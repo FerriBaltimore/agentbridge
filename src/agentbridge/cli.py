@@ -80,37 +80,37 @@ def _account_command(bridge, args):
 def _print_account_human(command, value):
     if command == 'list':
         if not value:
-            print('No hay cuentas registradas.')
+            print('No accounts registered.')
             return
-        print('ID | Motor | Nombre | Correo')
+        print('ID | Engine | Name | Email')
         print('---|---|---|---')
         for account in value:
             print(' | '.join(str(account.get(key) or '-') for key in ('id', 'engine', 'name', 'email')))
         return
     if command == 'add':
-        print(f"Cuenta añadida: {value['id']} ({value['engine']})")
+        print(f"Account added: {value['id']} ({value['engine']})")
         return
     if command == 'status':
         auth = value.get('authentication', {})
         identity = value.get('identity') or {}
         configured = value.get('configured') or {}
-        print(f"Cuenta: {value.get('account_id')}")
-        print(f"Motor: {configured.get('engine') or '-'}")
-        print(f"Nombre configurado: {configured.get('name') or '-'}")
-        print(f"Correo configurado: {configured.get('email') or '-'}")
-        print(f"Autenticación: {auth.get('status') or '-'}")
-        print(f"Identidad observada: {identity.get('email') or identity.get('type') or '-'}")
-        print(f"Observada: {auth.get('observed_at') or '-'}")
+        print(f"Account: {value.get('account_id')}")
+        print(f"Engine: {configured.get('engine') or '-'}")
+        print(f"Configured name: {configured.get('name') or '-'}")
+        print(f"Configured email: {configured.get('email') or '-'}")
+        print(f"Authentication: {auth.get('status') or '-'}")
+        print(f"Observed identity: {identity.get('email') or identity.get('type') or '-'}")
+        print(f"Observed at: {auth.get('observed_at') or '-'}")
         if value.get('reason'):
-            print(f"Motivo: {value['reason']}")
+            print(f"Reason: {value['reason']}")
         return
     if command == 'usage':
-        print(f"Cuenta: {value.get('account_id')}")
-        print(f"Fuente: {value.get('source') or '-'}")
-        print(f"Observado: {value.get('observed_at') or '-'}")
-        print(f"Obsoleto: {'sí' if value.get('stale') else 'no'}")
+        print(f"Account: {value.get('account_id')}")
+        print(f"Source: {value.get('source') or '-'}")
+        print(f"Observed at: {value.get('observed_at') or '-'}")
+        print(f"Stale: {'yes' if value.get('stale') else 'no'}")
         if value.get('reason'):
-            print(f"Motivo: {value['reason']}")
+            print(f"Reason: {value['reason']}")
         details = {key: value[key] for key in ('quota', 'account_usage') if key in value}
         if details:
             print(json.dumps(details, indent=2, ensure_ascii=False))
@@ -172,9 +172,9 @@ def rpc(bridge,inp,out):
 def main(argv=None):
     parser=argparse.ArgumentParser(
         prog='agentbridge',
-        description='Controla y observa Codex, Claude Code y Cursor desde una CLI persistente.',
+        description='Control and monitor Codex, Claude Code and Cursor with a persistent CLI.',
         epilog=(
-            'Ejemplos:\n'
+            'Examples:\n'
             '  agentbridge accounts list\n'
             '  agentbridge accounts status codex-main --refresh\n'
             '  agentbridge accounts check codex-main'

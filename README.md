@@ -65,6 +65,7 @@ agentbridge accounts usage codex-main --refresh
 agentbridge accounts check codex-main
 ```
 
+All CLI help, labels and messages are in English. User-supplied data is displayed as entered.
 Running `agentbridge` without a command opens the root help, and
 `agentbridge accounts` opens the account command help. Help is colored when it
 is printed to an interactive terminal, remains plain for pipes and redirects,

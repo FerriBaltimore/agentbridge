@@ -3,6 +3,7 @@
 Reusable Python SDK, CLI and JSON-RPC stdio API for Codex, Claude Code and Cursor.
 
 - Keep the core independent of Fullbrain, machine paths, UI, mission state and credentials.
+- All product-authored CLI output, help, labels and errors must be in English, regardless of the conversation language. Preserve user-supplied account names and other data as entered.
 - Capability claims must distinguish implementation, fixture tests and live provider acceptance.
 - Persist observable evidence before publishing it. Unknown results and missing usage are not success or zero.
 - Never persist credential values, raw provider error bodies or private reasoning. Account configurations contain references only.

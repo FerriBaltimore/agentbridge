@@ -10,7 +10,7 @@ def test_cli_without_arguments_prints_help(capsys):
     output = capsys.readouterr().out
     assert 'usage: agentbridge' in output
     assert 'accounts' in output
-    assert 'Ejemplos:' in output
+    assert 'Examples:' in output
     assert '\033[' not in output
 
 
@@ -43,7 +43,7 @@ def test_cli_add_and_list_accounts(tmp_path, capsys):
     root = tmp_path / 'state'
     main(['--root', str(root), 'accounts', 'add', 'codex-main', '--engine', 'codex',
           '--home', str(home), '--name', 'Personal Codex', '--email', 'ferran@example.test'])
-    assert 'Cuenta añadida: codex-main (codex)' in capsys.readouterr().out
+    assert 'Account added: codex-main (codex)' in capsys.readouterr().out
 
     main(['--root', str(root), 'accounts', 'list'])
     output = capsys.readouterr().out
