@@ -65,6 +65,12 @@ agentbridge accounts usage codex-main --refresh
 agentbridge accounts check codex-main
 ```
 
+Running `agentbridge` without a command opens the root help, and
+`agentbridge accounts` opens the account command help. Help is colored when it
+is printed to an interactive terminal, remains plain for pipes and redirects,
+and follows the `NO_COLOR` convention for environments that disable ANSI
+formatting.
+
 For callers in another language:
 
 ```bash
