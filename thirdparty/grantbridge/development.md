@@ -5,7 +5,7 @@
 AgentBridge currently expects an already authenticated account. It can register
 an isolated native home and execute with it:
 
-`bash
+```bash
 agentbridge accounts add \
   --engine codex \
   --home /path/to/codex-home \
@@ -13,7 +13,7 @@ agentbridge accounts add \
 
 agentbridge accounts status "Development Codex" --refresh
 agentbridge accounts usage "Development Codex" --refresh
-`
+```
 
 The same reference model exists for Claude. Cursor currently uses an environment
 variable reference for its API key. The values themselves must stay outside
@@ -27,11 +27,11 @@ AgentBridge.
 
 The next host command should be:
 
-`bash
+```bash
 agentbridge accounts login --engine codex --name "Development Codex"
 agentbridge accounts login --engine claude --name "Development Claude"
 agentbridge accounts login --engine cursor --name "Development Cursor"
-`
+```
 
 The command should:
 
@@ -48,6 +48,26 @@ The command must not ask the user to paste an OAuth code when the provider can
 complete through a browser callback. If a provider genuinely returns a device
 code, the UI can show that code as a provider challenge.
 
+## Local and remote URLs
+
+GrantBridge accepts a local HTTP origin on loopback or an HTTPS origin for
+remote access. The host supplies `origin` (or `GRANTBRIDGE_ORIGIN`) and mounts
+the callback routes. Setting an origin does not create a tunnel, HTTPS service
+or browser viewer; the embedding application supplies those.
+
+| Operator location | Completion path |
+| --- | --- |
+| On the execution machine | A supported loopback callback can return to the native process on that machine. |
+| Phone or another computer, standard OAuth | The provider returns to the host's reachable HTTPS callback registered for that OAuth client. |
+| Phone or another computer, native loopback login | Use the server-hosted browser so that its loopback callback reaches the server's native process. |
+| Provider-supported device or polling flow | The server waits for provider confirmation while the operator consents in another browser. |
+
+All paths leave the resulting execution credentials in the configured
+server-side `dataDir`, regardless of where the operator opens the UI. Local
+and remote use should be transparent to the operator once the host adapter is
+implemented. They are not interchangeable redirect URLs: the provider's
+callback registration and the flow's originating session must match.
+
 ## Mobile during development
 
 AgentBridge can remain the host even when the user operates from a phone. The
@@ -55,7 +75,12 @@ sidecar returns an authorization URL. The host either:
 
 - exposes that URL through an authenticated development web surface, or
 - uses GrantBridge's hosted browser and exposes its browser frame and input
-  transport.
+transport.
+
+The packaged GrantBridge SDK has hosted-browser mechanics, but its public
+callback router does not include the standalone lab's viewer and input routes.
+AgentBridge's host adapter still needs that authenticated presentation layer;
+`browser: mobile` alone does not provide remote access.
 
 The phone authenticates the server-side provider session. It does not become
 the execution account and it does not receive a provider token. A loopback

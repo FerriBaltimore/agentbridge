@@ -15,7 +15,7 @@ resume.
 
 Request:
 
-`json
+```json
 {
   "jsonrpc": "2.0",
   "id": 1,
@@ -27,7 +27,7 @@ Request:
     "request_key": "client-generated-idempotency-key"
   }
 }
-`
+```
 
 The adapter derives the owner from the authenticated local host session. A
 caller must not be able to choose an arbitrary owner string to access another
@@ -35,7 +35,7 @@ owner's attempts.
 
 Response:
 
-`json
+```json
 {
   "jsonrpc": "2.0",
   "id": 1,
@@ -47,7 +47,7 @@ Response:
     "expires_at": 1760000000000
   }
 }
-`
+```
 
 `starting` is normal because native providers may need time to publish their
 URL. The client polls `auth.get` until it receives `awaiting_user`,
@@ -62,14 +62,14 @@ a process.
 
 ## `auth.get`
 
-`json
+```json
 {
   "jsonrpc": "2.0",
   "id": 2,
   "method": "auth.get",
   "params": {"attempt_id": "opaque-attempt-id"}
 }
-`
+```
 
 The result contains the safe attempt projection, identity and verification
 state. A future activation result may include a server-local native-home path
@@ -79,9 +79,9 @@ configured account root. For Cursor and token APIs it should return an opaque
 
 ## `auth.cancel`
 
-`json
+```json
 {"jsonrpc":"2.0","id":3,"method":"auth.cancel","params":{"attempt_id":"opaque-attempt-id"}}
-`
+```
 
 Cancellation is explicit. The adapter should make a repeated cancel safe at the
 protocol boundary even though the current GrantBridge method reports
@@ -90,9 +90,9 @@ not remove an existing authorized account or its conversations.
 
 ## `auth.check`
 
-`json
+```json
 {"jsonrpc":"2.0","id":4,"method":"auth.check","params":{"account_id":"development-codex"}}
-`
+```
 
 The check launches a fresh provider process or provider request and returns
 structured observations such as local credential presence, authenticated

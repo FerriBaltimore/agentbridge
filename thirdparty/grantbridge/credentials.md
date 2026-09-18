@@ -39,13 +39,15 @@ never copied to the phone.
 | Claude native login | Provider files below `profiles/<id>/.claude` | A fresh Claude CLI process is started with `CLAUDE_CONFIG_DIR` pointing there. |
 | Codex native login | Provider files below `profiles/<id>/.codex` | A fresh Codex app-server is started with `CODEX_HOME` pointing there and reads the account again. |
 | Cursor | Encrypted `vault/credential_<id>.json` record containing the SDK key and identity | A probe or inference worker reads it inside GrantBridge. The current login requests a 24-hour key TTL; it is not assumed to be renewable OAuth. |
-| Google OAuth | Encrypted `vault/credential_<id>.json` record containing access and refresh tokens | The callback exchanges the code, then later calls refresh under a SQLite lease. |
+| Google OAuth | Encrypted `vault/credential_<id>.json` record containing access and refresh tokens | The callback exchanges the code; the Google library refreshes when necessary during the later check and the updated credentials are saved. This adapter does not currently use the generic OAuth SQLite lease. |
 | Configurable OAuth/OIDC | Encrypted `vault/oauth_tokens_<id>.json` plus encrypted profile/session records | State and PKCE verifier are checked on callback; access tokens are refreshed and rotated when supported. |
 | MCP OAuth | Encrypted `vault/mcp_<id>.json` record | MCP access and refresh tokens are used under the same serialized lease rules. |
 
-The Google client JSON and any OAuth client secret are separate application
-configuration. They are read from the configured server-side path and must be
-protected like any other secret. They are not sent to the mobile browser.
+The dedicated Google adapter reads its client JSON from a configured
+server-side file. When imported through the standalone setup, this file is
+written with mode `0600`, without vault encryption. Configurable OAuth profiles
+store their client secrets in the vault. These are application credentials,
+separate from the user's resulting tokens.
 
 ## Authorization data flow
 
@@ -58,20 +60,24 @@ protected like any other secret. They are not sent to the mobile browser.
    that URL on a phone. The phone only renders the provider page or the
    server-hosted browser; it does not receive the resulting credential.
 4. The provider completes through its callback, device polling, native CLI
-   process or server-hosted browser. GrantBridge validates state, PKCE and
-   identity before marking the attempt authorized.
-5. GrantBridge runs a fresh-process check. For Codex and Claude this confirms
-   that the native profile can be loaded; for generic OAuth, Google and Cursor
-   it performs the provider-specific authenticated request. An `authorized`
-   row without a successful check is not proof that an agent can execute.
+   process or server-hosted browser. GrantBridge handles standard OAuth checks;
+   native adapters delegate protocol validation to the provider CLI/SDK.
+   Available identity evidence differs by provider; MCP does not generally
+   return a user identity.
+5. The host requests a separate check, or opts into `autoCheck`. Claude's check
+   confirms local profile loading only; Codex checks the account and rate-limit
+   endpoint. Google, OAuth and Cursor perform their configured authenticated
+   request. Neither authorization nor these checks prove model execution.
 6. A future AgentBridge adapter will activate the result as a stable account:
    a Claude/Codex account points at the native profile home, while Cursor and
    other token APIs use a private resolver. The current repositories do not
    perform this activation automatically.
 
-At no point should the mobile client, AgentBridge SQLite state, prompts or
-event stream contain an access token, refresh token, Cursor key, authorization
-code or client secret.
+The application's mobile UI must not receive server access tokens, refresh
+tokens or Cursor keys. The provider may set its own login cookies in the
+phone's browser; an authorization code may pass through a browser callback or
+the provider's manual-code fallback. Codes must not be logged or persisted in
+AgentBridge state, prompts or events.
 
 ## Never persist values in AgentBridge
 

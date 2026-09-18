@@ -53,7 +53,7 @@ login-to-run flow.
 Run builds and tests through the workspace's managed temporary job wrapper.
 The exact checkout paths are local configuration, not part of the contract:
 
-`bash
+```bash
 # AgentBridge
 python -m pytest
 python -m pip wheel . --no-deps -w dist
@@ -63,7 +63,7 @@ npm ci
 npm test
 npm run lint
 npm run test:real
-`
+```
 
 The live checks must use disposable data directories and accounts. They must
 record provider versions, runtime versions, account identity, the operation
