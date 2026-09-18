@@ -26,7 +26,7 @@ class Store:
             db.executescript('''
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS metadata(version INTEGER NOT NULL);
-                INSERT INTO metadata SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM metadata);
+                INSERT INTO metadata SELECT 2 WHERE NOT EXISTS(SELECT 1 FROM metadata);
                 CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, config TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
                     cwd TEXT NOT NULL, model TEXT, native_id TEXT, parent_id TEXT, context TEXT,
@@ -46,8 +46,40 @@ class Store:
                     at REAL NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS event_run ON events(run_id,seq);
                 CREATE INDEX IF NOT EXISTS event_session ON events(session_id,seq);
+                CREATE TABLE IF NOT EXISTS account_observations(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL, observed_at REAL NOT NULL,
+                    source TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS account_observation_latest
+                    ON account_observations(account_id, observed_at DESC, id DESC);
+                CREATE TABLE IF NOT EXISTS usage_observations(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL, observed_at REAL NOT NULL,
+                    source TEXT NOT NULL, scope TEXT NOT NULL,
+                    stale INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS usage_observation_latest
+                    ON usage_observations(account_id, scope, observed_at DESC, id DESC);
             ''')
-            if db.execute('SELECT version FROM metadata').fetchone()[0] != 1:
+            version = db.execute('SELECT version FROM metadata').fetchone()[0]
+            if version == 1:
+                db.executescript('''
+                    CREATE TABLE IF NOT EXISTS account_observations(
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id TEXT NOT NULL, observed_at REAL NOT NULL,
+                        source TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
+                    CREATE INDEX IF NOT EXISTS account_observation_latest
+                        ON account_observations(account_id, observed_at DESC, id DESC);
+                    CREATE TABLE IF NOT EXISTS usage_observations(
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id TEXT NOT NULL, observed_at REAL NOT NULL,
+                        source TEXT NOT NULL, scope TEXT NOT NULL,
+                        stale INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
+                    CREATE INDEX IF NOT EXISTS usage_observation_latest
+                        ON usage_observations(account_id, scope, observed_at DESC, id DESC);
+                    UPDATE metadata SET version=2;
+                ''')
+                version = 2
+            if version != 2:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
         os.chmod(self.path, 0o600)
 
@@ -77,7 +109,51 @@ class Store:
         if table not in ('runs','sessions','accounts'):
             raise ValueError(table)
         with self.connect() as db:
-            return [dict(r) for r in db.execute(f'SELECT * FROM {table} ORDER BY rowid')]
+            rows = db.execute(f'SELECT * FROM {table} ORDER BY rowid').fetchall()
+        return [dict(r) for r in rows]
+
+    def account_observation(self, account_id, source, status, data, *, observed_at=None):
+        with self.connect() as db:
+            db.execute('INSERT INTO account_observations(account_id,observed_at,source,status,data) VALUES (?,?,?,?,?)',
+                       (account_id, observed_at or time.time(), source, status, dumps(data)))
+
+    def latest_account_observation(self, account_id):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM account_observations WHERE account_id=? ORDER BY observed_at DESC,id DESC LIMIT 1',
+                             (account_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result['data'] = json.loads(result['data'])
+        return result
+
+    def usage_observation(self, account_id, source, scope, data, *, stale=False, observed_at=None):
+        with self.connect() as db:
+            db.execute('INSERT INTO usage_observations(account_id,observed_at,source,scope,stale,data) VALUES (?,?,?,?,?,?)',
+                       (account_id, observed_at or time.time(), source, scope, int(stale), dumps(data)))
+
+    def latest_usage_observation(self, account_id, scope='account'):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM usage_observations WHERE account_id=? AND scope=? ORDER BY observed_at DESC,id DESC LIMIT 1',
+                             (account_id, scope)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result['data'] = json.loads(result['data'])
+        result['stale'] = bool(result['stale'])
+        return result
+
+    def usage_history(self, account_id, scope='account', limit=100):
+        with self.connect() as db:
+            rows = db.execute('SELECT * FROM usage_observations WHERE account_id=? AND scope=? ORDER BY observed_at DESC,id DESC LIMIT ?',
+                              (account_id, scope, limit)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['data'] = json.loads(item['data'])
+            item['stale'] = bool(item['stale'])
+            result.append(item)
+        return result
 
     def account(self, account):
         config = dumps(account.to_dict())

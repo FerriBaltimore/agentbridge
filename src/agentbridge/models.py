@@ -98,7 +98,7 @@ class Capabilities:
 
 
 CAPABILITIES = {
-    "codex": Capabilities("codex", native_transfer=True, account_quota="local_observation"),
+    "codex": Capabilities("codex", native_transfer=True, account_quota="provider_and_local_observation"),
     "claude": Capabilities("claude", native_transfer=True, account_quota="oauth_reader", monetary_cost="provider_reported"),
     "cursor": Capabilities("cursor", monetary_cost="optional_sdk_query"),
 }

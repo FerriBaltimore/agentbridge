@@ -13,6 +13,7 @@ It currently has adapters for Codex, Claude Code and Cursor. It separates the ap
 - Stop, timeout and recovery semantics that do not silently execute a request again.
 - Normalized text, tool, result, quota, usage, subagent and permission events.
 - Optional quota and usage readers. Tokens, limits and monetary cost stay separate and carry their observation source.
+- An independent account service for configured identity, authentication observations, quota snapshots and usage history. It does not supervise worker processes or choose fallback accounts.
 - Python, command-line and JSON-RPC 2.0 stdio entry points. No network server is opened by the library.
 
 The package does not copy credentials, private reasoning or Fullbrain state. Account records contain credential references such as environment variable names, never their values. Provider capabilities are reported as supported, partial, unknown or unsupported.
@@ -37,6 +38,19 @@ with Bridge(".agentbridge") as bridge:
         print(event.kind, event.data)
     print(run.wait())
 ```
+
+Account status and usage do not require submitting a model request:
+
+```python
+status = bridge.account_status("codex-main", refresh=True)
+usage = bridge.account_usage("codex-main", refresh=True)
+```
+
+The first Codex adapter uses the documented app-server account and rate-limit
+reads. It stores observations with their source and timestamp. A missing or
+stale observation remains unknown, never zero. Provider-specific authentication
+and usage support for Claude and Cursor is declared unsupported until an
+adapter is added.
 
 For callers in another language:
 

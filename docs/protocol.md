@@ -18,6 +18,9 @@ A `tool_result` with `outcome: unknown` means that the provider was asked to per
 | --- | --- |
 | `capabilities` | Return engine capability declarations. |
 | `accounts.register`, `accounts.list` | Register and inspect references, never secrets. |
+| `accounts.status` | Read configured identity and the latest authentication observation. `refresh: true` performs a provider account read when supported. |
+| `accounts.usage` | Read the latest quota and usage observation. `refresh: true` performs a provider usage read when supported. |
+| `accounts.usage_history` | Read the bounded, append-only history of account usage observations. |
 | `sessions.create`, `sessions.list`, `sessions.get` | Create and inspect sessions. |
 | `sessions.transfer` | Create a destination session using native or portable continuity. |
 | `sessions.export` | Build a bounded portable evidence bundle. |
@@ -26,7 +29,7 @@ A `tool_result` with `outcome: unknown` means that the provider was asked to per
 | `runs.stop` | Request cancellation of the exact run. |
 | `runs.resume` | Explicitly submit follow-up work after a terminal run. |
 | `runs.usage`, `runs.subagents` | Read observed usage and subagent coverage. |
-| `accounts.quota` | Read a supported account quota source. |
+| `accounts.quota` | Read the legacy local quota view. Prefer `accounts.usage` for account-service observations. |
 | `recover` | Mark a lost worker interrupted without retrying it. |
 
-The CLI validates provider-specific options before accepting a run. If an engine cannot support an option, it returns `unsupported` instead of silently ignoring it. Account selection, retry policy, permissions and external side effects belong to the embedding application.
+The CLI validates provider-specific options before accepting a run. If an engine cannot support an option, it returns `unsupported` instead of silently ignoring it. Account selection, retry policy, permissions and external side effects belong to the embedding application. Account status and usage are observations, not proof of future availability. The Codex adapter reads the documented app-server account and rate-limit methods without starting a model turn; Claude and Cursor remain explicitly unsupported until their provider contracts are implemented.

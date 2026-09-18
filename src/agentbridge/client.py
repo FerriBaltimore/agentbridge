@@ -18,12 +18,14 @@ from .security import Redactor, base_environment
 from .store import Store, dumps
 from .transports import command
 from . import usage
+from .accounts import AccountService
 
 
 class Bridge:
     def __init__(self, root='.agentbridge'):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
         self.store=Store(root)
+        self.account_service=AccountService(self.store)
         self._children={}
 
     @property
@@ -35,14 +37,22 @@ class Bridge:
         return asdict(CAPABILITIES[engine])
 
     def register(self, account: Account):
-        self.store.account(account)
-        return account
+        return self.account_service.register(account)
 
     def accounts(self):
-        return [Account(**json.loads(r['config'])) for r in self.store.list('accounts')]
+        return self.account_service.list()
 
     def account(self, id):
-        return Account(**json.loads(self.store.get('accounts',identifier(id))['config']))
+        return self.account_service.get(id)
+
+    def account_status(self, account_id, *, refresh=False):
+        return self.account_service.status(account_id, refresh=refresh)
+
+    def account_usage(self, account_id, *, refresh=False):
+        return self.account_service.usage(account_id, refresh=refresh)
+
+    def account_usage_history(self, account_id, *, limit=100):
+        return self.account_service.history(account_id, limit=limit)
 
     def session(self, account_id, cwd, *, model=None):
         account=self.account(account_id)

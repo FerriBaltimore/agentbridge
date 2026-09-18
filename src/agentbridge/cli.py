@@ -16,6 +16,9 @@ def dispatch(bridge,method,params):
     if method=='capabilities':return bridge.capabilities(**params)
     if method=='accounts.list':return [asdict(x) for x in bridge.accounts()]
     if method=='accounts.register':return asdict(bridge.register(Account(**params)))
+    if method=='accounts.status':return bridge.account_status(**params)
+    if method=='accounts.usage':return bridge.account_usage(**params)
+    if method=='accounts.usage_history':return bridge.account_usage_history(**params)
     if method=='accounts.quota':return bridge.quota(**params)
     if method=='sessions.create':return bridge.session(**params)
     if method=='sessions.list':return bridge.sessions()
