@@ -2,9 +2,49 @@
 import argparse
 from dataclasses import asdict, is_dataclass
 import json
+import os
+import re
 import sys
 
 from . import Account, Bridge, BridgeError, RunOptions, __version__
+
+
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_CYAN = "\033[36m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+
+
+def _color_enabled():
+    """Use color only for an interactive terminal unless explicitly forced off."""
+    return bool(getattr(sys.stdout, "isatty", lambda: False)()) and "NO_COLOR" not in os.environ
+
+
+class PrettyHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Keep argparse layout, then add restrained terminal colors."""
+
+    def format_help(self):
+        text = super().format_help()
+        if not _color_enabled():
+            return text
+        text = re.sub(r"(?m)^usage:", f"{_BOLD}{_CYAN}usage:{_RESET}", text)
+        text = re.sub(
+            r"(?m)^([A-Za-z][^\n]*):$",
+            lambda match: f"{_BOLD}{_YELLOW}{match.group(1)}:{_RESET}",
+            text,
+        )
+        text = re.sub(
+            r"(?m)^(\s+)(-[^\s,]+(?:,\s*--[^\s]+)?)(?=\s+)",
+            lambda match: f"{match.group(1)}{_GREEN}{match.group(2)}{_RESET}",
+            text,
+        )
+        return text
+
+
+def _add_parser(subparsers, name, **kwargs):
+    kwargs.setdefault("formatter_class", PrettyHelpFormatter)
+    return subparsers.add_parser(name, **kwargs)
 
 
 def serial(value):
@@ -130,15 +170,25 @@ def rpc(bridge,inp,out):
 
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog='agentbridge',description='Control coding agents through a persistent SDK and JSON API.')
+    parser=argparse.ArgumentParser(
+        prog='agentbridge',
+        description='Controla y observa Codex, Claude Code y Cursor desde una CLI persistente.',
+        epilog=(
+            'Ejemplos:\n'
+            '  agentbridge accounts list\n'
+            '  agentbridge accounts status codex-main --refresh\n'
+            '  agentbridge accounts check codex-main'
+        ),
+        formatter_class=PrettyHelpFormatter,
+    )
     parser.add_argument('--version',action='version',version=__version__)
     parser.add_argument('--root',default='.agentbridge',help='Private persistent state directory')
-    sub=parser.add_subparsers(dest='action',required=True)
-    sub.add_parser('capabilities',help='Show implemented capabilities per engine')
-    sub.add_parser('rpc',help='Serve JSON-RPC 2.0 on stdin/stdout; no network listener')
-    accounts=sub.add_parser('accounts',help='Register accounts and inspect identity, quota and usage')
-    account_sub=accounts.add_subparsers(dest='accounts_command',required=True)
-    add=account_sub.add_parser('add',help='Register an account reference; never pass a secret value')
+    sub=parser.add_subparsers(dest='action')
+    _add_parser(sub, 'capabilities',help='Show implemented capabilities per engine')
+    _add_parser(sub, 'rpc',help='Serve JSON-RPC 2.0 on stdin/stdout; no network listener')
+    accounts=_add_parser(sub, 'accounts',help='Register accounts and inspect identity, quota and usage')
+    account_sub=accounts.add_subparsers(dest='accounts_command')
+    add=_add_parser(account_sub, 'add',help='Register an account reference; never pass a secret value')
     add.add_argument('id',help='Stable local account ID')
     add.add_argument('--engine',choices=('codex','claude','cursor'),required=True)
     add.add_argument('--home',help='Native provider home for Codex or Claude')
@@ -148,24 +198,30 @@ def main(argv=None):
     add.add_argument('--key-env',help='API key environment variable name')
     add.add_argument('--command',nargs='+',help='Provider executable and fixed arguments')
     add.add_argument('--json',action='store_true')
-    list_command=account_sub.add_parser('list',help='List configured accounts')
+    list_command=_add_parser(account_sub, 'list',help='List configured accounts')
     list_command.add_argument('--json',action='store_true')
     for name, help_text in (('status','Read configured and observed authentication state'),
                             ('usage','Read account quota and token-activity observations')):
-        command_parser=account_sub.add_parser(name,help=help_text)
+        command_parser=_add_parser(account_sub, name,help=help_text)
         command_parser.add_argument('id')
         command_parser.add_argument('--refresh',action='store_true',help='Query the provider without starting a model turn')
         command_parser.add_argument('--json',action='store_true')
-    history=account_sub.add_parser('history',help='Show stored account usage observations')
+    history=_add_parser(account_sub, 'history',help='Show stored account usage observations')
     history.add_argument('id')
     history.add_argument('--limit',type=int,default=100)
     history.add_argument('--json',action='store_true')
-    check=account_sub.add_parser('check',help='Refresh account identity and usage together')
+    check=_add_parser(account_sub, 'check',help='Refresh account identity and usage together')
     check.add_argument('id')
     check.add_argument('--json',action='store_true')
-    call=sub.add_parser('call',help='Call one API method; JSON params are read from stdin')
+    call=_add_parser(sub, 'call',help='Call one API method; JSON params are read from stdin')
     call.add_argument('method')
     args=parser.parse_args(argv)
+    if args.action is None:
+        parser.print_help()
+        return
+    if args.action == 'accounts' and args.accounts_command is None:
+        accounts.print_help()
+        return
     with Bridge(args.root) as bridge:
         if args.action=='rpc':rpc(bridge,sys.stdin,sys.stdout)
         elif args.action=='capabilities':print(json.dumps(bridge.capabilities(),indent=2))

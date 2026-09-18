@@ -1,4 +1,40 @@
+import argparse
+import io
+
+from agentbridge import cli
 from agentbridge.cli import main
+
+
+def test_cli_without_arguments_prints_help(capsys):
+    main([])
+    output = capsys.readouterr().out
+    assert 'usage: agentbridge' in output
+    assert 'accounts' in output
+    assert 'Ejemplos:' in output
+    assert '\033[' not in output
+
+
+def test_accounts_without_command_prints_account_help(capsys):
+    main(['accounts'])
+    output = capsys.readouterr().out
+    assert 'usage: agentbridge accounts' in output
+    assert 'status' in output
+    assert 'usage' in output
+
+
+def test_help_uses_color_only_for_interactive_terminal(monkeypatch):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(cli.sys, 'stdout', Tty())
+    monkeypatch.delenv('NO_COLOR', raising=False)
+    parser = argparse.ArgumentParser(prog='agentbridge', formatter_class=cli.PrettyHelpFormatter)
+    parser.add_argument('--example')
+    assert '\033[36m' in parser.format_help()
+
+    monkeypatch.setenv('NO_COLOR', '1')
+    assert '\033[' not in parser.format_help()
 
 
 def test_cli_add_and_list_accounts(tmp_path, capsys):
