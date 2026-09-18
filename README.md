@@ -18,6 +18,8 @@ It currently has adapters for Codex, Claude Code and Cursor. It separates the ap
 
 The package does not copy credentials, private reasoning or Fullbrain state. Account records contain credential references such as environment variable names, never their values. Provider capabilities are reported as supported, partial, unknown or unsupported.
 
+Authentication integration with GrantBridge is documented in [thirdparty/grantbridge/README.md](thirdparty/grantbridge/README.md). AgentBridge currently consumes prepared account references; the local login adapter described there is planned and keeps provider authentication outside the execution core.
+
 ## Minimal Python use
 
 ```python

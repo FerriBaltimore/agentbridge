@@ -1,0 +1,75 @@
+# Development workflow
+
+## What works today
+
+AgentBridge currently expects an already authenticated account. It can register
+an isolated native home and execute with it:
+
+`bash
+agentbridge accounts add \
+  --engine codex \
+  --home /path/to/codex-home \
+  --name "Development Codex"
+
+agentbridge accounts status "Development Codex" --refresh
+agentbridge accounts usage "Development Codex" --refresh
+`
+
+The same reference model exists for Claude. Cursor currently uses an environment
+variable reference for its API key. The values themselves must stay outside
+AgentBridge state.
+
+This is the temporary development path. The native provider login is performed
+separately, then the resulting home or environment reference is registered with
+AgentBridge.
+
+## Intended development path
+
+The next host command should be:
+
+`bash
+agentbridge accounts login --engine codex --name "Development Codex"
+agentbridge accounts login --engine claude --name "Development Claude"
+agentbridge accounts login --engine cursor --name "Development Cursor"
+`
+
+The command should:
+
+1. Create or select an isolated account record.
+2. Ask the GrantBridge sidecar to start the provider attempt.
+3. Print the authorization URL. Opening it is an explicit user action; an
+   opt-in local browser helper may open it on the same host.
+4. Poll the attempt and show only safe status, identity and next action.
+5. On success, activate a native-home reference or credential-provider
+   reference in AgentBridge.
+6. Run a fresh-provider check before reporting the account as authenticated.
+
+The command must not ask the user to paste an OAuth code when the provider can
+complete through a browser callback. If a provider genuinely returns a device
+code, the UI can show that code as a provider challenge.
+
+## Mobile during development
+
+AgentBridge can remain the host even when the user operates from a phone. The
+sidecar returns an authorization URL. The host either:
+
+- exposes that URL through an authenticated development web surface, or
+- uses GrantBridge's hosted browser and exposes its browser frame and input
+  transport.
+
+The phone authenticates the server-side provider session. It does not become
+the execution account and it does not receive a provider token. A loopback
+callback opened directly on the phone returns to the phone, so native flows
+that require a server-local callback must use the hosted server browser,
+provider polling or a valid server HTTPS callback.
+
+## Shutdown and recovery
+
+An authentication attempt has its own ID and deadline. Cancelling the
+AgentBridge command must cancel the GrantBridge attempt. Restarting the host must
+reconcile the attempt before presenting it as pending. A failed or interrupted
+login must not silently start a new login or change the selected account.
+
+The sidecar should be one long-lived process per host/store while attempts or
+workers are active. Its shutdown closes child processes and records an
+interrupted state; it does not log out provider accounts.
