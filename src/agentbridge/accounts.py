@@ -13,7 +13,7 @@ import time
 
 from . import usage
 from .errors import BridgeError
-from .models import Account, identifier
+from .models import Account, account_name_key, identifier
 from .security import base_environment
 
 
@@ -168,6 +168,20 @@ class AccountService:
         account_id = identifier(account_id)
         row = self.store.get('accounts', account_id)
         return Account(**json.loads(row['config']))
+
+    def resolve(self, reference):
+        """Resolve a human-facing unique name or an internal account ID."""
+        if isinstance(reference, str):
+            wanted_name = account_name_key(reference)
+            for account in self.list():
+                if account.name and account_name_key(account.name) == wanted_name:
+                    return account
+        try:
+            return self.get(reference)
+        except BridgeError as error:
+            if error.code in ('invalid_id', 'not_found'):
+                raise BridgeError('account_not_found', 'No account matches that name.') from None
+            raise
 
     def list(self):
         return [Account(**json.loads(row['config'])) for row in self.store.list('accounts')]

@@ -16,6 +16,11 @@ def identifier(value: str) -> str:
     return value
 
 
+def account_name_key(value: str) -> str:
+    """Return the case-insensitive key used to keep account names unique."""
+    return value.strip().casefold()
+
+
 @dataclass(frozen=True)
 class Account:
     id: str
@@ -31,6 +36,10 @@ class Account:
         identifier(self.id)
         if self.engine not in ENGINES:
             raise BridgeError("invalid_engine", "Choose codex, claude or cursor.")
+        if self.name is not None:
+            if not isinstance(self.name, str) or not self.name.strip() or len(self.name.strip()) > 128:
+                raise BridgeError("invalid_name", "Account names must contain 1-128 non-space characters.")
+            object.__setattr__(self, "name", self.name.strip())
         if self.engine != "cursor" and not self.home:
             raise BridgeError("account_home_required", "Codex and Claude accounts require an explicit native home.")
         if self.home:

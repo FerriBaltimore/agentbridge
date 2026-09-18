@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+from uuid import uuid4
 
 from . import Account, Bridge, BridgeError, RunOptions, __version__
 
@@ -59,42 +60,50 @@ def _account_dict(account):
 def _account_command(bridge, args):
     command = args.accounts_command
     if command == 'add':
-        account = Account(id=args.id, engine=args.engine, home=args.home, name=args.name,
+        account = Account(id=uuid4().hex, engine=args.engine, home=args.home, name=args.name,
                           email=args.email, env_names=tuple(args.env_names or ()),
                           key_env=args.key_env, command=tuple(args.command or ()))
         return _account_dict(bridge.register(account))
     if command == 'list':
         return [_account_dict(account) for account in bridge.accounts()]
     if command == 'status':
-        return bridge.account_status(args.id, refresh=args.refresh)
+        account = bridge.resolve_account(args.name)
+        args.account_name, args.id = account.name, account.id
+        return bridge.account_status(account.id, refresh=args.refresh)
     if command == 'usage':
-        return bridge.account_usage(args.id, refresh=args.refresh)
+        account = bridge.resolve_account(args.name)
+        args.account_name, args.id = account.name, account.id
+        return bridge.account_usage(account.id, refresh=args.refresh)
     if command == 'history':
-        return bridge.account_usage_history(args.id, limit=args.limit)
+        account = bridge.resolve_account(args.name)
+        args.account_name, args.id = account.name, account.id
+        return bridge.account_usage_history(account.id, limit=args.limit)
     if command == 'check':
-        return {'status': bridge.account_status(args.id, refresh=True),
-                'usage': bridge.account_usage(args.id, refresh=True)}
+        account = bridge.resolve_account(args.name)
+        args.account_name, args.id = account.name, account.id
+        return {'status': bridge.account_status(account.id, refresh=True),
+                'usage': bridge.account_usage(account.id, refresh=True)}
     raise BridgeError('invalid_command', 'Unknown accounts command.')
 
 
-def _print_account_human(command, value):
+def _print_account_human(command, value, account_name=None):
     if command == 'list':
         if not value:
             print('No accounts registered.')
             return
-        print('ID | Engine | Name | Email')
-        print('---|---|---|---')
+        print('Name | Engine | Email')
+        print('---|---|---')
         for account in value:
-            print(' | '.join(str(account.get(key) or '-') for key in ('id', 'engine', 'name', 'email')))
+            print(' | '.join(str(account.get(key) or '-') for key in ('name', 'engine', 'email')))
         return
     if command == 'add':
-        print(f"Account added: {value['id']} ({value['engine']})")
+        print(f"Account added: {value['name']} ({value['engine']})")
         return
     if command == 'status':
         auth = value.get('authentication', {})
         identity = value.get('identity') or {}
         configured = value.get('configured') or {}
-        print(f"Account: {value.get('account_id')}")
+        print(f"Account: {account_name or configured.get('name') or value.get('account_id')}")
         print(f"Engine: {configured.get('engine') or '-'}")
         print(f"Configured name: {configured.get('name') or '-'}")
         print(f"Configured email: {configured.get('email') or '-'}")
@@ -105,7 +114,7 @@ def _print_account_human(command, value):
             print(f"Reason: {value['reason']}")
         return
     if command == 'usage':
-        print(f"Account: {value.get('account_id')}")
+        print(f"Account: {account_name or value.get('account_id')}")
         print(f"Source: {value.get('source') or '-'}")
         print(f"Observed at: {value.get('observed_at') or '-'}")
         print(f"Stale: {'yes' if value.get('stale') else 'no'}")
@@ -114,6 +123,23 @@ def _print_account_human(command, value):
         details = {key: value[key] for key in ('quota', 'account_usage') if key in value}
         if details:
             print(json.dumps(details, indent=2, ensure_ascii=False))
+        return
+    if command == 'history':
+        print(f"Account: {account_name or '-'}")
+        if not value:
+            print('No usage observations.')
+            return
+        print('Observed at | Source | Stale')
+        print('---|---|---')
+        for observation in value:
+            print(' | '.join(str(observation.get(key) or '-') for key in ('observed_at', 'source', 'stale')))
+        return
+    if command == 'check':
+        print(f"Account: {account_name or '-'}")
+        print('Status:')
+        _print_account_human('status', value.get('status', {}), account_name)
+        print('Usage:')
+        _print_account_human('usage', value.get('usage', {}), account_name)
         return
     print(json.dumps(value, indent=2, ensure_ascii=False))
 
@@ -176,8 +202,8 @@ def main(argv=None):
         epilog=(
             'Examples:\n'
             '  agentbridge accounts list\n'
-            '  agentbridge accounts status codex-main --refresh\n'
-            '  agentbridge accounts check codex-main'
+            '  agentbridge accounts status "Personal Codex" --refresh\n'
+            '  agentbridge accounts check "Personal Codex"'
         ),
         formatter_class=PrettyHelpFormatter,
     )
@@ -189,10 +215,9 @@ def main(argv=None):
     accounts=_add_parser(sub, 'accounts',help='Register accounts and inspect identity, quota and usage')
     account_sub=accounts.add_subparsers(dest='accounts_command')
     add=_add_parser(account_sub, 'add',help='Register an account reference; never pass a secret value')
-    add.add_argument('id',help='Stable local account ID')
     add.add_argument('--engine',choices=('codex','claude','cursor'),required=True)
     add.add_argument('--home',help='Native provider home for Codex or Claude')
-    add.add_argument('--name')
+    add.add_argument('--name',required=True,help='Unique human-facing account name')
     add.add_argument('--email')
     add.add_argument('--env',dest='env_names',action='append',default=[],help='Credential environment variable name, repeatable')
     add.add_argument('--key-env',help='API key environment variable name')
@@ -203,15 +228,15 @@ def main(argv=None):
     for name, help_text in (('status','Read configured and observed authentication state'),
                             ('usage','Read account quota and token-activity observations')):
         command_parser=_add_parser(account_sub, name,help=help_text)
-        command_parser.add_argument('id')
+        command_parser.add_argument('name',help='Unique account name')
         command_parser.add_argument('--refresh',action='store_true',help='Query the provider without starting a model turn')
         command_parser.add_argument('--json',action='store_true')
     history=_add_parser(account_sub, 'history',help='Show stored account usage observations')
-    history.add_argument('id')
+    history.add_argument('name',help='Unique account name')
     history.add_argument('--limit',type=int,default=100)
     history.add_argument('--json',action='store_true')
     check=_add_parser(account_sub, 'check',help='Refresh account identity and usage together')
-    check.add_argument('id')
+    check.add_argument('name',help='Unique account name')
     check.add_argument('--json',action='store_true')
     call=_add_parser(sub, 'call',help='Call one API method; JSON params are read from stdin')
     call.add_argument('method')
@@ -229,7 +254,7 @@ def main(argv=None):
             try:
                 result=_account_command(bridge,args)
                 if getattr(args,'json',False):print(json.dumps(result,default=serial,indent=2,ensure_ascii=False))
-                else:_print_account_human(args.accounts_command,result)
+                else:_print_account_human(args.accounts_command,result,getattr(args,'account_name',None))
             except (BridgeError,ValueError,TypeError,KeyError) as error:
                 print(json.dumps({'error':getattr(error,'code','invalid_params'),'message':str(error)},ensure_ascii=False),file=sys.stderr)
                 raise SystemExit(1) from None

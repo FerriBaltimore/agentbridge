@@ -57,15 +57,17 @@ options are references only, so pass environment variable names, never their
 values:
 
 ```bash
-agentbridge accounts add codex-main --engine codex --home "$CODEX_HOME" \
+agentbridge accounts add --engine codex --home "$CODEX_HOME" \
   --name "Personal Codex" --email ferran@example.com
 agentbridge accounts list
-agentbridge accounts status codex-main --refresh
-agentbridge accounts usage codex-main --refresh
-agentbridge accounts check codex-main
+agentbridge accounts status "Personal Codex" --refresh
+agentbridge accounts usage "Personal Codex" --refresh
+agentbridge accounts check "Personal Codex"
 ```
 
 All CLI help, labels and messages are in English. User-supplied data is displayed as entered.
+The account name is the unique identifier used by the CLI. AgentBridge generates
+the internal account ID automatically and does not ask the operator to invent one.
 Running `agentbridge` without a command opens the root help, and
 `agentbridge accounts` opens the account command help. Help is colored when it
 is printed to an interactive terminal, remains plain for pipes and redirects,

@@ -1,5 +1,6 @@
 import argparse
 import io
+import pytest
 
 from agentbridge import cli
 from agentbridge.cli import main
@@ -41,21 +42,43 @@ def test_cli_add_and_list_accounts(tmp_path, capsys):
     home = tmp_path / 'codex-home'
     home.mkdir()
     root = tmp_path / 'state'
-    main(['--root', str(root), 'accounts', 'add', 'codex-main', '--engine', 'codex',
+    main(['--root', str(root), 'accounts', 'add', '--engine', 'codex',
           '--home', str(home), '--name', 'Personal Codex', '--email', 'ferran@example.test'])
-    assert 'Account added: codex-main (codex)' in capsys.readouterr().out
+    assert 'Account added: Personal Codex (codex)' in capsys.readouterr().out
 
     main(['--root', str(root), 'accounts', 'list'])
     output = capsys.readouterr().out
-    assert 'codex-main | codex | Personal Codex | ferran@example.test' in output
+    assert 'Personal Codex | codex | ferran@example.test' in output
 
 
 def test_cli_status_json_does_not_claim_unobserved_authentication(tmp_path, capsys):
     home = tmp_path / 'codex-home'
     home.mkdir()
     root = tmp_path / 'state'
-    main(['--root', str(root), 'accounts', 'add', 'codex-main', '--engine', 'codex', '--home', str(home)])
+    main(['--root', str(root), 'accounts', 'add', '--engine', 'codex', '--home', str(home), '--name', 'Codex Main'])
     capsys.readouterr()
-    main(['--root', str(root), 'accounts', 'status', 'codex-main', '--json'])
+    main(['--root', str(root), 'accounts', 'status', 'Codex Main', '--json'])
     output = capsys.readouterr().out
     assert '"status": "not_observed"' in output
+
+
+def test_cli_account_name_is_unique_and_hides_internal_id(tmp_path, capsys):
+    home = tmp_path / 'codex-home'
+    home.mkdir()
+    root = tmp_path / 'state'
+    main(['--root', str(root), 'accounts', 'add', '--engine', 'codex', '--home', str(home), '--name', 'Test Account'])
+    added = capsys.readouterr().out
+    assert added == 'Account added: Test Account (codex)\n'
+
+    main(['--root', str(root), 'accounts', 'list'])
+    listing = capsys.readouterr().out
+    assert listing == 'Name | Engine | Email\n---|---|---\nTest Account | codex | -\n'
+
+    main(['--root', str(root), 'accounts', 'status', 'TEST ACCOUNT'])
+    status = capsys.readouterr().out
+    assert 'Account: Test Account' in status
+    assert 'account_id' not in status
+
+    with pytest.raises(SystemExit):
+        main(['--root', str(root), 'accounts', 'add', '--engine', 'codex', '--home', str(home), '--name', 'test account'])
+    assert 'account_name_in_use' in capsys.readouterr().err

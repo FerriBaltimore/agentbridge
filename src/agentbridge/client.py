@@ -45,6 +45,9 @@ class Bridge:
     def account(self, id):
         return self.account_service.get(id)
 
+    def resolve_account(self, reference):
+        return self.account_service.resolve(reference)
+
     def account_status(self, account_id, *, refresh=False):
         return self.account_service.status(account_id, refresh=refresh)
 

@@ -8,7 +8,7 @@ import sqlite3
 import time
 
 from .errors import BridgeError, BusyError
-from .models import Event, TERMINAL
+from .models import Event, TERMINAL, account_name_key
 
 
 def dumps(value):
@@ -162,6 +162,14 @@ class Store:
             old = db.execute('SELECT config FROM accounts WHERE id=?', (account.id,)).fetchone()
             if old and json.loads(old[0]) != json.loads(config):
                 raise BridgeError('account_changed', 'Account IDs are immutable. Register a new ID for a different identity.')
+            if account.name:
+                wanted_name = account_name_key(account.name)
+                for row in db.execute('SELECT id,config FROM accounts'):
+                    if row['id'] == account.id:
+                        continue
+                    other = json.loads(row['config'])
+                    if other.get('name') and account_name_key(other['name']) == wanted_name:
+                        raise BridgeError('account_name_in_use', 'Account names must be unique.')
             if account.home:
                 for row in db.execute('SELECT id,config FROM accounts'):
                     other = json.loads(row['config'])
