@@ -1,0 +1,23 @@
+from agentbridge.protocols import Parser
+
+def collect(engine,events):
+    out=[];p=Parser(engine,lambda k,d:out.append((k,d)))
+    for event in events:p.feed(event)
+    return p,out
+
+def test_codex_pairs_tools_and_usage():
+    p,out=collect('codex',[{'type':'thread.started','thread_id':'thread-1'},{'type':'item.started','item':{'id':'call-1','type':'command_execution','command':'true'}},{'type':'item.completed','item':{'id':'call-1','type':'command_execution','status':'completed','exit_code':0,'aggregated_output':'ok'}},{'type':'turn.completed','usage':{'input_tokens':4,'output_tokens':2}}])
+    assert ('session',{'native_id':'thread-1'}) in out
+    assert [x[0] for x in out].count('tool_call')==1
+    assert out[-1][0]=='usage' and out[-1][1]['tokens']['input_tokens']==4
+    assert p.terminal=='completed' and not p.end()
+
+def test_unknown_tool_result_is_explicit():
+    p,out=collect('claude',[{'type':'assistant','message':{'content':[{'type':'tool_use','id':'t-1','name':'Bash','input':{'command':'x'}}]}}])
+    assert p.end()
+    assert out[-1][0]=='tool_result' and out[-1][1]['outcome']=='unknown'
+
+def test_cursor_usage_and_subagent_are_observable():
+    _p,out=collect('cursor',[{'type':'task','task_id':'child-1','status':'running','agent_id':'parent'},{'type':'usage','usage':{'total_tokens':5},'cost':{'charged_cents':2}},{'type':'bridge_result','status':'success'}])
+    assert any(k=='subagent' and x['agent_id']=='child-1' for k,x in out)
+    assert any(k=='usage' and x['cost']['charged_cents']==2 for k,x in out)
