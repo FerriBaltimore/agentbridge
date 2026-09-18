@@ -2,7 +2,7 @@
 
 This directory describes how AgentBridge uses GrantBridge for account authentication while keeping agent execution in AgentBridge. The GrantBridge checkout is kept separate, and its `scripts/agentbridge-adapter.mjs` entry point is the local JSON-RPC sidecar used by the AgentBridge CLI.
 
-Reviewed on 2026-09-18 against AgentBridge `3b216a2` and GrantBridge `5eebb0386e647f062647a3208f2ad49c28eba515`. GrantBridge's repository is [FerriBaltimore/grantbridge](https://github.com/FerriBaltimore/grantbridge). Recheck the [source inventory](current-api.md) when either dependency changes.
+Reviewed on 2026-09-18 against AgentBridge `b0dcdd7` and GrantBridge `98a6c6b`. GrantBridge's repository is [FerriBaltimore/grantbridge](https://github.com/FerriBaltimore/grantbridge). Recheck the [source inventory](current-api.md) when either dependency changes.
 
 The boundary is deliberate:
 
