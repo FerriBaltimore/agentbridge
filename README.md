@@ -52,6 +52,19 @@ stale observation remains unknown, never zero. Provider-specific authentication
 and usage support for Claude and Cursor is declared unsupported until an
 adapter is added.
 
+The same checks are available from the CLI. Account homes and credential
+options are references only, so pass environment variable names, never their
+values:
+
+```bash
+agentbridge accounts add codex-main --engine codex --home "$CODEX_HOME" \
+  --name "Personal Codex" --email ferran@example.com
+agentbridge accounts list
+agentbridge accounts status codex-main --refresh
+agentbridge accounts usage codex-main --refresh
+agentbridge accounts check codex-main
+```
+
 For callers in another language:
 
 ```bash

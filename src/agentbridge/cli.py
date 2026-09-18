@@ -12,6 +12,72 @@ def serial(value):
     raise TypeError(type(value).__name__)
 
 
+def _account_dict(account):
+    return asdict(account) if is_dataclass(account) else account
+
+
+def _account_command(bridge, args):
+    command = args.accounts_command
+    if command == 'add':
+        account = Account(id=args.id, engine=args.engine, home=args.home, name=args.name,
+                          email=args.email, env_names=tuple(args.env_names or ()),
+                          key_env=args.key_env, command=tuple(args.command or ()))
+        return _account_dict(bridge.register(account))
+    if command == 'list':
+        return [_account_dict(account) for account in bridge.accounts()]
+    if command == 'status':
+        return bridge.account_status(args.id, refresh=args.refresh)
+    if command == 'usage':
+        return bridge.account_usage(args.id, refresh=args.refresh)
+    if command == 'history':
+        return bridge.account_usage_history(args.id, limit=args.limit)
+    if command == 'check':
+        return {'status': bridge.account_status(args.id, refresh=True),
+                'usage': bridge.account_usage(args.id, refresh=True)}
+    raise BridgeError('invalid_command', 'Unknown accounts command.')
+
+
+def _print_account_human(command, value):
+    if command == 'list':
+        if not value:
+            print('No hay cuentas registradas.')
+            return
+        print('ID | Motor | Nombre | Correo')
+        print('---|---|---|---')
+        for account in value:
+            print(' | '.join(str(account.get(key) or '-') for key in ('id', 'engine', 'name', 'email')))
+        return
+    if command == 'add':
+        print(f"Cuenta añadida: {value['id']} ({value['engine']})")
+        return
+    if command == 'status':
+        auth = value.get('authentication', {})
+        identity = value.get('identity') or {}
+        configured = value.get('configured') or {}
+        print(f"Cuenta: {value.get('account_id')}")
+        print(f"Motor: {configured.get('engine') or '-'}")
+        print(f"Nombre configurado: {configured.get('name') or '-'}")
+        print(f"Correo configurado: {configured.get('email') or '-'}")
+        print(f"Autenticación: {auth.get('status') or '-'}")
+        print(f"Identidad observada: {identity.get('email') or identity.get('type') or '-'}")
+        print(f"Observada: {auth.get('observed_at') or '-'}")
+        if value.get('reason'):
+            print(f"Motivo: {value['reason']}")
+        return
+    if command == 'usage':
+        print(f"Cuenta: {value.get('account_id')}")
+        print(f"Fuente: {value.get('source') or '-'}")
+        print(f"Observado: {value.get('observed_at') or '-'}")
+        print(f"Obsoleto: {'sí' if value.get('stale') else 'no'}")
+        if value.get('reason'):
+            print(f"Motivo: {value['reason']}")
+        details = {key: value[key] for key in ('quota', 'account_usage') if key in value}
+        if details:
+            print(json.dumps(details, indent=2, ensure_ascii=False))
+        return
+    print(json.dumps(value, indent=2, ensure_ascii=False))
+
+
 def dispatch(bridge,method,params):
     if method=='capabilities':return bridge.capabilities(**params)
     if method=='accounts.list':return [asdict(x) for x in bridge.accounts()]
@@ -70,12 +136,47 @@ def main(argv=None):
     sub=parser.add_subparsers(dest='action',required=True)
     sub.add_parser('capabilities',help='Show implemented capabilities per engine')
     sub.add_parser('rpc',help='Serve JSON-RPC 2.0 on stdin/stdout; no network listener')
+    accounts=sub.add_parser('accounts',help='Register accounts and inspect identity, quota and usage')
+    account_sub=accounts.add_subparsers(dest='accounts_command',required=True)
+    add=account_sub.add_parser('add',help='Register an account reference; never pass a secret value')
+    add.add_argument('id',help='Stable local account ID')
+    add.add_argument('--engine',choices=('codex','claude','cursor'),required=True)
+    add.add_argument('--home',help='Native provider home for Codex or Claude')
+    add.add_argument('--name')
+    add.add_argument('--email')
+    add.add_argument('--env',dest='env_names',action='append',default=[],help='Credential environment variable name, repeatable')
+    add.add_argument('--key-env',help='API key environment variable name')
+    add.add_argument('--command',nargs='+',help='Provider executable and fixed arguments')
+    add.add_argument('--json',action='store_true')
+    list_command=account_sub.add_parser('list',help='List configured accounts')
+    list_command.add_argument('--json',action='store_true')
+    for name, help_text in (('status','Read configured and observed authentication state'),
+                            ('usage','Read account quota and token-activity observations')):
+        command_parser=account_sub.add_parser(name,help=help_text)
+        command_parser.add_argument('id')
+        command_parser.add_argument('--refresh',action='store_true',help='Query the provider without starting a model turn')
+        command_parser.add_argument('--json',action='store_true')
+    history=account_sub.add_parser('history',help='Show stored account usage observations')
+    history.add_argument('id')
+    history.add_argument('--limit',type=int,default=100)
+    history.add_argument('--json',action='store_true')
+    check=account_sub.add_parser('check',help='Refresh account identity and usage together')
+    check.add_argument('id')
+    check.add_argument('--json',action='store_true')
     call=sub.add_parser('call',help='Call one API method; JSON params are read from stdin')
     call.add_argument('method')
     args=parser.parse_args(argv)
     with Bridge(args.root) as bridge:
         if args.action=='rpc':rpc(bridge,sys.stdin,sys.stdout)
         elif args.action=='capabilities':print(json.dumps(bridge.capabilities(),indent=2))
+        elif args.action=='accounts':
+            try:
+                result=_account_command(bridge,args)
+                if getattr(args,'json',False):print(json.dumps(result,default=serial,indent=2,ensure_ascii=False))
+                else:_print_account_human(args.accounts_command,result)
+            except (BridgeError,ValueError,TypeError,KeyError) as error:
+                print(json.dumps({'error':getattr(error,'code','invalid_params'),'message':str(error)},ensure_ascii=False),file=sys.stderr)
+                raise SystemExit(1) from None
         else:
             try:result=dispatch(bridge,args.method,json.load(sys.stdin));print(json.dumps(result,default=serial))
             except (BridgeError,ValueError,TypeError,KeyError) as e:
