@@ -57,6 +57,9 @@ class Bridge:
     def account_usage_history(self, account_id, *, limit=100):
         return self.account_service.history(account_id, limit=limit)
 
+    def account_login(self, **options):
+        return self.account_service.login(**options)
+
     def session(self, account_id, cwd, *, model=None):
         account=self.account(account_id)
         cwd=str(Path(cwd).expanduser().resolve())

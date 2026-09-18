@@ -1,6 +1,6 @@
 # Current APIs and integration gaps
 
-This inventory describes the reviewed source revisions in the [index](README.md). Planned interfaces are listed separately. A source implementation, a deterministic test and a real-provider acceptance result are different evidence.
+This inventory describes the reviewed source revisions in the [index](README.md), plus the local adapter now used by AgentBridge. A source implementation, a deterministic test and a real-provider acceptance result are different evidence.
 
 ## AgentBridge today
 
@@ -13,9 +13,9 @@ This inventory describes the reviewed source revisions in the [index](README.md)
 | [`worker`](../../src/agentbridge/worker.py) | Sets `CODEX_HOME=account.home` or `CLAUDE_CONFIG_DIR=account.home`. The inherited `HOME` is not replaced by a per-account home. |
 | [`cursor_worker`](../../src/agentbridge/cursor_worker.py) | Passes the value named by `key_env` to the Python Cursor SDK. The parent must supply it. |
 | [`Store.account`](../../src/agentbridge/store.py) | Rejects changes to an existing account's serialized configuration, including its home. Native-session continuity depends on preserving that binding. |
-| [`CLI`](../../src/agentbridge/cli.py) | Offers `accounts add/list/status/usage/history/check`. There is no `accounts login`, `relogin` or `logout` command. |
+| [`CLI`](../../src/agentbridge/cli.py) | Offers `accounts add/list/status/usage/history/check/login`. Login uses the local GrantBridge adapter; relogin and logout are not exposed yet. |
 
-AgentBridge's core remains usable with externally prepared accounts. Adding the optional GrantBridge adapter must preserve that path.
+AgentBridge's core remains usable with externally prepared accounts. The optional GrantBridge adapter preserves that path and is only needed for interactive login.
 
 ## GrantBridge today
 
@@ -24,10 +24,10 @@ Paths below refer to the separate GrantBridge repository at the reviewed revisio
 | Surface | Existing behavior |
 | --- | --- |
 | `src/index.mjs: GrantBridge.startProvider` | Starts a provider asynchronously. It can return `starting` before an authorization URL is available. |
-| `getAttempt`, `listAttempts`, `cancelProvider` | Return owner-scoped attempt state or cancel an active attempt. Cancelling a terminal attempt currently throws `already_finished`; idempotent cancellation requires adapter handling. |
+| `getAttempt`, `listAttempts`, `cancelProvider` | Return owner-scoped attempt state or cancel an active attempt. The local adapter exposes these operations as `auth.get` and `auth.cancel`. |
 | `checkProvider` | Runs a separate verification worker. Check `verification` and `probeError`, not just the unchanged `authorized` status. `inference: true` starts an actual model request. |
 | `submitProviderCode` | Supplies a code to a pending Claude process. It is a fallback, not a generic callback receiver. |
-| `src/store.mjs: Store.home` | Creates `<dataDir>/profiles/<attempt-id>`. There is no stable account-home provisioning or activation API. |
+| `src/store.mjs: Store.home` | Creates `<dataDir>/profiles/<attempt-id>`. The AgentBridge sidecar activates the provider-specific `.codex` or `.claude` subdirectory after authorization; GrantBridge itself does not own the stable AgentBridge account ID. |
 | `src/process.mjs: isolatedEnv` | Sets `CODEX_HOME=<attempt-home>/.codex` and `CLAUDE_CONFIG_DIR=<attempt-home>/.claude`. AgentBridge needs those subdirectories, not the outer attempt directory. |
 | `src/providers/cursor.mjs` | Saves an SDK-issued key in the vault; the login requests a 24-hour TTL. There is no public credential-resolution API. Expiry must not be treated as refreshable OAuth without provider support. |
 | `src/http.mjs` | Express callbacks for generic OAuth, Google and MCP only. Native Claude/Codex completion and Cursor polling do not use these routes. |
@@ -38,8 +38,8 @@ The manifest says Node `>=20`, but the source imports `node:sqlite` and dependen
 
 ## Gaps that must be closed
 
-- A versioned Node JSON-RPC entry point and Python client, with packaged dependencies and bounded shutdown.
-- Stable account binding, identity-safe promotion after relogin, native profile activation and a private Cursor secret resolver.
+- A versioned Node JSON-RPC entry point and Python client, with bounded shutdown. The adapter lives at `scripts/agentbridge-adapter.mjs` in the GrantBridge checkout.
+- Stable account binding for relogin, identity-safe promotion and a private Cursor secret resolver remain open. Initial native profile activation is implemented for Codex and Claude.
 - Coordination between native CLI credential writes and relogin. Generic OAuth refresh leases do not coordinate native CLI writers.
 - A sanitized status vocabulary distinguishing local credential presence, authenticated network use, quota and model execution.
 - Owner-authenticated hosted-browser transport and callback routing for remote development.

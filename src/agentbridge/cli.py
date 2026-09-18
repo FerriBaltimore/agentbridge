@@ -83,6 +83,36 @@ def _account_command(bridge, args):
         args.account_name, args.id = account.name, account.id
         return {'status': bridge.account_status(account.id, refresh=True),
                 'usage': bridge.account_usage(account.id, refresh=True)}
+    if command == 'login':
+        seen = set()
+
+        def progress(attempt):
+            if args.json or not isinstance(attempt, dict):
+                return
+            status = attempt.get('status')
+            if status in seen:
+                return
+            seen.add(status)
+            if status in ('starting', 'awaiting_user'):
+                if status == 'starting':
+                    print(f"Starting authentication for {args.name} ({args.engine})...")
+                if attempt.get('authorizationUrl'):
+                    print('Open this URL to continue:')
+                    print(f"  {attempt['authorizationUrl']}")
+                if attempt.get('userCode'):
+                    print(f"Verification code: {attempt['userCode']}")
+                print('Waiting for provider confirmation...')
+            elif status == 'exchanging':
+                print('Provider confirmed the login. Verifying the native account...')
+
+        result = bridge.account_login(
+            engine=args.engine, name=args.name, email=args.email,
+            grantbridge_root=args.grantbridge_root, data_dir=args.grantbridge_data_dir,
+            mode=args.mode, browser=args.browser, timeout=args.timeout,
+            poll_interval=args.poll_interval, on_attempt=progress,
+        )
+        args.account_name = result['account']['name']
+        return result
     raise BridgeError('invalid_command', 'Unknown accounts command.')
 
 
@@ -141,6 +171,13 @@ def _print_account_human(command, value, account_name=None):
         print('Usage:')
         _print_account_human('usage', value.get('usage', {}), account_name)
         return
+    if command == 'login':
+        account = value.get('account') or {}
+        print(f"Account authenticated: {account.get('name') or account.get('id') or '-'} ({account.get('engine') or '-'})")
+        if value.get('identity', {}).get('email'):
+            print(f"Observed identity: {value['identity']['email']}")
+        print('Authentication: authenticated')
+        return
     print(json.dumps(value, indent=2, ensure_ascii=False))
 
 
@@ -152,6 +189,7 @@ def dispatch(bridge,method,params):
     if method=='accounts.usage':return bridge.account_usage(**params)
     if method=='accounts.usage_history':return bridge.account_usage_history(**params)
     if method=='accounts.quota':return bridge.quota(**params)
+    if method=='accounts.login':return bridge.account_login(**params)
     if method=='sessions.create':return bridge.session(**params)
     if method=='sessions.list':return bridge.sessions()
     if method=='sessions.get':return bridge.get_session(**params)
@@ -202,6 +240,7 @@ def main(argv=None):
         epilog=(
             'Examples:\n'
             '  agentbridge accounts list\n'
+            '  agentbridge accounts login --engine codex --name "Development Codex" --grantbridge-root /path/to/grantbridge\n'
             '  agentbridge accounts status "Personal Codex" --refresh\n'
             '  agentbridge accounts check "Personal Codex"'
         ),
@@ -238,6 +277,17 @@ def main(argv=None):
     check=_add_parser(account_sub, 'check',help='Refresh account identity and usage together')
     check.add_argument('name',help='Unique account name')
     check.add_argument('--json',action='store_true')
+    login=_add_parser(account_sub, 'login', help='Authenticate or refresh a native account through GrantBridge')
+    login.add_argument('--engine', choices=('codex', 'claude', 'cursor'), required=True)
+    login.add_argument('--name', required=True, help='Unique human-facing account name')
+    login.add_argument('--email', help='Optional configured email when the provider does not return one')
+    login.add_argument('--grantbridge-root', help='GrantBridge checkout containing scripts/agentbridge-adapter.mjs')
+    login.add_argument('--grantbridge-data-dir', help='GrantBridge data directory; credentials remain owned by GrantBridge')
+    login.add_argument('--mode', choices=('browser', 'device', 'hosted'), default='browser', help='GrantBridge provider login mode')
+    login.add_argument('--browser', choices=('same_host', 'remote_desktop', 'mobile', 'mobile_vm'), default='same_host', help='Where the provider login is completed')
+    login.add_argument('--timeout', type=float, default=600, help='Maximum login wait in seconds')
+    login.add_argument('--poll-interval', type=float, default=1.0, help='Status polling interval in seconds')
+    login.add_argument('--json', action='store_true')
     call=_add_parser(sub, 'call',help='Call one API method; JSON params are read from stdin')
     call.add_argument('method')
     args=parser.parse_args(argv)

@@ -2,7 +2,7 @@
 
 ## What works today
 
-AgentBridge currently expects an already authenticated account. It can register
+AgentBridge can still consume an already authenticated account. It can register
 an isolated native home and execute with it:
 
 ```bash
@@ -19,29 +19,30 @@ The same reference model exists for Claude. Cursor currently uses an environment
 variable reference for its API key. The values themselves must stay outside
 AgentBridge state.
 
-This is the temporary development path. The native provider login is performed
-separately, then the resulting home or environment reference is registered with
-AgentBridge.
+This remains useful when another host performs login. The native provider login
+can also be performed directly by the local GrantBridge adapter.
 
-## Intended development path
+## Local GrantBridge login
 
 The next host command should be:
 
 ```bash
-agentbridge accounts login --engine codex --name "Development Codex"
-agentbridge accounts login --engine claude --name "Development Claude"
-agentbridge accounts login --engine cursor --name "Development Cursor"
+agentbridge accounts login --engine codex --name "Development Codex" \
+  --grantbridge-root /home/ferran/grantbridge
+agentbridge accounts login --engine claude --name "Development Claude" \
+  --grantbridge-root /home/ferran/grantbridge
 ```
 
 The command should:
 
-1. Create or select an isolated account record.
+1. Generate an internal account identifier without exposing it in the command.
 2. Ask the GrantBridge sidecar to start the provider attempt.
 3. Print the authorization URL. Opening it is an explicit user action; an
    opt-in local browser helper may open it on the same host.
 4. Poll the attempt and show only safe status, identity and next action.
-5. On success, activate a native-home reference or credential-provider
-   reference in AgentBridge.
+5. On success, activate a native-home reference in AgentBridge for Codex or
+   Claude. Cursor remains GrantBridge-vault-backed until a private resolver is
+   available.
 6. Run a fresh-provider check before reporting the account as authenticated.
 
 The command must not ask the user to paste an OAuth code when the provider can
@@ -95,6 +96,6 @@ AgentBridge command must cancel the GrantBridge attempt. Restarting the host mus
 reconcile the attempt before presenting it as pending. A failed or interrupted
 login must not silently start a new login or change the selected account.
 
-The sidecar should be one long-lived process per host/store while attempts or
-workers are active. Its shutdown closes child processes and records an
-interrupted state; it does not log out provider accounts.
+The sidecar is one long-lived process for the attached login command. Its
+shutdown closes child processes and records an interrupted state; it does not
+log out provider accounts.

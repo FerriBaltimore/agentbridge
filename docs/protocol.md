@@ -18,6 +18,7 @@ A `tool_result` with `outcome: unknown` means that the provider was asked to per
 | --- | --- |
 | `capabilities` | Return engine capability declarations. |
 | `accounts.register`, `accounts.list` | Register and inspect references, never secrets. |
+| `accounts.login` | Start a GrantBridge authentication attempt, wait for a verified native identity and register the resulting account. |
 | `accounts.status` | Read configured identity and the latest authentication observation. `refresh: true` performs a provider account read when supported. |
 | `accounts.usage` | Read the latest quota and usage observation. `refresh: true` performs a provider usage read when supported. |
 | `accounts.usage_history` | Read the bounded, append-only history of account usage observations. |

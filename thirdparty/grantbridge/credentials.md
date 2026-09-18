@@ -68,10 +68,10 @@ separate from the user's resulting tokens.
    confirms local profile loading only; Codex checks the account and rate-limit
    endpoint. Google, OAuth and Cursor perform their configured authenticated
    request. Neither authorization nor these checks prove model execution.
-6. A future AgentBridge adapter will activate the result as a stable account:
-   a Claude/Codex account points at the native profile home, while Cursor and
-   other token APIs use a private resolver. The current repositories do not
-   perform this activation automatically.
+6. The local AgentBridge adapter activates the result as a stable account for
+   Claude and Codex: the account points at the provider-specific native profile
+   subdirectory. Cursor and other token APIs still require a private resolver,
+   so they are not activated automatically.
 
 The application's mobile UI must not receive server access tokens, refresh
 tokens or Cursor keys. The provider may set its own login cookies in the
@@ -91,11 +91,10 @@ prompts, logs or event data:
 - Authorization codes.
 - Raw provider error bodies that may contain request credentials.
 
-The planned AgentBridge account configuration can contain an environment
-variable name, an opaque GrantBridge credential reference or a server-local
-native home path. The current `Account` model supports the environment-name
-and native-home forms only; it has no GrantBridge credential-reference field
-yet. It must never contain the value behind any reference.
+The AgentBridge account configuration can contain an environment variable name
+or a server-local native home path. The current `Account` model supports these
+forms only; it has no GrantBridge credential-reference field. It must never
+contain the value behind any reference.
 
 ## Native homes
 

@@ -18,7 +18,7 @@ It currently has adapters for Codex, Claude Code and Cursor. It separates the ap
 
 The package does not copy credentials, private reasoning or Fullbrain state. Account records contain credential references such as environment variable names, never their values. Provider capabilities are reported as supported, partial, unknown or unsupported.
 
-Authentication integration with GrantBridge is documented in [thirdparty/grantbridge/README.md](thirdparty/grantbridge/README.md). AgentBridge currently consumes prepared account references; the local login adapter described there is planned and keeps provider authentication outside the execution core.
+Authentication integration with GrantBridge is available through a local stdio adapter. GrantBridge owns the browser flow, provider credentials and native profile. AgentBridge receives only the safe authorization state and the verified native home needed for execution.
 
 ## Minimal Python use
 
@@ -66,6 +66,23 @@ agentbridge accounts status "Personal Codex" --refresh
 agentbridge accounts usage "Personal Codex" --refresh
 agentbridge accounts check "Personal Codex"
 ```
+
+To authenticate and register a new native account, keep the login process attached while
+you complete the provider flow in the browser:
+
+```bash
+agentbridge accounts login --engine codex --name "Development Codex" \
+  --grantbridge-root /home/ferran/grantbridge
+agentbridge accounts status "Development Codex" --refresh
+```
+
+The command starts `scripts/agentbridge-adapter.mjs` from the GrantBridge checkout,
+prints the provider authorization URL, waits for confirmation, performs a fresh
+provider check, and then registers the account. GrantBridge keeps its encrypted vault
+and profile under its own data directory. AgentBridge never stores a token, code or
+provider error body. Codex and Claude native homes are activated today. Cursor login
+can be started by GrantBridge, but its vault-backed key resolver is not yet exposed to
+AgentBridge, so Cursor activation remains unsupported.
 
 All CLI help, labels and messages are in English. User-supplied data is displayed as entered.
 The account name is the unique identifier used by the CLI. AgentBridge generates

@@ -10,9 +10,11 @@ import select
 import signal
 import subprocess
 import time
+from uuid import uuid4
 
 from . import usage
 from .errors import BridgeError
+from .grantbridge import GrantBridgeClient
 from .models import Account, account_name_key, identifier
 from .security import base_environment
 
@@ -163,6 +165,74 @@ class AccountService:
     def register(self, account):
         self.store.account(account)
         return self.get(account.id)
+
+    def login(self, *, engine, name, email=None, grantbridge_root=None, data_dir=None,
+              mode='browser', browser='same_host', timeout=600, poll_interval=1.0,
+              on_attempt=None, client=None):
+        """Authenticate or refresh a native account through GrantBridge.
+
+        GrantBridge owns the browser flow, provider credentials and native profile.
+        AgentBridge only receives a safe identity projection and the provider home
+        path after the fresh authorization reaches ``authorized``.
+        """
+        existing = next((account for account in self.list()
+                         if account.name and account_name_key(account.name) == account_name_key(name)), None)
+        if existing and existing.engine != engine:
+            raise BridgeError('account_engine_mismatch', 'The existing account name belongs to a different engine.')
+        if not isinstance(timeout, (int, float)) or not 1 <= timeout <= 86400:
+            raise BridgeError('invalid_timeout', 'Login timeout must be in [1, 86400] seconds.')
+        if not isinstance(poll_interval, (int, float)) or not 0.05 <= poll_interval <= 60:
+            raise BridgeError('invalid_poll_interval', 'Login poll interval must be in [0.05, 60] seconds.')
+        account_id = existing.id if existing else uuid4().hex
+        client = client or GrantBridgeClient(grantbridge_root, data_dir=data_dir, timeout=min(30, timeout))
+        attempt = None
+        started = time.monotonic()
+        try:
+            attempt = client.start(owner=account_id, engine=engine, mode=mode, browser=browser,
+                                   request_key=account_id)
+            if on_attempt:
+                on_attempt(attempt)
+            while attempt.get('status') not in {'authorized', 'failed', 'cancelled', 'expired', 'interrupted', 'revoked', 'replaced'}:
+                if time.monotonic() - started >= timeout:
+                    try:
+                        client.cancel(attempt['id'], account_id)
+                    except BridgeError:
+                        pass
+                    raise BridgeError('login_timeout', 'The authentication attempt timed out.')
+                time.sleep(poll_interval)
+                attempt = client.get(attempt['id'], account_id)
+                if on_attempt:
+                    on_attempt(attempt)
+            if attempt.get('status') != 'authorized':
+                detail = attempt.get('error') or {}
+                code = detail.get('code', 'login_failed')
+                messages = {
+                    'provider_unavailable': 'The provider process could not be started.',
+                    'activation_unsupported': 'This provider does not expose a native home to AgentBridge yet.',
+                    'native_reauthorization_required': 'The provider requires a new login.',
+                    'login_timeout': 'The authentication attempt timed out.',
+                }
+                raise BridgeError(code, messages.get(code, 'The provider did not complete authentication.'))
+            activation = client.activate(attempt['id'], account_id)
+            home = activation.get('home') if isinstance(activation, dict) else None
+            if not home:
+                raise BridgeError('activation_invalid', 'GrantBridge did not return a native account home.')
+            identity = activation.get('identity') if isinstance(activation, dict) else {}
+            observed_email = identity.get('email') if isinstance(identity, dict) else None
+            promoted = Account(account_id, engine, home=home,
+                               name=existing.name if existing else name,
+                               email=observed_email or email or (existing.email if existing else None),
+                               env_names=existing.env_names if existing else (),
+                               key_env=existing.key_env if existing else None,
+                               command=existing.command if existing else ())
+            account = self.store.replace_account_home(promoted) if existing else self.register(promoted)
+            account = self.get(account_id)
+            self.store.account_observation(account.id, 'grantbridge', 'authenticated',
+                                           {'identity': identity or {}, 'source': 'grantbridge_native_login'})
+            return {'account': account.to_dict(), 'attempt': attempt,
+                    'identity': identity or {}, 'home': home}
+        finally:
+            client.close()
 
     def get(self, account_id):
         account_id = identifier(account_id)

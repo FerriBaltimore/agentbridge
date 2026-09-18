@@ -1,6 +1,6 @@
 # GrantBridge integration
 
-This directory describes how AgentBridge can use GrantBridge for account authentication while keeping agent execution in AgentBridge. It contains integration documentation only, not a vendored dependency or a working adapter.
+This directory describes how AgentBridge uses GrantBridge for account authentication while keeping agent execution in AgentBridge. The GrantBridge checkout is kept separate, and its `scripts/agentbridge-adapter.mjs` entry point is the local JSON-RPC sidecar used by the AgentBridge CLI.
 
 Reviewed on 2026-09-18 against AgentBridge `3b216a2` and GrantBridge `5eebb0386e647f062647a3208f2ad49c28eba515`. GrantBridge's repository is [FerriBaltimore/grantbridge](https://github.com/FerriBaltimore/grantbridge). Recheck the [source inventory](current-api.md) when either dependency changes.
 
@@ -16,15 +16,15 @@ GrantBridge is a Node.js SDK. AgentBridge is a Python SDK and CLI. AgentBridge s
 
 ## Current state
 
-The repositories are not fully wired together yet.
+The local login path is wired together; remote presentation and Cursor credential handoff remain separate work.
 
 - GrantBridge exposes native Claude, Codex and Cursor authorization attempts through `startProvider`, `checkProvider`, `cancelProvider` and `submitProviderCode`.
 - GrantBridge has a real-provider smoke test: `npm run test:real`. It starts each installed native adapter, verifies its authorization URL and cancels the attempt without changing an account.
-- AgentBridge currently registers references to already prepared account homes or environment variable names. `agentbridge accounts add` does not perform login.
+- AgentBridge still supports references to already prepared account homes or environment variable names. `agentbridge accounts add` remains a non-authenticating registration command.
 - AgentBridge's provider account observation adapter is implemented for Codex. Claude and Cursor status probes remain unsupported in the current `AccountService`; that does not mean their execution adapters are absent.
-- The handoff of a GrantBridge native home or a Cursor credential reference into an AgentBridge account is a planned adapter, not an existing feature.
+- AgentBridge now activates Codex and Claude native homes after GrantBridge reports authorization and a fresh identity check. Cursor authorization remains available in GrantBridge, but its vault-backed key resolver is not exposed to AgentBridge yet.
 
-This distinction matters: the documents below define the integration contract and the development path. They do not claim that `agentbridge accounts login` already exists.
+This distinction matters: the documents below define the integration contract and the remaining development path. The local `agentbridge accounts login` flow is implemented for Codex and Claude native homes.
 
 ## Recommended shape
 

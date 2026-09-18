@@ -1,7 +1,7 @@
 # Adapter protocol
 
-This is the proposed local protocol between AgentBridge and a GrantBridge
-adapter. It is not implemented yet. The transport should be JSON-RPC 2.0 over
+This is the local protocol between AgentBridge and a GrantBridge
+adapter. The transport is JSON-RPC 2.0 over
 stdin/stdout, matching AgentBridge's existing public transport and avoiding a
 network listener during development.
 
@@ -29,9 +29,9 @@ Request:
 }
 ```
 
-The adapter derives the owner from the authenticated local host session. A
-caller must not be able to choose an arbitrary owner string to access another
-owner's attempts.
+The AgentBridge parent supplies its generated stable account identifier as the
+owner. The sidecar binds every operation to that owner, and a caller cannot use
+one owner's attempt ID with another owner.
 
 Response:
 
@@ -72,7 +72,7 @@ a process.
 ```
 
 The result contains the safe attempt projection, identity and verification
-state. A future activation result may include a server-local native-home path
+state. The activation result may include a server-local native-home path
 only when the host explicitly requested one and the path is inside the
 configured account root. For Cursor and token APIs it should return an opaque
 `credential_ref`, never the key.
@@ -83,7 +83,7 @@ configured account root. For Cursor and token APIs it should return an opaque
 {"jsonrpc":"2.0","id":3,"method":"auth.cancel","params":{"attempt_id":"opaque-attempt-id"}}
 ```
 
-Cancellation is explicit. The adapter should make a repeated cancel safe at the
+Cancellation is explicit. The adapter makes a repeated cancel safe at the
 protocol boundary even though the current GrantBridge method reports
 `already_finished` for a terminal attempt. Cancelling a pending attempt must
 not remove an existing authorized account or its conversations.
@@ -91,7 +91,7 @@ not remove an existing authorized account or its conversations.
 ## `auth.check`
 
 ```json
-{"jsonrpc":"2.0","id":4,"method":"auth.check","params":{"account_id":"development-codex"}}
+{"jsonrpc":"2.0","id":4,"method":"auth.check","params":{"attempt_id":"opaque-attempt-id","owner":"development-codex"}}
 ```
 
 The check launches a fresh provider process or provider request and returns
@@ -101,8 +101,8 @@ grant permission to execute a business operation.
 
 ## `auth.activate` and relogin
 
-Activation is the missing bridge between a successful attempt and an
-AgentBridge account. A future `auth.activate` must:
+Activation is the bridge between a successful attempt and an
+AgentBridge account. The implemented `auth.activate` must:
 
 - verify the provider identity against the requested stable account;
 - atomically publish a new credential generation only after checks pass;

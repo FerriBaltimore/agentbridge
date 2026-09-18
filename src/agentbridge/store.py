@@ -177,6 +177,28 @@ class Store:
                         raise BridgeError('home_in_use', 'This native account home already has an ID.')
             db.execute('INSERT OR IGNORE INTO accounts VALUES (?,?)', (account.id, config))
 
+    def replace_account_home(self, account):
+        """Promote an authenticated native home while keeping the account ID stable."""
+        config = dumps(account.to_dict())
+        next_config = json.loads(config)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            old = db.execute('SELECT config FROM accounts WHERE id=?', (account.id,)).fetchone()
+            if not old:
+                raise BridgeError('not_found', 'Account does not exist.')
+            previous = json.loads(old['config'])
+            immutable = ('engine', 'name', 'env_names', 'key_env', 'command')
+            if any(previous.get(key) != next_config.get(key) for key in immutable):
+                raise BridgeError('account_changed', 'Authenticated promotion cannot change account identity or credential references.')
+            active = db.execute("SELECT 1 FROM runs WHERE account_id=? AND state IN ('starting','running','stopping')", (account.id,)).fetchone()
+            if active:
+                raise BusyError()
+            for row in db.execute('SELECT id,config FROM accounts WHERE id<>?', (account.id,)):
+                other = json.loads(row['config'])
+                if other.get('home') == account.home and other.get('engine') == account.engine:
+                    raise BridgeError('home_in_use', 'This native account home already has an ID.')
+            db.execute('UPDATE accounts SET config=? WHERE id=?', (config, account.id))
+
     def add_session(self, id, account_id, cwd, model, native_id=None, parent_id=None, context=None):
         with self.connect() as db:
             db.execute('INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)',

@@ -1,9 +1,10 @@
 # Implementation sequence
 
-This is the planned work after the documentation pass. The files and APIs
-below are proposed boundaries, not existing code.
+The first implementation stage is complete in the GrantBridge checkout and
+AgentBridge. The files and APIs below remain the boundary for the later
+activation, relogin and remote-host work.
 
-## Stage 1: make the adapter explicit
+## Stage 1: make the adapter explicit, complete
 
 1. Add a small public GrantBridge adapter entry point for JSON-RPC over stdio.
    It should expose version information, provider catalog, `auth.start`,
