@@ -1,10 +1,66 @@
-"""Stable error codes across the SDK and JSON API."""
+"""Stable error codes and safe JSON-RPC error metadata."""
+
+
+RETRYABLE = {"busy", "provider_timeout", "provider_unavailable", "grantbridge_timeout", "store_unavailable"}
+ACTION = {
+    "authentication_required": "login",
+    "credential_unavailable": "login",
+    "credential_expired": "login",
+    "identity_changed": "change_account",
+    "identity_missing": "login",
+    "authentication_interrupted": "inspect",
+    "quota_exhausted": "wait",
+    "model_not_found": "change_model",
+    "model_unavailable": "change_model",
+    "interrupted": "resume",
+    "unknown_outcome": "inspect",
+    "authentication_attempt_not_ready": "wait",
+    "authentication_not_verified": "check",
+    "login_timeout": "login",
+    "activation_unsupported": "change_account",
+}
 
 
 class BridgeError(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, phase="admission", outcome="not_started",
+                 retryable=None, retry_after_ms=None, details=None):
         self.code = code
+        self.phase = phase
+        self.outcome = outcome
+        self.retryable = False if outcome == 'unknown' or code == 'unknown_outcome' else (
+            code in RETRYABLE if retryable is None else bool(retryable))
+        self.retry_after_ms = retry_after_ms
+        self.details = details or {}
         super().__init__(message)
+
+    def safe_data(self):
+        category = "validation"
+        if (self.code in {"authentication_required", "credential_unavailable", "authorization_denied"}
+                or self.code in {'credential_expired', 'identity_changed', 'identity_missing', 'activation_invalid'}
+                or self.code.startswith("authentication_") or self.code in {"activation_unsupported", "login_timeout"}):
+            category = "auth"
+        elif self.code in {"quota_exhausted"}:
+            category = "quota"
+        elif self.code.startswith("provider_") or self.code in {"grantbridge_failed", "grantbridge_timeout"}:
+            category = "provider"
+        elif self.code in {"busy", "instance_busy", "account_busy"}:
+            category = "conflict"
+        elif self.code in {"cancelled", "interrupted"}:
+            category = "cancel"
+        elif self.code == "internal_error":
+            category = "internal"
+        elif self.code in {'unsupported', 'unsupported_parameter', 'unsupported_operation'}:
+            category = 'capability'
+        return {
+            "code": self.code,
+            "category": category,
+            "retryable": self.retryable,
+            "action": 'inspect' if self.outcome == 'unknown' else ACTION.get(self.code, "none"),
+            "phase": self.phase,
+            "outcome": self.outcome,
+            "retry_after_ms": self.retry_after_ms,
+            "details": self.details,
+        }
 
 
 class BusyError(BridgeError):

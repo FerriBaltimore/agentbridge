@@ -11,6 +11,7 @@ from pathlib import Path
 import selectors
 import subprocess
 import threading
+import time
 
 from .errors import BridgeError
 
@@ -24,7 +25,7 @@ class GrantBridgeClient:
             if configured:
                 root = Path(configured).expanduser().resolve()
             else:
-                candidates = [Path("/home/ferran/grantbridge"), Path(__file__).resolve().parents[3] / "grantbridge"]
+                candidates = [Path(__file__).resolve().parents[3] / "grantbridge"]
                 root = next((candidate for candidate in candidates if candidate.is_dir()), None)
             if root is None:
                 raise BridgeError("grantbridge_unavailable", "GrantBridge is not configured. Pass --grantbridge-root or set AGENTBRIDGE_GRANTBRIDGE_ROOT.")
@@ -38,6 +39,12 @@ class GrantBridgeClient:
         self.process = None
         self._next_id = 0
         self._lock = threading.Lock()
+        self._buffer = b''
+
+    def configuration(self):
+        """Non-secret references sufficient to reconnect from another process."""
+        return {'adapter': str(self.adapter), 'data_dir': str(self.data_dir) if self.data_dir else None,
+                'node': self.node}
 
     def _start(self):
         command = [self.node, str(self.adapter)]
@@ -70,25 +77,32 @@ class GrantBridgeClient:
             selector = selectors.DefaultSelector()
             try:
                 selector.register(process.stdout, selectors.EVENT_READ)
+                deadline = time.monotonic() + self.timeout
                 while True:
-                    events = selector.select(self.timeout)
+                    events = selector.select(max(0, deadline - time.monotonic()))
                     if not events:
                         raise BridgeError("grantbridge_timeout", "GrantBridge did not answer in time.")
-                    line = process.stdout.readline()
-                    if not line:
+                    chunk = os.read(process.stdout.fileno(), 65536)
+                    if not chunk:
                         raise BridgeError("grantbridge_failed", "The GrantBridge adapter exited unexpectedly.")
-                    try:
-                        response = json.loads(line.decode())
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        continue
-                    if response.get("id") != request_id:
-                        continue
-                    if isinstance(response.get("error"), dict):
-                        error = response["error"]
-                        code = ((error.get("data") or {}).get("code") or "grantbridge_failed")
-                        message = error.get("message") or "GrantBridge did not complete the operation."
-                        raise BridgeError(code, message)
-                    return response.get("result")
+                    self._buffer += chunk
+                    if len(self._buffer) > 1024 * 1024:
+                        raise BridgeError('provider_protocol_error', 'GrantBridge response exceeded the size limit.')
+                    while b'\n' in self._buffer:
+                        line, self._buffer = self._buffer.split(b'\n', 1)
+                        try:
+                            response = json.loads(line)
+                        except (UnicodeDecodeError, json.JSONDecodeError):
+                            continue
+                        if not isinstance(response, dict) or response.get('id') != request_id:
+                            continue
+                        if isinstance(response.get('error'), dict):
+                            error = response['error']
+                            code = ((error.get('data') or {}).get('code') or 'grantbridge_failed')
+                            raise BridgeError(code, 'GrantBridge did not complete the operation.')
+                        return response.get('result')
+                    if time.monotonic() >= deadline:
+                        raise BridgeError('grantbridge_timeout', 'GrantBridge did not answer in time.')
             finally:
                 selector.close()
 
@@ -100,14 +114,21 @@ class GrantBridgeClient:
     def get(self, attempt_id, owner):
         return self._request("auth.get", {"attempt_id": attempt_id, "owner": owner})
 
+    def find(self, request_key, owner):
+        return self._request('auth.find', {'request_key': request_key, 'owner': owner})
+
     def cancel(self, attempt_id, owner):
         return self._request("auth.cancel", {"attempt_id": attempt_id, "owner": owner})
 
-    def check(self, attempt_id, owner):
-        return self._request("auth.check", {"attempt_id": attempt_id, "owner": owner})
+    def check(self, attempt_id, owner, *, inference=False):
+        return self._request("auth.check", {"attempt_id": attempt_id, "owner": owner, 'inference': inference})
 
     def activate(self, attempt_id, owner):
         return self._request("auth.activate", {"attempt_id": attempt_id, "owner": owner})
+
+    def credentials(self, attempt_id, owner):
+        """Private execution channel. Never return this result through public RPC."""
+        return self._request('auth.credentials', {'attempt_id': attempt_id, 'owner': owner})
 
     def submit_code(self, attempt_id, owner, code):
         return self._request("auth.submit_code", {"attempt_id": attempt_id, "owner": owner, "code": code})
@@ -116,11 +137,14 @@ class GrantBridgeClient:
         process = self.process
         if process is None:
             return
+        timeout = self.timeout
+        self.timeout = min(timeout, 2)
         try:
             self._request("auth.close")
         except (BridgeError, OSError):
             pass
         finally:
+            self.timeout = timeout
             self.process = None
             try:
                 process.stdin.close()

@@ -14,6 +14,7 @@ from .protocols import Parser
 from .security import Redactor, base_environment
 from .store import Store
 from .transports import command
+from .credentials import CURSOR_KEY_ENV
 
 MAX_LINE=8*1024*1024
 
@@ -48,8 +49,8 @@ def main():
         if session.get('context') and not session.get('native_id'):
             prompt=session['context']+'\n\nCurrent user request:\n'+prompt
         if account.engine=='cursor':
-            payload=json.dumps({'prompt':prompt,'cwd':session['cwd'],'model':session['model'],
-                'native_id':session.get('native_id'),'key_env':account.key_env,
+            payload=json.dumps({'prompt':prompt,'cwd':session['cwd'],'model':options.model or session['model'],
+                'native_id':session.get('native_id'),'key_env':account.key_env or CURSOR_KEY_ENV,
                 'sandbox':options.sandbox,'tools':list(options.allowed_tools),'collect_usage':options.collect_usage})
         else:payload=prompt
         if run['stop_requested'] or stopped[0]:

@@ -11,14 +11,15 @@ It currently has adapters for Codex, Claude Code and Cursor. It separates the ap
 - Native session resume where a provider and compatible local layout support it.
 - Portable context bundles with bounded size, archive hashes, explicit omissions and unknown tool outcomes.
 - Stop, timeout and recovery semantics that do not silently execute a request again.
+- Restart-safe idempotency for instance creation, message admission, authentication and transfers.
 - Normalized text, tool, result, quota, usage, subagent and permission events.
 - Optional quota and usage readers. Tokens, limits and monetary cost stay separate and carry their observation source.
 - An independent account service for configured identity, authentication observations, quota snapshots and usage history. It does not supervise worker processes or choose fallback accounts.
 - Python, command-line and JSON-RPC 2.0 stdio entry points. No network server is opened by the library.
 
-The package does not copy credentials, private reasoning or Fullbrain state. Account records contain credential references such as environment variable names, never their values. Provider capabilities are reported as supported, partial, unknown or unsupported.
+The package does not copy credentials, private reasoning or Fullbrain state. Account records contain credential references such as environment variable names, never their values. Provider capabilities include support and maturity, so fixture-tested behavior is not presented as live provider acceptance.
 
-Authentication integration with GrantBridge is available through a local stdio adapter. GrantBridge owns the browser flow, provider credentials and native profile. AgentBridge receives only the safe authorization state and the verified native home needed for execution.
+Authentication integration with GrantBridge is available through a local stdio adapter. GrantBridge owns the browser flow, encrypted credentials and native profile. Public responses contain safe authorization state. The trusted execution layer receives a verified native home or temporarily resolves a Cursor key over a private pipe.
 
 ## Minimal Python use
 
@@ -50,9 +51,9 @@ usage = bridge.account_usage("codex-main", refresh=True)
 
 The first Codex adapter uses the documented app-server account and rate-limit
 reads. It stores observations with their source and timestamp. A missing or
-stale observation remains unknown, never zero. Provider-specific authentication
-and usage support for Claude and Cursor is declared unsupported until an
-adapter is added.
+stale observation remains unknown, never zero. Live account and usage readers for
+Claude and Cursor remain incomplete. Managed Cursor bindings can be checked for
+local expiry/revocation; that observation is marked as cached provider verification.
 
 The same checks are available from the CLI. Account homes and credential
 options are references only, so pass environment variable names, never their
@@ -67,6 +68,17 @@ agentbridge accounts usage "Personal Codex" --refresh
 agentbridge accounts check "Personal Codex"
 ```
 
+The provider-neutral target interface is documented in
+[docs/interface/README.md](docs/interface/README.md). It keeps accounts,
+models, conversation instances, messages, turns, usage and events separate.
+The current sessions/runs names remain supported while that contract is
+introduced incrementally.
+
+Repository structure is guarded by a 450-line limit for every text file and by
+Python and filename conventions. Run python tools/check_repository.py during
+development. Enable the staged-content pre-commit hook once per checkout with
+python tools/install_hooks.py; CI runs the check independently.
+
 To authenticate and register a new native account, keep the login process attached while
 you complete the provider flow in the browser:
 
@@ -76,13 +88,25 @@ agentbridge accounts login --engine codex --name "Development Codex" \
 agentbridge accounts status "Development Codex" --refresh
 ```
 
+For a restart-safe integration, use the asynchronous commands. `login-start`
+returns an attempt and owner reference immediately; then call `login-status`,
+`login-check`, `login-complete` or `login-cancel` with those references.
+
 The command starts `scripts/agentbridge-adapter.mjs` from the GrantBridge checkout,
 prints the provider authorization URL, waits for confirmation, performs a fresh
 provider check, and then registers the account. GrantBridge keeps its encrypted vault
 and profile under its own data directory. AgentBridge never stores a token, code or
-provider error body. Codex and Claude native homes are activated today. Cursor login
-can be started by GrantBridge, but its vault-backed key resolver is not yet exposed to
-AgentBridge, so Cursor activation remains unsupported.
+provider error body. Codex and Claude activation requires a verified native
+profile. Claude requires an explicitly requested inference check (`--inference`)
+because its local status read alone does not prove provider access. Cursor now binds
+a non-secret GrantBridge reference and resolves its API key over a private pipe at
+execution time. Expired or locally revoked bindings are rejected. Remote revocation
+is only observed on a provider request. No default Cursor login is discovered.
+
+The asynchronous login worker survives caller exit. `login-check` is asynchronous;
+wait for checking=false and status=verified before completing. Tests use isolated
+fixtures, not real accounts. See [implementation inventory](docs/interface/implementation-status.md)
+for remaining features and production acceptance requirements.
 
 All CLI help, labels and messages are in English. User-supplied data is displayed as entered.
 The account name is the unique identifier used by the CLI. AgentBridge generates

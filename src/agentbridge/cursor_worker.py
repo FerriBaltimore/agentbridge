@@ -17,10 +17,13 @@ def plain(value):
 def execute(payload, emit, sdk=None):
     if sdk is None:
         import cursor_sdk as sdk
-    kwargs={'cwd':payload['cwd'],'setting_sources':['project']}
+    api_key = os.environ.get(payload.get('key_env') or '')
+    if not api_key:
+        raise ValueError('An explicit Cursor credential is required.')
+    kwargs={'cwd':payload['cwd'],'setting_sources':[]}
     # Cursor exposes its own sandbox controls. A read-only request uses an empty
     # tool set, so we never claim an OS read-only sandbox that the SDK cannot express.
-    options=sdk.AgentOptions(model=payload['model'],api_key=os.environ.get(payload.get('key_env') or ''),
+    options=sdk.AgentOptions(model=payload['model'],api_key=api_key,
         local=sdk.LocalAgentOptions(**kwargs),
         tools=[] if payload.get('sandbox','read-only')=='read-only' else payload.get('tools') or None)
     agent=sdk.Agent.resume(payload['native_id'],options) if payload.get('native_id') else sdk.Agent.create(options)

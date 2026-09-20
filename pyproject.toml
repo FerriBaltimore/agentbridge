@@ -12,7 +12,7 @@ authors = [{name = "Ferran Gutierrez"}]
 dependencies = []
 
 [project.optional-dependencies]
-cursor = ["cursor-sdk>=1.0.30,<2"]
+cursor = ["cursor-sdk==1.0.31"]
 test = ["pytest>=8,<10"]
 
 [project.scripts]

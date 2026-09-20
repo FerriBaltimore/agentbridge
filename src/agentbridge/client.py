@@ -1,6 +1,4 @@
 """Public SDK. No server, event loop or Fullbrain installation required."""
-import asyncio
-from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -9,38 +7,42 @@ import sys
 import time
 from uuid import uuid4
 
-from .continuity import all_events, build, unresolved
+from .continuity import build, unresolved
+from .credentials import environment
+from .catalog import ModelCatalog
+from .discovery import DiscoveryMixin
+from .event_contract import public_event
 from .errors import BridgeError, BusyError, UnsupportedError
-from .models import Account, CAPABILITIES, RunOptions, TERMINAL, identifier
-from .native import copy_session
+from .models import Account, RunOptions, TERMINAL, identifier, page_values
+from .transfer import TransferMixin
 from .process import alive
 from .security import Redactor, base_environment
 from .store import Store, dumps
 from .transports import command
 from . import usage
 from .accounts import AccountService
+from .authentication import AuthenticationService
+from .run_state import Run
+from .transcript import messages as transcript_messages
 
 
-class Bridge:
+class Bridge(DiscoveryMixin, TransferMixin):
     def __init__(self, root='.agentbridge'):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
         self.store=Store(root)
         self.account_service=AccountService(self.store)
+        self.authentication=AuthenticationService(self.store, self.account_service)
+        self.catalog=ModelCatalog(self.account_service)
         self._children={}
 
     @property
     def root(self):return self.store.root
 
-    def capabilities(self, engine=None):
-        if engine is None:return {k:asdict(v) for k,v in CAPABILITIES.items()}
-        if engine not in CAPABILITIES:raise BridgeError('invalid_engine','Unknown engine.')
-        return asdict(CAPABILITIES[engine])
-
     def register(self, account: Account):
         return self.account_service.register(account)
 
-    def accounts(self):
-        return self.account_service.list()
+    def accounts(self, **filters):
+        return self.account_service.list(**filters)
 
     def account(self, id):
         return self.account_service.get(id)
@@ -48,26 +50,244 @@ class Bridge:
     def resolve_account(self, reference):
         return self.account_service.resolve(reference)
 
-    def account_status(self, account_id, *, refresh=False):
-        return self.account_service.status(account_id, refresh=refresh)
+    def account_status(self, account_id=None, *, account_ref=None, refresh=False):
+        return self.account_service.status(self._account_id(account_id, account_ref), refresh=refresh)
 
-    def account_usage(self, account_id, *, refresh=False):
-        return self.account_service.usage(account_id, refresh=refresh)
+    def account_usage(self, account_id=None, *, account_ref=None, refresh=False):
+        return self.account_service.usage(self._account_id(account_id, account_ref), refresh=refresh)
 
-    def account_usage_history(self, account_id, *, limit=100):
-        return self.account_service.history(account_id, limit=limit)
+    def usage(self, scope='account', *, account_ref=None, instance_id=None, turn_id=None,
+              refresh=False, include_quota=False, since=None, until=None):
+        if since or until:
+            raise UnsupportedError('Usage time filters are not supported by this adapter.')
+        if scope == 'account':
+            account_id = self._account_id(None, account_ref)
+            value = self.account_usage(account_id, refresh=refresh)
+            if include_quota:
+                value = {**value, 'quota': self.quota(account_id)}
+            return {**value, 'scope': 'account'}
+        if scope == 'turn':
+            if not turn_id:
+                raise BridgeError('turn_id_required', 'turn_id is required for turn usage.')
+            return {'scope': 'turn', 'turn_id': turn_id, **self.run(turn_id).consumption}
+        if scope == 'instance':
+            if not instance_id:
+                raise BridgeError('instance_id_required', 'instance_id is required for instance usage.')
+            rows = self.store.session_runs(instance_id, limit=10000)
+            observations = [self.run(row['id']).consumption for row in rows]
+            return {'scope': 'instance', 'instance_id': instance_id,
+                    'turns': len(rows), 'observations': observations,
+                    'supported': any(item.get('supported') for item in observations)}
+        raise BridgeError('invalid_scope', 'scope must be account, instance or turn.')
 
-    def account_login(self, **options):
-        return self.account_service.login(**options)
+    def account_usage_history(self, account_id, *, limit=100, cursor=0, since=None,
+                              until=None, granularity=None, refresh=False):
+        limit, cursor = page_values(limit, cursor)
+        if since or until or granularity:
+            raise UnsupportedError('Historical usage filters are not supported by this adapter.')
+        values = self.account_service.history(account_id, limit=limit + cursor)
+        return values[cursor:cursor + limit]
 
-    def session(self, account_id, cwd, *, model=None):
+    def account_login(self, **options):return self.authentication.login(**options)
+    def account_login_start(self, **options):return self.authentication.start(**options)
+    def account_login_check(self, attempt_id=None, **options):return self.authentication.check(attempt_id or options.pop('attempt_id'), **options)
+    def account_login_complete(self, attempt_id=None, **options):return self.authentication.complete(attempt_id or options.pop('attempt_id'), **options)
+    def account_login_status(self, attempt_id=None, **options):return self.authentication.status(attempt_id or options.pop('attempt_id'), **options)
+    def account_login_cancel(self, attempt_id=None, **options):return self.authentication.cancel(attempt_id or options.pop('attempt_id'), **options)
+
+    def _account_id(self, account_id, account_ref):
+        if account_id or account_ref:
+            return self.resolve_account(account_ref or account_id).id
+        raise BridgeError('account_ref_required', 'account_ref is required.')
+
+    def _public_instance(self, value):
+        result = dict(value)
+        result['instance_id'] = result['id']
+        account = self.account(result['account_id'])
+        result['account_ref'] = account.name or result['account_id']
+        result['engine'] = account.engine
+        result['workspace_path'] = result['cwd']
+        result['native_session_id'] = result.get('native_id')
+        result['created_at'] = result['created']
+        result['updated_at'] = result.get('updated', result['created'])
+        return result
+
+    def session(self, account_id, cwd, *, model=None, request_key=None):
         account=self.account(account_id)
         cwd=str(Path(cwd).expanduser().resolve())
         if not Path(cwd).is_dir():raise BridgeError('invalid_workspace','Workspace must be an existing directory.')
         if account.engine=='cursor' and not model:raise BridgeError('model_required','Cursor requires an explicit model for reliable resume.')
         id=uuid4().hex
-        self.store.add_session(id,account_id,cwd,model)
-        return self.get_session(id)
+        session_id, created = self.store.add_session(id, account_id, cwd, model,
+                                                     request_key=request_key)
+        result = self.get_session(session_id)
+        result['replayed'] = not created
+        return result
+
+    def instance_create(self, *, engine=None, account_ref=None, workspace_path=None, model=None,
+                        effort=None, context_window=None, permission_mode='dontAsk',
+                        sandbox_mode='read-only', allowed_tools=(), metadata=None,
+                        provider_options=None, continuity_mode=None, idempotency_key=None):
+        if provider_options or metadata or continuity_mode:
+            raise UnsupportedError('Provider-specific options, metadata and continuity require an adapter contract.')
+        if effort or context_window or permission_mode != 'dontAsk' or sandbox_mode != 'read-only' or allowed_tools:
+            raise UnsupportedError('Instance defaults are configured per turn by this adapter.')
+        if account_ref is None:
+            raise BridgeError('account_ref_required', 'account_ref is required for instance creation.')
+        account = self.resolve_account(account_ref)
+        if engine and account.engine != engine:
+            raise BridgeError('invalid_engine', 'The account engine does not match the requested engine.')
+        result = self.session(account.id, workspace_path or '.', model=model,
+                              request_key=idempotency_key)
+        return self._public_instance(result)
+
+    def instance_get(self, instance_id, *, include_last_turn=False, include_usage=False):
+        value = self._public_instance(self.get_session(instance_id))
+        if include_last_turn:
+            value['last_turn'] = self.store.last_session_run(instance_id)
+        if include_usage:
+            runs = self.store.session_runs(instance_id, limit=1000)
+            value['usage'] = {'turns': len(runs), 'observed': False, 'reason': 'run_usage_available_per_turn'}
+        return value
+
+    def instances(self, *, engine=None, account_ref=None, state=None, limit=100, cursor=0, include_last_turn=False):
+        limit, cursor = page_values(limit, cursor)
+        account_id = self.resolve_account(account_ref).id if account_ref else None
+        rows = self.store.list('sessions')
+        selected = [row for row in rows if (not engine or self.account(row['account_id']).engine == engine)
+                    and (not account_id or row['account_id'] == account_id)
+                    and (not state or row.get('state') == state)]
+        selected = selected[cursor:cursor + limit]
+        if include_last_turn:
+            for row in selected:
+                row['last_turn'] = self.store.last_session_run(row['id'])
+        return [self._public_instance(row) for row in selected]
+
+    def instance_update(self, instance_id, *, model=None, effort=None, context_window=None,
+                        permission_mode=None, sandbox_mode=None, allowed_tools=None,
+                        expected_version=None, metadata=None, provider_options=None, state=None):
+        if any(value is not None for value in (effort, context_window, permission_mode,
+                                                sandbox_mode, allowed_tools, metadata, provider_options)):
+            raise UnsupportedError('Only model and state updates are supported by this adapter.')
+        values = {}
+        if model is not None:
+            values['model'] = model
+        if state is not None:
+            values['state'] = state
+        if not values:
+            raise BridgeError('invalid_request', 'At least one instance field must change.')
+        return self._public_instance(self.store.update_session(instance_id, expected_version=expected_version, **values))
+
+    def instance_archive(self, instance_id, *, expected_version=None):
+        return self._public_instance(self.store.update_session(instance_id, expected_version=expected_version, state='archived'))
+
+    def message_create(self, instance_id, content, *, model=None, effort=None, context_window=None,
+                       permission_mode='dontAsk', sandbox_mode='read-only', allowed_tools=(),
+                       max_turns=None, max_budget=None, timeout_ms=None, attachments=None,
+                       provider_options=None, metadata=None, idempotency_key=None):
+        prompt = self._message_text(content, attachments)
+        if provider_options or metadata:
+            raise UnsupportedError('Provider-specific options and metadata require an adapter contract.')
+        options = RunOptions(
+            timeout=(timeout_ms / 1000) if timeout_ms is not None else 600,
+            sandbox=sandbox_mode, permission_mode=permission_mode,
+            allowed_tools=tuple(allowed_tools), model=model,
+            context_window=context_window, effort=effort, max_turns=max_turns,
+            max_budget_usd=max_budget, collect_usage=True,
+        )
+        run = self.submit(instance_id, prompt, options=options, request_key=idempotency_key)
+        message_id = run.snapshot.get('message_id', run.id)
+        return {'turn_id': run.id, 'message_id': message_id, 'instance_id': instance_id,
+                'state': run.status, 'replayed': bool(getattr(run, 'replayed', False))}
+
+    @staticmethod
+    def _message_text(content, attachments):
+        if attachments:
+            raise UnsupportedError('Attachments are not supported by every configured engine.')
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list) and all(isinstance(item, dict) and item.get('type') == 'text' for item in content):
+            value = ''.join(item.get('text', '') for item in content)
+            if value.strip():
+                return value
+        raise BridgeError('invalid_request', 'content must contain nonempty text.')
+
+    def messages(self, instance_id, *, after=None, before=None, role=None, limit=100, cursor=0):
+        return transcript_messages(self, instance_id, after=after, before=before, role=role,
+                                   limit=limit, cursor=cursor)
+
+    def turn(self, turn_id, *, include_usage=False, include_error=False):
+        run = self.run(turn_id)
+        value = dict(run.snapshot)
+        value['turn_id'] = value['id']
+        value['instance_id'] = value['session_id']
+        value['message_id'] = value.get('message_id', value['id'])
+        value['created_at'] = value['created']
+        value['updated_at'] = value['updated']
+        value['outcome'] = value['error'] or value['state']
+        if include_usage:
+            value['usage'] = run.consumption
+        if include_error and value.get('error'):
+            value['error_detail'] = {'code': value['error'], 'outcome': value['state']}
+        return value
+
+    def turns(self, *, instance_id=None, state=None, limit=100, cursor=0):
+        limit, cursor = page_values(limit, cursor)
+        rows = self.runs()
+        selected = [row for row in rows
+                    if (not instance_id or row['session_id'] == instance_id)
+                    and (not state or row['state'] == state)]
+        return [dict(row, turn_id=row['id']) for row in selected[cursor:cursor + limit]]
+
+    def turn_events(self, turn_id, *, after_seq=0, limit=1000, follow=False, timeout_ms=None):
+        if timeout_ms is not None and (not isinstance(timeout_ms, (int, float))
+                                       or isinstance(timeout_ms, bool) or timeout_ms < 0):
+            raise BridgeError('invalid_timeout', 'timeout_ms must be nonnegative.')
+        run = self.run(turn_id)
+        engine = self.account(run.session['account_id']).engine
+        return [public_event(event, engine) for event in run.events(
+            after=after_seq, limit=limit, follow=follow,
+            timeout=(timeout_ms / 1000) if timeout_ms is not None else None)]
+
+    def instance_events(self, instance_id, *, after_seq=0, limit=1000, follow=False, timeout_ms=None):
+        if follow:
+            raise UnsupportedError('Conversation event follow is not supported; poll with after_seq.')
+        if timeout_ms is not None and (not isinstance(timeout_ms, (int, float))
+                                       or isinstance(timeout_ms, bool) or timeout_ms < 0):
+            raise BridgeError('invalid_timeout', 'timeout_ms must be nonnegative.')
+        session = self.get_session(instance_id)
+        engine = self.account(session['account_id']).engine
+        events = self.store.events(session_id=instance_id, after=after_seq, limit=limit)
+        return [public_event(event, engine) for event in events]
+
+    def turn_stop(self, turn_id, *, reason=None, grace_period_ms=None, wait=False):
+        if grace_period_ms is not None and (not isinstance(grace_period_ms, (int, float))
+                                            or isinstance(grace_period_ms, bool) or grace_period_ms < 0):
+            raise BridgeError('invalid_timeout', 'grace_period_ms must be nonnegative.')
+        if grace_period_ms is not None:
+            raise UnsupportedError('Stop grace is configured by RunOptions.stop_grace before execution.')
+        result = self.run(turn_id).stop(wait=wait, timeout=15)
+        if isinstance(result, dict) and reason:
+            result['stop_reason'] = reason
+        return result
+
+    def turn_resume(self, turn_id, content=None, *, mode='native', timeout_ms=None, idempotency_key=None):
+        if mode not in ('native', 'reconcile'):
+            raise BridgeError('invalid_mode', 'Choose native or reconcile.')
+        run = self.run(turn_id)
+        if mode == 'reconcile' and run.status not in TERMINAL:
+            raise BusyError()
+        options = None
+        if timeout_ms is not None:
+            values = json.loads(run.snapshot['options'])
+            values['timeout'] = timeout_ms / 1000
+            options = RunOptions(**values)
+        resumed = run.resume(prompt=content, options=options, request_key=idempotency_key)
+        return {'turn_id': resumed.id, 'instance_id': resumed.snapshot['session_id'],
+                'state': resumed.status, 'mode': mode}
+
+    def permission_respond(self, turn_id, permission_id, decision, *, reason=None, expires_at=None):
+        raise UnsupportedError('Interactive permission responses are not connected to these provider transports.')
 
     def get_session(self, id):return self.store.get('sessions',identifier(id))
     def sessions(self):return self.store.list('sessions')
@@ -76,19 +296,27 @@ class Bridge:
         self.store.get('runs',identifier(id))
         return Run(self,id)
 
-    def submit(self, session_id, prompt, *, options=None, request_key=None):
+    def submit(self, session_id, prompt, *, options=None, request_key=None, message_id=None):
         options=options or RunOptions()
         if not isinstance(prompt,str) or not prompt.strip():raise BridgeError('empty_prompt','A nonempty prompt is required.')
+        previous = self.store.replay(session_id, prompt, options, request_key)
+        if previous:
+            run = Run(self, previous)
+            run.replayed = True
+            return run
         session=self.get_session(session_id)
+        if session.get('state') == 'archived':
+            raise BridgeError('instance_archived', 'Archived instances cannot accept new messages.')
         account=self.account(session['account_id'])
         command(account,session,options) # Refuse unsupported controls before recording a request.
-        secrets={}
-        for name in (*account.env_names,*((account.key_env,) if account.key_env else ())):
-            if name not in os.environ:raise BridgeError('credential_unavailable',f'Required environment variable {name} is unavailable.')
-            secrets[name]=os.environ[name]
+        secrets=environment(account)
         prompt=Redactor(secrets.values()).clean(prompt)
-        id,created=self.store.admit(uuid4().hex,session_id,prompt,options,request_key)
-        if not created:return Run(self,id)
+        id,created=self.store.admit(uuid4().hex,session_id,prompt,options,request_key,
+                                    message_id=message_id or uuid4().hex)
+        if not created:
+            run = Run(self, id)
+            run.replayed = True
+            return run
         env=base_environment()
         env['PYTHONPATH']=str(Path(__file__).resolve().parent.parent)
         try:
@@ -99,55 +327,32 @@ class Bridge:
         except (OSError,BrokenPipeError):
             self.store.finish(id,'failed','launch_failed')
             raise BridgeError('launch_failed','Could not start the AgentBridge worker.') from None
-        return Run(self,id)
+        run = Run(self, id)
+        run.replayed = False
+        return run
 
     def export_context(self, session_id, *, budget_bytes=128000):
         self.get_session(session_id)
         return build(self.store,session_id,budget_bytes)
 
-    def transfer(self, session_id, account_id, *, model=None, mode='auto', budget_bytes=128000):
-        """Create a new session branch; the source remains independently resumable.
-
-        auto: same-engine native if proven locally, otherwise bounded portable context.
-        native: fail rather than silently use portable context.
-        portable: always start a fresh provider session with a public evidence bundle.
-        """
-        if mode not in ('auto','native','portable'):raise BridgeError('invalid_mode','Choose auto, native or portable.')
-        source=self.get_session(session_id);old=self.account(source['account_id']);target=self.account(account_id)
-        if target.id==old.id:raise BridgeError('same_account','Continue the existing session on the same account.')
-        target_model=model if model is not None else source['model'] if old.engine==target.engine else None
-        if target.engine=='cursor' and not target_model:raise BridgeError('model_required','Specify the destination Cursor model.')
-        # Serialize transfer with run admission. This protects sessions managed by this store.
-        with self.store.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            active=db.execute("SELECT 1 FROM runs WHERE account_id IN (?,?) AND state IN ('starting','running','stopping')",
-                              (old.id,target.id)).fetchone()
-            if active:raise BusyError()
-            native_id=None;fallback=None
-            if mode!='portable' and old.engine==target.engine and source['native_id'] and old.home and target.home:
-                try:native_id=copy_session(old.engine,source['native_id'],old.home,target.home,list(target.command or (target.engine,)))
-                except (BridgeError,OSError) as error:
-                    if mode=='native':raise
-                    fallback=getattr(error,'code','native_unavailable')
-            elif mode=='native':raise UnsupportedError('Native transfer requires the same supported engine and an observed native session.')
-            bundle=None if native_id else self.export_context(session_id,budget_bytes=budget_bytes)
-            # Native copy also carries uncertain side effects which need verification.
-            unknown=unresolved(list(all_events(self.store,session_id)))
-            context=bundle.text if bundle else ('Verify these unknown historical outcomes before repeating actions: '+dumps(unknown) if unknown else None)
-            id=uuid4().hex
-            db.execute('INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)',
-                       (id,target.id,source['cwd'],target_model,native_id,session_id,context,time.time()))
-        return {**self.get_session(id),'transfer_mode':'native' if native_id else 'portable','fallback_reason':fallback,
-                'context_omissions':len(bundle.omitted) if bundle else 0}
+    def instance_export(self, instance_id, *, budget_bytes=128000, include_events=True,
+                        include_unknowns=True):
+        if not include_events or not include_unknowns:
+            raise UnsupportedError('Selective context export is not supported by this adapter.')
+        return self.export_context(instance_id, budget_bytes=budget_bytes)
 
     def quota(self, account_id, *, allow_network=False, oauth_env=None):
         token=os.environ.get(oauth_env) if oauth_env else None
         return usage.snapshot(self.account(account_id),oauth_token=token,allow_network=allow_network)
 
-    def recover(self):
+    def recover(self, instance_id=None, turn_id=None):
         """Reattach live workers. Never repeat an interrupted request automatically."""
         report={'live':[],'interrupted':[],'unresolved':[]}
         for row in self.runs():
+            if instance_id and row['session_id'] != instance_id:
+                continue
+            if turn_id and row['id'] != turn_id:
+                continue
             if row['state'] in TERMINAL:continue
             id=row['id']
             if alive(row['worker_pid'],row['worker_identity']):report['live'].append(id);continue
@@ -166,88 +371,10 @@ class Bridge:
 
     def close(self, *, cancel=False):
         """Default detaches; cancel=True waits for runs owned by this Bridge instance."""
+        self.authentication.runtime.reap()
         for id,proc in list(self._children.items()):
             if cancel and self.run(id).status not in TERMINAL:self.run(id).stop(wait=True)
             if proc.poll() is not None:proc.wait();self._children.pop(id,None)
 
     def __enter__(self):return self
     def __exit__(self,*_):self.close()
-
-
-class Run:
-    def __init__(self, bridge,id):self.bridge,self.id=bridge,id
-    @property
-    def snapshot(self):return self.bridge.store.get('runs',self.id)
-    @property
-    def status(self):return self.snapshot['state']
-    @property
-    def session(self):return self.bridge.get_session(self.snapshot['session_id'])
-    @property
-    def text(self):
-        events=list(self.events())
-        finals=[e.data.get('text','') for e in events if e.kind=='assistant' and not e.data.get('parent_id')]
-        if finals:return '\n'.join(finals)
-        return ''.join(e.data.get('text','') for e in events if e.kind=='text_delta')
-    @property
-    def consumption(self):return usage.summarize(self.events())
-    @property
-    def subagents(self):
-        agents={}
-        for e in self.events():
-            if e.kind=='subagent':agents[e.data['agent_id']]={**e.data,'observed_at':e.at}
-        return {'coverage':'partial','agents':list(agents.values())}
-
-    def events(self, *, after=0, follow=False, timeout=None):
-        start=time.monotonic()
-        while True:
-            batch=self.bridge.store.events(run_id=self.id,after=after)
-            for event in batch:
-                after=event.seq;yield event
-            if batch:continue
-            if not follow:return
-            if self.status in TERMINAL:
-                # Terminal state and final event commit together; re-read once after observing it.
-                for event in self.bridge.store.events(run_id=self.id,after=after):yield event
-                return
-            if timeout is not None and time.monotonic()-start>=timeout:raise TimeoutError('Event wait timed out; the run remains active.')
-            time.sleep(0.05)
-
-    async def aevents(self, *, after=0, timeout=None):
-        start=time.monotonic()
-        while True:
-            batch=await asyncio.to_thread(lambda:self.bridge.store.events(run_id=self.id,after=after))
-            for event in batch:after=event.seq;yield event
-            if batch:continue
-            if await asyncio.to_thread(lambda:self.status in TERMINAL):
-                for event in await asyncio.to_thread(lambda:self.bridge.store.events(run_id=self.id,after=after)):yield event
-                return
-            if timeout is not None and time.monotonic()-start>=timeout:raise TimeoutError('Event wait timed out; the run remains active.')
-            await asyncio.sleep(0.05)
-
-    def wait(self, timeout=None):
-        start=time.monotonic()
-        while self.status not in TERMINAL:
-            if timeout is not None and time.monotonic()-start>=timeout:raise TimeoutError('Wait timed out; the run remains active.')
-            self.bridge.recover()
-            time.sleep(0.05)
-        self.bridge.close()
-        return self.snapshot
-
-    async def await_result(self, timeout=None):return await asyncio.to_thread(self.wait,timeout)
-
-    def stop(self, *, wait=False, timeout=15):
-        self.bridge.store.stop(self.id)
-        return self.wait(timeout) if wait else self.snapshot
-
-    def resume(self, prompt=None, *, options=None, request_key=None):
-        if self.status not in TERMINAL:raise BusyError()
-        # Repeating the original prompt is deliberate and accompanied by uncertainty context.
-        row=self.snapshot
-        pending=unresolved(list(self.events()))
-        if prompt is None:
-            prompt='Continue the interrupted work. Verify effects before repeating them. Original request:\n'+row['prompt']
-        if pending:prompt+='\nUnknown previous outcomes:\n'+dumps(pending)
-        if not self.session['native_id']:
-            bundle=self.bridge.export_context(row['session_id'])
-            prompt=bundle.text+'\n\n'+prompt
-        return self.bridge.submit(row['session_id'],prompt,options=options or RunOptions(**json.loads(row['options'])),request_key=request_key)

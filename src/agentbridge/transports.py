@@ -5,9 +5,13 @@ from .errors import UnsupportedError
 
 
 def command(account, session, options):
+    if options.context_window is not None:
+        raise UnsupportedError('Context window selection is not supported by this adapter.')
     native=session.get('native_id')
-    model=session.get('model')
+    model=options.model or session.get('model')
     if account.engine=='codex':
+        if options.permission_mode != 'dontAsk':
+            raise UnsupportedError('Codex exec does not support interactive permission policies.')
         if options.max_turns is not None or options.max_budget_usd is not None or options.allowed_tools:
             raise UnsupportedError('Codex exec does not support AgentBridge turn, tool-list or dollar caps.')
         cmd=list(account.command or ('codex',))+['exec']
@@ -30,4 +34,10 @@ def command(account, session, options):
         return cmd
     if options.max_turns is not None or options.max_budget_usd is not None or options.effort:
         raise UnsupportedError('Cursor adapter does not map turn/dollar caps or effort yet.')
+    if options.permission_mode != 'dontAsk':
+        raise UnsupportedError('Cursor interactive permission responses are not connected.')
+    if options.sandbox == 'workspace-write':
+        raise UnsupportedError('Cursor does not provide the same workspace-write policy as Codex.')
+    if options.sandbox == 'read-only' and options.allowed_tools:
+        raise UnsupportedError('Cursor read-only mode disables tools; a tool list would conflict.')
     return list(account.command or (sys.executable,'-m','agentbridge.cursor_worker'))

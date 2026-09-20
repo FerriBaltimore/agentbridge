@@ -21,6 +21,10 @@ def fake_app_server(path):
                 result = {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1900000000}}}
             elif method == "account/usage/read":
                 result = {"summary": {"lifetimeTokens": 1234}, "dailyUsageBuckets": []}
+            elif method == "model/list":
+                result = {"data": [{"id": "gpt-test", "displayName": "GPT Test",
+                                    "isDefault": True, "supportedReasoningEfforts": ["low", "high"],
+                                    "inputModalities": ["text", "image"]}]}
             else:
                 result = {}
             print(json.dumps({"id": request["id"], "result": result}), flush=True)
@@ -50,6 +54,24 @@ def test_account_status_and_usage_are_observed_without_a_model_run(tmp_path, mon
 
     stored = bridge.store.latest_account_observation('codex-test')
     assert 'FAKE_PROVIDER_SECRET' not in json.dumps(stored)
+
+
+def test_codex_model_catalog_is_normalized_without_a_model_run(tmp_path, monkeypatch):
+    provider = tmp_path / 'fake-codex'
+    fake_app_server(provider)
+    home = tmp_path / 'home'
+    home.mkdir()
+    monkeypatch.setenv('FAKE_PROVIDER_SECRET', 'secret-value')
+    bridge = Bridge(tmp_path / 'state')
+    bridge.register(Account('codex-test', 'codex', home=str(home), command=(str(provider),),
+                            env_names=('FAKE_PROVIDER_SECRET',)))
+
+    catalog = bridge.models('codex', account_ref='codex-test', refresh=True)
+
+    assert catalog['source'] == 'live'
+    assert catalog['models'][0]['id'] == 'gpt-test'
+    assert catalog['models'][0]['reasoning_efforts'] == ['low', 'high']
+    assert catalog['models'][0]['input_modalities'] == ['text', 'image']
 
 
 def test_account_service_does_not_call_unsupported_providers(tmp_path):

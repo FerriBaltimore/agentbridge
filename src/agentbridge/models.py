@@ -21,6 +21,18 @@ def account_name_key(value: str) -> str:
     return value.strip().casefold()
 
 
+def page_values(limit=100, cursor=0, *, allow_none=False):
+    if limit is None and allow_none:
+        normalized_limit = None
+    elif isinstance(limit, int) and not isinstance(limit, bool) and limit >= 1:
+        normalized_limit = limit
+    else:
+        raise BridgeError("invalid_pagination", "limit must be positive.")
+    if not isinstance(cursor, int) or isinstance(cursor, bool) or cursor < 0:
+        raise BridgeError("invalid_pagination", "cursor must be nonnegative.")
+    return normalized_limit, cursor
+
+
 @dataclass(frozen=True)
 class Account:
     id: str
@@ -31,11 +43,21 @@ class Account:
     env_names: tuple[str, ...] = ()
     key_env: str | None = None
     command: tuple[str, ...] = ()
+    credential_ref: dict | None = None
 
     def __post_init__(self):
         identifier(self.id)
         if self.engine not in ENGINES:
             raise BridgeError("invalid_engine", "Choose codex, claude or cursor.")
+        if self.credential_ref is not None:
+            value = self.credential_ref
+            if (self.engine != 'cursor' or self.key_env or not isinstance(value, dict)
+                    or set(value) != {'attempt_id', 'owner_ref', 'connection'}
+                    or not isinstance(value['connection'], dict)
+                    or set(value['connection']) != {'adapter', 'data_dir', 'node'}):
+                raise BridgeError('invalid_credential_reference', 'Use a managed Cursor credential reference.')
+            identifier(value['attempt_id'])
+            identifier(value['owner_ref'])
         if self.name is not None:
             if not isinstance(self.name, str) or not self.name.strip() or len(self.name.strip()) > 128:
                 raise BridgeError("invalid_name", "Account names must contain 1-128 non-space characters.")
@@ -63,6 +85,8 @@ class RunOptions:
     sandbox: str = "read-only"
     permission_mode: str = "dontAsk"
     allowed_tools: tuple[str, ...] = ()
+    model: str | None = None
+    context_window: str | int | None = None
     effort: str | None = None
     max_turns: int | None = None
     max_budget_usd: float | None = None
@@ -79,6 +103,10 @@ class RunOptions:
             raise BridgeError("invalid_budget", "max_turns must be positive.")
         if self.max_budget_usd is not None and self.max_budget_usd <= 0:
             raise BridgeError("invalid_budget", "max_budget_usd must be positive.")
+        if self.model is not None and not isinstance(self.model, str):
+            raise BridgeError("invalid_model", "model must be a string.")
+        if self.context_window is not None and not isinstance(self.context_window, (str, int)):
+            raise BridgeError("invalid_context_window", "context_window must be a named value or token count.")
         object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
 
 
