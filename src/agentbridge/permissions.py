@@ -26,6 +26,11 @@ class Permissions:
                    (run['id'], run['session_id'], kind, time.time(), dumps(data)))
 
     def request(self, turn_id, details, *, timeout):
+        if not isinstance(details, dict):
+            raise BridgeError('invalid_permissions', 'Permission details must be an object.')
+        if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+                or not math.isfinite(timeout) or timeout < 0):
+            raise BridgeError('invalid_timeout', 'Permission timeout must be finite and nonnegative.')
         permission_id, expires = uuid4().hex, time.time() + min(timeout, 600)
         run = self.store.get('runs', identifier(turn_id))
         with self.store.connect() as db:
@@ -33,7 +38,7 @@ class Permissions:
             db.execute('INSERT INTO permission_requests(id,run_id,request,expires) VALUES (?,?,?,?)',
                        (permission_id, turn_id, dumps(details), expires))
             self._event(db, run, 'permission_required',
-                        {'permission_id': permission_id, 'expires_at': expires, **details})
+                        {**details, 'permission_id': permission_id, 'expires_at': expires})
         return permission_id
 
     def respond(self, turn_id, permission_id, decision, *, reason=None, expires_at=None):
@@ -79,8 +84,18 @@ class Permissions:
             time.sleep(0.05)
 
     def delivered(self, turn_id, permission_id, decision):
+        if decision not in {'allow', 'deny'}:
+            raise BridgeError('invalid_permissions', 'Only an observed allow or deny can be recorded.')
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM permission_requests WHERE id=? AND run_id=?',
+                             (identifier(permission_id), identifier(turn_id))).fetchone()
+            if row is None:
+                raise BridgeError('not_found', 'No matching permission request exists for this turn.')
+            if row['delivered']:
+                if row['applied_decision'] != decision:
+                    raise BridgeError('idempotency_conflict', 'This permission has another observed decision.')
+                return
             db.execute('UPDATE permission_requests SET delivered=1,applied_decision=? WHERE id=? AND run_id=?',
                        (decision, permission_id, turn_id))
             run = db.execute('SELECT * FROM runs WHERE id=?', (turn_id,)).fetchone()

@@ -37,6 +37,8 @@ def model_selection(model_id, effort, *, sdk, api_key, catalog=None):
     parameters = _field(matches[0], 'parameters', ())
     if not isinstance(parameters, (list, tuple)):
         raise BridgeError('provider_protocol_error', 'The Cursor model parameters are invalid.')
+    if any(not isinstance(_field(parameter, 'id'), str) or not _field(parameter, 'id') for parameter in parameters):
+        raise BridgeError('provider_protocol_error', 'The Cursor model parameter identifiers are invalid.')
     parameters = [parameter for parameter in parameters if _field(parameter, 'id') in REASONING_PARAMETERS]
     if len(parameters) != 1:
         raise BridgeError('unsupported_parameter', 'This Cursor model does not advertise a reasoning effort parameter.')

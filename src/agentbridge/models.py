@@ -1,6 +1,7 @@
 """Public value objects. Credential values are never part of these records."""
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import math
 import re
 from typing import Any
 
@@ -14,6 +15,21 @@ def identifier(value: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value):
         raise BridgeError("invalid_id", "Identifiers must be 1-128 letters, digits, dots, underscores or hyphens.")
     return value
+
+
+def model_id(value):
+    """Provider model IDs are opaque strings, not AgentBridge resource IDs."""
+    if (not isinstance(value, str) or not value.strip() or len(value) > 200
+            or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise BridgeError('invalid_model', 'model must be a nonempty bounded provider identifier.')
+    return value
+
+
+def finite_number(value):
+    try:
+        return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def account_name_key(value: str) -> str:
@@ -94,20 +110,26 @@ class RunOptions:
     attachments: tuple[dict, ...] = ()
 
     def __post_init__(self):
-        if not 0 < self.timeout <= 86400 or not 0 <= self.stop_grace <= 60:
+        if (not finite_number(self.timeout) or not finite_number(self.stop_grace)
+                or not 0 < self.timeout <= 86400 or not 0 <= self.stop_grace <= 60):
             raise BridgeError("invalid_timeout", "Timeout must be in (0, 86400], stop grace in [0, 60].")
         if self.sandbox not in ("read-only", "workspace-write", "danger-full-access"):
             raise BridgeError("invalid_sandbox", "Unknown sandbox policy.")
         if self.permission_mode not in ("dontAsk", "default", "acceptEdits", "plan", "bypassPermissions"):
             raise BridgeError("invalid_permissions", "Unknown Claude permission mode.")
-        if self.max_turns is not None and self.max_turns < 1:
+        if self.max_turns is not None and (type(self.max_turns) is not int or self.max_turns < 1):
             raise BridgeError("invalid_budget", "max_turns must be positive.")
-        if self.max_budget_usd is not None and self.max_budget_usd <= 0:
+        if self.max_budget_usd is not None and (not finite_number(self.max_budget_usd) or self.max_budget_usd <= 0):
             raise BridgeError("invalid_budget", "max_budget_usd must be positive.")
-        if self.model is not None and not isinstance(self.model, str):
-            raise BridgeError("invalid_model", "model must be a string.")
-        if self.context_window is not None and not isinstance(self.context_window, (str, int)):
+        if self.model is not None:
+            model_id(self.model)
+        if (self.context_window is not None and (isinstance(self.context_window, bool)
+                or not isinstance(self.context_window, (str, int))
+                or (isinstance(self.context_window, int) and self.context_window <= 0)
+                or (isinstance(self.context_window, str) and not self.context_window.strip()))):
             raise BridgeError("invalid_context_window", "context_window must be a named value or token count.")
+        if self.effort is not None and (not isinstance(self.effort, str) or not self.effort.strip()):
+            raise BridgeError('unsupported_parameter', 'effort must be a provider-declared value.')
         object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
         from .attachments import normalize
         object.__setattr__(self, "attachments", normalize(self.attachments))

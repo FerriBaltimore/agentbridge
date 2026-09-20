@@ -11,7 +11,10 @@ def finish(parser, *, reason=None, exit_code=0, unresolved=False, stderr=''):
             reason, 'unknown_outcome')
         return 'interrupted', code, normalize(engine, {'code': code}, outcome='unknown')
     if parser.terminal == 'interrupted':
-        return 'interrupted', 'interrupted', normalize(engine, {'code': 'interrupted'})
+        issue = parser.last_error or normalize(engine, {'code': 'interrupted'})
+        issue = {**issue, 'outcome': 'unknown', 'action': 'inspect', 'retryable': False,
+                 'terminal': True, 'provider_retrying': False}
+        return 'interrupted', issue['code'], issue
     if exit_code != 0 or parser.failed:
         issue = parser.last_error or normalize(engine, stderr)
         lost_unknown = (parser.terminal != 'failed' and

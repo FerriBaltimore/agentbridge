@@ -1,8 +1,10 @@
 # Capability model
 
 Adapters declare each operation as native, adapter, fallback, unsupported or
-unknown, with a reason, requirements and observed timestamp. The declaration
-is part of capabilities.get, not scattered across callers.
+unknown, with limitations and requirements. `declaration_scope` is
+`adapter_implementation`; `runtime_provider_support_verified` is false. These
+are implementation declarations, not fresh native account observations. The
+declaration is part of capabilities.get, not scattered across callers.
 
 These labels describe adapter internals and evidence, not public API names.
 Callers always use AgentBridge operations such as models.list and
@@ -15,8 +17,8 @@ codes.
 | Execute a turn | native | native | adapter |
 | Account status | native app-server | adapter with provider probe limits | adapter with provider probe limits |
 | Account usage and quota | native plus local observation | native OAuth windows plus turn observations | session usage; account quota unavailable |
-| Model catalog | native model/list plus fallback | native initialize plus fallback | SDK catalogue plus fallback |
-| Per-model effort | native | adapter | unsupported |
+| Model catalog | native model/list | native initialize | SDK catalog |
+| Per-model effort | native | adapter | reported model parameter only |
 | Context window selection | unsupported | unsupported | unsupported |
 | Native continuation | native | native | SDK resume |
 | Stop | process group | process group | SDK or process |
@@ -40,7 +42,7 @@ model, effort, workspace_path, timeout_ms, permission_mode, sandbox_mode,
 allowed_tools, max_turns and max_budget. Context-window selection remains unsupported. Bounded inline attachments and
 Codex/Claude host approvals are specified in [interactive-inputs.md](interactive-inputs.md).
 
-Provider-only flags belong under provider_options.<engine>. Unknown fields and
+The reserved provider_options surface is currently unsupported. Unknown fields and
 unsupported values fail admission with unsupported or unsupported_parameter; they are never
 silently ignored.
 

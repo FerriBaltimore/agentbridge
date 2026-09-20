@@ -75,10 +75,13 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         if scope == 'instance':
             if not instance_id:
                 raise BridgeError('instance_id_required', 'instance_id is required for instance usage.')
-            rows = self.store.session_runs(instance_id, limit=10000)
+            rows = self.store.session_runs(instance_id, limit=10001)
+            partial = len(rows) > 10000
+            rows = rows[:10000]
             observations = [self.run(row['id']).consumption for row in rows]
             return {'scope': 'instance', 'instance_id': instance_id,
                     'turns': len(rows), 'observations': observations,
+                    'partial': partial, 'observation_limit': 10000,
                     'supported': any(item.get('supported') for item in observations)}
         raise BridgeError('invalid_scope', 'scope must be account, instance or turn.')
 
@@ -152,8 +155,8 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         if include_last_turn:
             value['last_turn'] = self.store.last_session_run(instance_id)
         if include_usage:
-            runs = self.store.session_runs(instance_id, limit=1000)
-            value['usage'] = {'turns': len(runs), 'observed': False, 'reason': 'run_usage_available_per_turn'}
+            value['usage'] = {'turns': self.store.session_run_count(instance_id),
+                              'observed': False, 'reason': 'run_usage_available_per_turn'}
         return value
 
     def instances(self, *, engine=None, account_ref=None, state=None, limit=100, cursor=0, include_last_turn=False):
@@ -378,7 +381,7 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             if alive(row['child_pid'],row['child_identity']):
                 report['unresolved'].append(id);continue # Never rerun work while its process may still execute.
             self.store.emit(id,'recovery',{'reason':'worker_lost','automatic_retry':False})
-            pending=unresolved(self.run(id).events())
+            pending=unresolved(self.run(id)._observations())
             for item in pending:
                 kind='subagent' if item.get('kind')=='subagent' else 'tool_result'
                 self.store.emit(id,kind,{**item,'outcome':'unknown','status':'unknown','reason':'worker_lost'})

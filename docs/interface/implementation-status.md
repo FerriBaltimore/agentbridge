@@ -39,7 +39,7 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
 - PDFs/other binary attachments, context-window selection, metadata/provider_options,
   persistent effort/tool/sandbox defaults and changing these defaults on instances.
 - Model entitlement verification at instance creation. Missing catalogue metadata
-  remains unknown; a static entry is not proof of access.
+  remains unknown; unavailable discovery returns no invented model entries.
 - Historical usage time filters, quota aggregation and uniform paginated
   collection envelopes.
 - Shared message identity across execution retries, active-turn message steering,
@@ -81,3 +81,7 @@ outside this repository and outside the current delivery scope.
 
 The normalized quota, reset, model and failure subset is specified in
 [usage and failures](../usage-and-failures.md), including evidence boundaries.
+
+The repository-wide metadata and structural compatibility audit is recorded in
+[provider contracts](../development/provider-contracts.md). Published fields,
+native compatibility formats and local policy constants are distinct categories.

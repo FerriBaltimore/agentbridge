@@ -167,6 +167,8 @@ class AccountService:
         try:
             with GrantBridgeClient(**reference['connection']) as client:
                 value = client.activate(reference['attempt_id'], reference['owner_ref'])
+            if (not isinstance(value, dict) or value.get('attempt_id') != reference['attempt_id']):
+                raise BridgeError('provider_protocol_error', 'The credential binding response is incompatible.')
             identity = safe_identity(value.get('identity'))
             if value.get('provider') != 'cursor' or (account.email and identity.get('email') != account.email):
                 raise BridgeError('identity_changed', 'The account binding no longer matches its identity.')

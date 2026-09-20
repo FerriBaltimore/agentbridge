@@ -1,14 +1,21 @@
 """Durable run state, event following and explicit recovery."""
 import asyncio
 import json
+import math
 import time
 
 from . import usage
 from .continuity import unresolved
-from .errors import BusyError
-from .models import RunOptions, TERMINAL
+from .errors import BridgeError, BusyError
+from .models import RunOptions, TERMINAL, page_values
 from .store import dumps
 from .message_projection import text as project_text
+
+
+def _timeout(value):
+    if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool)
+                              or not math.isfinite(value) or value < 0):
+        raise BridgeError('invalid_timeout', 'Timeout must be finite and nonnegative.')
 
 
 class Run:
@@ -58,8 +65,8 @@ class Run:
             after = page[-1].seq
 
     def events(self, *, after=0, limit=1000, follow=False, timeout=None):
-        if not isinstance(limit, int) or limit < 1:
-            raise ValueError('limit must be a positive integer')
+        limit, after = page_values(limit, after)
+        _timeout(timeout)
         started = time.monotonic()
         remaining = limit
         while True:
@@ -82,6 +89,8 @@ class Run:
             time.sleep(0.05)
 
     async def aevents(self, *, after=0, timeout=None):
+        _, after = page_values(1, after)
+        _timeout(timeout)
         started = time.monotonic()
         while True:
             batch = await asyncio.to_thread(
@@ -102,6 +111,7 @@ class Run:
             await asyncio.sleep(0.05)
 
     def wait(self, timeout=None):
+        _timeout(timeout)
         started = time.monotonic()
         while self.status not in TERMINAL:
             if timeout is not None and time.monotonic() - started >= timeout:

@@ -14,7 +14,8 @@ class ProviderChannel:
             self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except OSError:
-            raise BridgeError('provider_unavailable', 'The native provider could not be started.') from None
+            raise BridgeError('provider_unavailable', 'The native provider could not be started.',
+                              phase='launch', outcome='not_started') from None
         self.buffer = b''
         os.set_blocking(self.process.stdout.fileno(), False)
 
@@ -23,7 +24,8 @@ class ProviderChannel:
             self.process.stdin.write((json.dumps(value) + '\n').encode())
             self.process.stdin.flush()
         except (BrokenPipeError, OSError):
-            raise BridgeError('provider_unavailable', 'The native provider connection closed.') from None
+            raise BridgeError('provider_connection_lost', 'The native provider connection closed.',
+                              phase='execution', outcome='unknown') from None
 
     def receive(self, timeout=30):
         deadline = time.monotonic() + timeout
@@ -45,7 +47,8 @@ class ProviderChannel:
                 continue
             chunk = os.read(self.process.stdout.fileno(), 65536)
             if not chunk:
-                raise BridgeError('provider_unavailable', 'The native provider ended its stream.')
+                raise BridgeError('provider_connection_lost', 'The native provider ended its stream.',
+                                  phase='execution', outcome='unknown')
             self.buffer += chunk
             if len(self.buffer) > 8 * 1024 * 1024:
                 raise BridgeError('provider_protocol_error', 'The native provider message is too large.')

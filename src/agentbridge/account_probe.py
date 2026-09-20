@@ -15,11 +15,11 @@ from .security import base_environment
 
 
 def stamp(value=None):
-    return datetime.fromtimestamp(value or time.time(), timezone.utc).isoformat(timespec="seconds")
+    return datetime.fromtimestamp(time.time() if value is None else value, timezone.utc).isoformat(timespec="seconds")
 
 
 def safe_text(value, maximum=320):
-    return value if isinstance(value, str) and 0 < len(value) <= maximum else None
+    return value if isinstance(value, str) and 0 < len(value) <= maximum and all(ord(c) >= 32 and ord(c) != 127 for c in value) else None
 
 
 def safe_identity(provider_account):
@@ -90,7 +90,7 @@ class CodexAppServerProbe:
                     message = json.loads(line)
                 except (TypeError, ValueError):
                     continue
-                if not isinstance(message, dict) or message.get("id") != request["id"]:
+                if not isinstance(message, dict) or type(message.get('id')) is not int or message['id'] != request['id']:
                     continue
                 if isinstance(message.get("error"), dict):
                     raise BridgeError("provider_failed", "The provider rejected the account query.")
@@ -109,14 +109,16 @@ class CodexAppServerProbe:
             result = self._rpc("account/read", {"refreshToken": False})
             provider_account = result.get("account")
             identity = safe_identity(provider_account)
+            requires_auth = result.get('requiresOpenaiAuth')
+            requires_auth = requires_auth if type(requires_auth) is bool else None
             if provider_account is None:
-                status = "authentication_required" if result.get("requiresOpenaiAuth") else "unauthenticated"
-            elif isinstance(provider_account, dict):
+                status = 'unknown' if requires_auth is None else 'authentication_required' if requires_auth else 'unauthenticated'
+            elif isinstance(provider_account, dict) and safe_text(provider_account.get('type')) in {'chatgpt', 'apiKey', 'amazonBedrock'}:
                 status = "authenticated"
             else:
                 status = "provider_protocol_error"
             data = {"status": status, "identity": identity,
-                    "requires_openai_auth": bool(result.get("requiresOpenaiAuth"))}
+                    "requires_openai_auth": requires_auth}
             if include_usage and status == "authenticated":
                 for key, method in (("quota", "account/rateLimits/read"), ("account_usage", "account/usage/read")):
                     try:
@@ -135,7 +137,7 @@ class CodexAppServerProbe:
             models, cursor, seen = [], None, set()
             for _ in range(100):
                 result = self._rpc('model/list', {'cursor': cursor, 'limit': 100, 'includeHidden': True})
-                page = result.get('data', result.get('models', []))
+                page = result.get('data')
                 if not isinstance(page, list) or len(models) + len(page) > 10000:
                     raise BridgeError('provider_protocol_error', 'The provider returned an invalid model catalog.')
                 models.extend(page)

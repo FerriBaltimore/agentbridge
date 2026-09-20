@@ -1,131 +1,88 @@
-# Adapter protocol
+# Private GrantBridge adapter protocol
 
-This is the local protocol between AgentBridge and a GrantBridge
-adapter. The transport is JSON-RPC 2.0 over
-stdin/stdout, matching AgentBridge's existing public transport and avoiding a
-network listener during development.
+AgentBridge consumes the JSON-RPC 2.0 stdio adapter in GrantBridge, currently
+reviewed at revision `798ef3518778a82953b2d2365ee270271cad2f7a`.
+The executable sources are `src/agentbridge-protocol.mjs`,
+`src/agentbridge-credentials.mjs` and `scripts/agentbridge-adapter.mjs`.
+This private boundary is distinct from AgentBridge's public snake_case RPC.
+It does not establish compatibility with arbitrary future GrantBridge revisions.
 
-The Node sidecar owns one GrantBridge instance and one configured data
-directory. The Python parent owns the AgentBridge account registry and the
-user-facing command. The sidecar must run for the lifetime of pending attempts;
-a restart reconciles them as interrupted unless the provider flow can safely
-resume.
+## Framing and ownership
 
-## `auth.start`
+One JSON object per line. Each response has `jsonrpc: "2.0"`, the request `id`
+and exactly one of `result` or `error`. The error envelope carries a numeric
+JSON-RPC code and may carry `data.code`. Unknown private error codes become
+`grantbridge_failed`; provider error bodies are not exposed or persisted.
+Malformed matching envelopes become `provider_protocol_error`.
 
-Request:
+Every account operation requires `owner`. It is AgentBridge's durable attempt
+owner, not the account name or a new owner on every retry. The local host chooses
+the adapter executable and its private data directory; public RPC cannot change
+these references. `health` returns the service and version. `auth.close` closes
+the sidecar; pending native work follows GrantBridge's interrupted-state rules.
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "auth.start",
-  "params": {
-    "account_id": "development-codex",
-    "engine": "codex",
-    "browser": "same_host",
-    "request_key": "client-generated-idempotency-key"
-  }
-}
-```
-
-The AgentBridge parent supplies its generated stable account identifier as the
-owner. The sidecar binds every operation to that owner, and a caller cannot use
-one owner's attempt ID with another owner.
-
-Response:
+## Start, inspect and reconcile
 
 ```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "attempt_id": "opaque-attempt-id",
-    "provider": "codex",
-    "status": "starting",
-    "authorization_url": null,
-    "expires_at": 1760000000000
-  }
-}
+{"jsonrpc":"2.0","id":1,"method":"auth.start","params":{"owner":"owner-ref","engine":"codex","mode":"browser","browser":"same_host","request_key":"durable-key","auto_check":false}}
 ```
 
-`starting` is normal because native providers may need time to publish their
-URL. The client polls `auth.get` until it receives `awaiting_user`,
-`authorized`, `failed`, `cancelled`, `expired` or `interrupted`. The result may
-contain a device code when the provider requires one. It must never contain an
-access token, refresh token, client secret or raw credential file.
-
-`request_key` is scoped to the owner and operation. Repeating it returns the
-same attempt result instead of starting a second login. The adapter validates
-provider, engine, browser mode and all size and deadline limits before spawning
-a process.
-
-## `auth.get`
+The result uses native field names:
 
 ```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "auth.get",
-  "params": {"attempt_id": "opaque-attempt-id"}
-}
+{"jsonrpc":"2.0","id":1,"result":{"id":"opaque-attempt-id","provider":"codex","status":"starting","authorizationUrl":null,"expiresAt":1760000000000}}
 ```
 
-The result contains the safe attempt projection, identity and verification
-state. The activation result may include a server-local native-home path
-only when the host explicitly requested one and the path is inside the
-configured account root. For Cursor and token APIs it should return an opaque
-`credential_ref`, never the key.
+`auth.get` takes `attempt_id` and `owner`. `auth.find` takes `request_key` and
+`owner`, returning the existing attempt or null. It reconciles a lost start
+response without creating another provider login.
 
-## `auth.cancel`
+Known remote states: `starting`, `awaiting_user`, `exchanging`, `authorized`,
+`failed`, `cancelled`, `expired`, `interrupted`, `revoked`, `replaced`.
+`verified`, `bound` and `usable` are AgentBridge states, never accepted as remote
+GrantBridge authorization evidence. Unknown states or mismatched provider/ID
+produce `provider_protocol_error`; a saved verified attempt is invalidated on
+such a refresh and cannot subsequently activate using its older observation.
 
-```json
-{"jsonrpc":"2.0","id":3,"method":"auth.cancel","params":{"attempt_id":"opaque-attempt-id"}}
-```
+The public projection copies bounded identity fields and the documented
+verification observations, timestamps, authorization URL and device user code.
+Opaque added fields, nested credentials and error messages are dropped. New
+optional fields do not invalidate an otherwise compatible attempt. Additive
+fields needed by the product must be added deliberately with regression tests.
 
-Cancellation is explicit. The adapter makes a repeated cancel safe at the
-protocol boundary even though the current GrantBridge method reports
-`already_finished` for a terminal attempt. Cancelling a pending attempt must
-not remove an existing authorized account or its conversations.
+## Check, complete and cancel
 
-## `auth.check`
+`auth.check` takes `attempt_id`, `owner` and optional `inference` (boolean).
+The result is an attempt with `verification.freshProcess`, optional
+`verification.inference`, and `checking`. AgentBridge verifies only an
+`authorized` attempt whose check is no longer running and whose fresh-process
+result is explicitly `passed`. `loaded_only` does not verify usability.
+An inference probe is explicit and consumes provider usage.
 
-```json
-{"jsonrpc":"2.0","id":4,"method":"auth.check","params":{"attempt_id":"opaque-attempt-id","owner":"development-codex"}}
-```
+`auth.activate` takes `attempt_id` and `owner`. Its result includes
+`attempt_id`, `provider`, `identity` and either a native `home` for Codex/Claude
+or Cursor `credential_ref` (`provider`, `attempt_id`) and `expires_at_ms`.
+AgentBridge validates provider, attempt and expected identity before atomically
+binding the account. Relogin preserves the account ID and cannot silently change
+its identity. The native home is a trusted local-host reference, never a public
+RPC field. GrantBridge owns the provisioned directory under its configured root.
 
-The check launches a fresh provider process or provider request and returns
-structured observations such as local credential presence, authenticated
-identity, quota access or model execution. It is not a model run and does not
-grant permission to execute a business operation.
+`auth.cancel` takes `attempt_id` and `owner`. Repeating cancellation is safe.
+Existing authorized provider grants are not revoked by local cancellation.
+A cancelled AgentBridge attempt cannot later bind, even if a remote check ends.
 
-## `auth.activate` and relogin
+`auth.submit_code` is a private protected input taking `attempt_id`, `owner`
+and `code`. It is not exposed by AgentBridge's public dispatcher.
 
-Activation is the bridge between a successful attempt and an
-AgentBridge account. The implemented `auth.activate` must:
+## Private credential handoff
 
-- verify the provider identity against the requested stable account;
-- atomically publish a new credential generation only after checks pass;
-- retain the old generation until the new one is usable;
-- return a stable account reference, not a secret;
-- allow a failed relogin to leave the current account working.
+`auth.credentials` takes `attempt_id` and `owner`; only the trusted execution
+adapter may call it. For Cursor its result contains `provider`, `api_key` and
+`expires_at_ms`. This result intentionally carries a credential in the private
+pipe, never in public RPC, SQLite, command arguments, logs or events. GrantBridge
+checks the verified attempt, credential expiry, identity and supported backend.
 
-A fresh attempt ID must not become the permanent AgentBridge account ID.
-
-## Credential handoff
-
-The first implementation should use two provider-specific handoff modes:
-
-1. **Native home reference:** GrantBridge provisions or updates an isolated
-   Claude or Codex home. AgentBridge stores only the server-local path and
-   provider identity, then sets `CLAUDE_CONFIG_DIR` or `CODEX_HOME` for the
-   worker.
-2. **Short-lived secret channel:** Cursor credentials remain in GrantBridge's
-   encrypted vault. At worker start, the adapter resolves `credential_ref`
-   through a private pipe or inherited file descriptor and injects the value
-   into the child environment. The value must not enter AgentBridge SQLite,
-   argv, logs or events.
-
-The adapter must define ownership and cleanup for both modes. A path reference
-is not a credential export and must be rejected if it points outside the
-configured account root.
+Codex/Claude workers use an explicit isolated home with `CODEX_HOME` or
+`CLAUDE_CONFIG_DIR`. Cursor workers resolve the bound reference at execution time
+and receive the credential through a private environment handoff. Ambient
+operator credentials never substitute for an explicit account binding.

@@ -25,7 +25,8 @@ class TransferMixin:
             raise BridgeError('same_account', 'Continue the existing session on the same account.')
         if validate_only:
             same_engine = old.engine == target.engine
-            supported = mode != 'native' or (same_engine and bool(source['native_id']))
+            supported = mode != 'native' or (same_engine and old.engine in {'codex', 'claude'}
+                                            and bool(source['native_id']) and bool(old.home) and bool(target.home))
             return {'supported': supported, 'mode': mode, 'same_engine': same_engine,
                     'reason': None if supported else 'native_continuation_unavailable'}
         target_model = model if model is not None else source['model'] if old.engine == target.engine else None

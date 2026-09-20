@@ -30,9 +30,14 @@ def identity(account):
         if not isinstance(value, dict):
             raise ValueError()
         email = value.get('email')
-        if result.returncode or not value.get('loggedIn') or not isinstance(email, str):
+        if type(value.get('loggedIn')) is not bool:
+            raise ValueError()
+        if result.returncode or not value['loggedIn']:
             return {'status': 'authentication_required', 'identity': {}, 'live_request': False}
-        if account.email and account.email != email:
+        if (not isinstance(email, str) or not 1 <= len(email) <= 320 or email.strip() != email
+                or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in email)):
+            raise ValueError()
+        if account.email and account.email.casefold() != email.casefold():
             return {'status': 'identity_changed', 'identity': {}, 'live_request': False}
         return {'status': 'loaded_only', 'identity': {'email': email}, 'live_request': False,
                 'reason': 'native_profile_loaded'}
@@ -74,7 +79,9 @@ def quota_request(token):
         raise BridgeError(code, 'Claude did not provide a quota observation.') from None
     except (OSError, ValueError):
         raise BridgeError('provider_unavailable', 'Claude did not provide a quota observation.') from None
-    windows = [row for row in normalize('claude', value) if row['used_percent'] is not None]
+    windows = [row for row in normalize('claude', value) if row['used_percent'] is not None
+               or row['resets_at'] is not None or row['window_seconds'] is not None
+               or row.get('scope_source') == 'provider']
     extra = value.get('extra_usage')
     extra = extra if isinstance(extra, dict) else {}
     spend = {'enabled': extra.get('is_enabled') if type(extra.get('is_enabled')) is bool else None,

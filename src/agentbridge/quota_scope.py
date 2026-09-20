@@ -16,7 +16,7 @@ _TEMPORAL_NAME = re.compile(r'^(\d{1,5}|' + '|'.join(_COUNTS) + r')_(minute|hour
 
 
 def _text(value):
-    return value if isinstance(value, str) and 0 < len(value) <= 512 and all(ord(c) >= 32 for c in value) else None
+    return value if isinstance(value, str) and 0 < len(value) <= 512 and all(ord(c) >= 32 and ord(c) != 127 for c in value) else None
 
 
 def _positive(value):
@@ -80,10 +80,12 @@ pools. Usage, reset deadlines and labels with a stable ID do not change IDs.
     surface_id, surface_label = _dimension(raw_scope.get('surface'))
     family_id, family_label = _dimension(raw_scope.get('model_family'))
     model, surface, family = model_id or model_label, surface_id or surface_label, family_id or family_label
+    seconds, duration_source = _duration(item, kind)
     alias = None
     if not model and not surface and not family and not group and scope_kind in {None, 'account', 'all'}:
         alias = {'session': 'five_hour', 'weekly_all': 'seven_day'}.get(kind)
-    seconds, duration_source = _duration(item, kind)
+        if alias and duration_source == 'provider' and seconds != legacy_window(alias)['window_seconds']:
+            alias = None
     identity = [kind, group, model, surface]
     if scope_kind is not None or family is not None:
         identity.extend([scope_kind, family])

@@ -6,6 +6,7 @@ import time
 
 from .accounts import AccountService
 from .authentication import AuthenticationService, TERMINAL
+from .auth_contract import attempt
 from .auth_runtime import AuthRuntime
 from .errors import BridgeError
 from .grantbridge import GrantBridgeClient
@@ -35,6 +36,7 @@ def execute(store, attempt_id, token):
                 return
             remote = client.start(owner=row['owner'], engine=row['engine'], mode=row['mode'],
                                   browser=row['browser'], request_key=attempt_id)
+            remote = attempt(remote, engine=row['engine'])
             row = store.update_auth_attempt(attempt_id, row['owner'], grantbridge_id=remote['id'],
                                             status=service._status(remote), data=remote)
             deadline = time.monotonic() + 600

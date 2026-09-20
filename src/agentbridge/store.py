@@ -331,6 +331,11 @@ class Store(AuthStoreMixin):
                              (session_id,)).fetchone()
         return dict(row) if row else None
 
+    def session_run_count(self, session_id):
+        self.get('sessions', session_id)
+        with self.connect() as db:
+            return db.execute('SELECT count(*) FROM runs WHERE session_id=?', (session_id,)).fetchone()[0]
+
     def replay(self, session_id, prompt, options, key):
         """Return an exact prior request without requiring credentials again."""
         if not key:

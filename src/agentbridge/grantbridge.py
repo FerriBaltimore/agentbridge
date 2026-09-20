@@ -1,7 +1,8 @@
 """Minimal stdio client for the optional GrantBridge authentication adapter.
 
-The client transports account IDs and safe authentication projections only. GrantBridge
-keeps provider credentials in its own vault and native profile directories.
+Attempt operations transport account IDs and authentication projections. The
+private credentials method hands a secret to execution only; GrantBridge owns
+its vault and native profile directories.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import threading
 import time
 
 from .errors import BridgeError
+from .auth_contract import response_result
 
 
 class GrantBridgeClient:
@@ -96,11 +98,7 @@ class GrantBridgeClient:
                             continue
                         if not isinstance(response, dict) or response.get('id') != request_id:
                             continue
-                        if isinstance(response.get('error'), dict):
-                            error = response['error']
-                            code = ((error.get('data') or {}).get('code') or 'grantbridge_failed')
-                            raise BridgeError(code, 'GrantBridge did not complete the operation.')
-                        return response.get('result')
+                        return response_result(response)
                     if time.monotonic() >= deadline:
                         raise BridgeError('grantbridge_timeout', 'GrantBridge did not answer in time.')
             finally:

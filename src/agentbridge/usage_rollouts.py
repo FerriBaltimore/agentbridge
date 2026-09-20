@@ -21,11 +21,16 @@ WINDOW_KEYS = ("primary", "secondary")
 
 
 def _subdirs(root: Path):
+    descriptor = None
     try:
-        with os.scandir(root) as entries:
-            return [Path(e.path) for e in entries if e.is_dir(follow_symlinks=False)]
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        with os.scandir(descriptor) as entries:
+            return [root / e.name for e in entries if e.is_dir(follow_symlinks=False)]
     except OSError:
         return []
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def newest_rollouts(home: Path, limit: int = PER_HOME) -> list:
@@ -67,7 +72,9 @@ def _tail(path: Path) -> str | None:
 
 
 def has_windows(tc: dict) -> bool:
-    limits = tc.get("rate_limits") or {}
+    limits = tc.get("rate_limits")
+    if not isinstance(limits, dict):
+        return False
     return any(isinstance(limits.get(key), dict) and limits[key].get("used_percent") is not None
                for key in WINDOW_KEYS)
 
@@ -85,8 +92,10 @@ def last_token_count(path: Path) -> dict | None:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        payload = event.get("payload") or {}
-        if payload.get("type") != "token_count":
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or payload.get("type") != "token_count":
             continue
         found = {"at": event.get("timestamp"), **payload}
         if has_windows(found):
@@ -101,7 +110,8 @@ def observed_at(tc: dict, path: Path) -> datetime:
     if isinstance(raw, str):
         try:
             stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+            if stamp.tzinfo:
+                return stamp
         except ValueError:
             pass
     try:

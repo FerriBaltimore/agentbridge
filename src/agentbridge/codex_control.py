@@ -22,11 +22,18 @@ class CodexControl:
                     raise BridgeError(issue['code'], 'Codex rejected the native operation.',
                                       phase='launch', outcome='not_started', retryable=False,
                                       details=issue['details'])
-                return value.get('result', {})
+                result = value.get('result')
+                if not isinstance(result, dict):
+                    raise BridgeError('provider_protocol_error', 'Invalid native response result.',
+                                      phase='execution', outcome='unknown')
+                return result
             self.event(value)
 
     def event(self, value):
-        method, params = value.get('method'), value.get('params') or {}
+        method, params = value.get('method'), value.get('params', {})
+        if not isinstance(method, str) or not isinstance(params, dict):
+            raise BridgeError('provider_protocol_error', 'Invalid native notification parameters.',
+                              phase='execution', outcome='unknown')
         if 'id' in value and method:
             if (method in {'item/commandExecution/requestApproval', 'item/fileChange/requestApproval'}
                     and params.get('threadId') == self.thread_id
@@ -44,12 +51,18 @@ class CodexControl:
         if self.turn_id and params.get('turnId') not in (None, self.turn_id):
             return
         if method == 'turn/completed':
-            turn = params.get('turn') or {}
+            turn = params.get('turn', {})
+            if not isinstance(turn, dict):
+                raise BridgeError('provider_protocol_error', 'Invalid native completed turn.',
+                                  phase='execution', outcome='unknown')
             if self.turn_id and turn.get('id') != self.turn_id:
                 return
             status = turn.get('status')
             if status not in {'completed', 'interrupted', 'failed'}:
-                status = 'failed'
+                self.emit({'type': 'turn.failed', 'error': normalize('codex',
+                    {'code': 'provider_protocol_error'}, outcome='unknown')})
+                self.done = True
+                return
             event = {'type': 'turn.' + status}
             if turn.get('error'):
                 event['error'] = normalize('codex', turn['error'])
@@ -66,20 +79,34 @@ class CodexControl:
         elif method == 'item/agentMessage/delta':
             self.emit({'type': 'bridge_text_delta', 'text': params.get('delta', '')})
         elif method in {'item/started', 'item/completed'}:
-            item = params.get('item') or {}
+            item = params.get('item', {})
+            if not isinstance(item, dict):
+                raise BridgeError('provider_protocol_error', 'Invalid native item.',
+                                  phase='execution', outcome='unknown')
             kinds = {'agentMessage': 'agent_message', 'commandExecution': 'command_execution',
                      'fileChange': 'file_change', 'mcpToolCall': 'mcp_tool_call', 'webSearch': 'web_search',
-                     'reasoning': 'reasoning'}
+                     'dynamicToolCall': 'dynamic_tool_call', 'collabAgentToolCall': 'collab_agent_tool_call',
+                     'contextCompaction': 'context_compaction', 'reasoning': 'reasoning'}
             kind = kinds.get(item.get('type'), item.get('type'))
             if kind and kind != 'reasoning':
                 safe = {k: item[k] for k in ('id', 'text', 'command', 'cwd', 'changes', 'status',
-                                           'server', 'tool', 'arguments', 'result') if k in item}
+                                           'server', 'tool', 'arguments', 'result', 'query', 'success') if k in item}
                 for native, public in [('aggregatedOutput', 'aggregated_output'), ('exitCode', 'exit_code')]:
+                    if native in item:
+                        safe[public] = item[native]
+                if item.get('error'):
+                    safe['error'] = normalize('codex', item['error'])
+                for native, public in [('contentItems', 'content'), ('agentsStates', 'agents_states'),
+                                       ('receiverThreadIds', 'receiver_thread_ids'),
+                                       ('senderThreadId', 'sender_thread_id')]:
                     if native in item:
                         safe[public] = item[native]
                 self.emit({'type': method.replace('/', '.'), 'item': {'type': kind, **safe}})
         elif method == 'thread/tokenUsage/updated':
-            usage = params.get('tokenUsage') or {}
+            usage = params.get('tokenUsage', {})
+            if not isinstance(usage, dict):
+                raise BridgeError('provider_protocol_error', 'Invalid native token observation.',
+                                  phase='execution', outcome='unknown')
             for key, scope, aggregation in [('total', 'session', 'cumulative'), ('last', 'observation', 'latest')]:
                 counters = usage.get(key)
                 if not isinstance(counters, dict):
@@ -89,9 +116,18 @@ class CodexControl:
                            ('cachedInputTokens', 'cached_input_tokens'), ('totalTokens', 'total_tokens'),
                            ('reasoningOutputTokens', 'reasoning_output_tokens'),
                            ('cacheWriteInputTokens', 'cache_write_input_tokens')]
-                          if isinstance(counters.get(native), int) and not isinstance(counters[native], bool)}
-                self.emit({'type': 'bridge_usage', 'scope': scope, 'tokens': tokens,
-                           'aggregation': aggregation, 'context_window': usage.get('modelContextWindow')})
+                          if isinstance(counters.get(native), int) and not isinstance(counters[native], bool)
+                          and counters[native] >= 0}
+                context_window = usage.get('modelContextWindow')
+                if type(context_window) is not int or context_window <= 0:
+                    context_window = None
+                if tokens:
+                    self.emit({'type': 'bridge_usage', 'scope': scope, 'tokens': tokens,
+                               'aggregation': aggregation, 'context_window': context_window})
+        elif method and not (method.startswith('item/reasoning/') or method in {
+            'thread/started', 'thread/status/changed', 'turn/started', 'item/started',
+        }):
+            self.emit({'type': 'bridge_gap'})
 
     def execute(self):
         options = self.payload['options']

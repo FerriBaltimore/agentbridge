@@ -19,8 +19,10 @@ Equivalent RPC methods are `accounts.usage`, `accounts.usage_history`,
 and bounded `turns.events` or `instances.events`.
 
 Live queries need an explicit bound account. Reading a catalog or quota does
-not start a model turn. Without refresh, models use a clearly marked static
-fallback; account usage reads cached observations or available Codex rollouts.
+not start a model turn. Without a successful live refresh, the catalog is empty,
+`supported: false` and stale, with a reason. The legacy `source: static` label
+means discovery is unavailable; it no longer contains invented model IDs.
+Account usage reads cached observations or available Codex rollouts.
 
 ## Quota windows
 
@@ -81,6 +83,8 @@ available even when the provider omits its total. Never derive the available
 count from a possibly truncated detail list.
 
 Each detail preserves its ID, reported status/type, grant time and expiry.
+`expiry_status` distinguishes `expires`, `no_expiry` (explicit native null)
+and `unknown` (missing or invalid expiry).
 `expires_in_seconds` and `expired` are recomputed on read. The reset-credit
 observation also exposes `observed_at`, `age_seconds` and `stale`. An available
 credit passing its expiry marks that observation stale; it does not decrement
@@ -127,6 +131,9 @@ while `modelUsage` and total cost may include resumed-session history and are
 reported as cumulative session observations. They are not summed across turns.
 Model-specific context/output sizes reported during execution are observations,
 not universal catalog entitlements or a context-selection control.
+Instance usage returns at most 10,000 turn observations, with `partial` and
+`observation_limit` explicitly identifying truncation; it does not claim a
+complete aggregate. Instance metadata uses the actual stored turn count.
 
 ## Failures and interruptions
 

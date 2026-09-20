@@ -16,7 +16,8 @@ def routing(engine, event):
                 'reason': 'safety_blocked' if event.get('reason') == 'highRiskCyberActivity' else 'unknown',
                 'direction': 'reroute', 'host_initiated': False}
     value = {'engine': engine, 'source': 'provider',
-             'scope': event.get('scope') if event.get('scope') in {'session', 'local'} else 'session',
+             'scope': ('session' if 'scope' not in event else event['scope']
+                       if event['scope'] in {'session', 'local'} else 'unknown'),
              'from_model': identifier(event.get('original_model')),
              'to_model': identifier(event.get('fallback_model')), 'reason': 'safety_blocked',
              'direction': event.get('direction') if event.get('direction') in {'retry', 'revert', 'sticky'} else 'unknown',

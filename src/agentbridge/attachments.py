@@ -25,7 +25,7 @@ def normalize(values):
         if set(value) - allowed:
             raise BridgeError('invalid_attachment', 'Attachment fields are not recognized; paths and URLs are not accepted.')
         name = value.get('name', 'attachment')
-        if not isinstance(name, str) or not name or len(name) > 200 or any(ord(c) < 32 for c in name):
+        if not isinstance(name, str) or not name or len(name) > 200 or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in name):
             raise BridgeError('invalid_attachment', 'Use a short, printable attachment name.')
         if kind == 'image':
             encoded, media = value.get('data'), value.get('media_type')

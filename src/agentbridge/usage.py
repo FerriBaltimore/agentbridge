@@ -3,7 +3,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 import time
 from . import usage_rollouts
-from .quota_windows import project
+from .quota_windows import project, timestamp
 
 
 def snapshot(account, *, oauth_token=None, allow_network=False):
@@ -18,14 +18,18 @@ def _snapshot(account, *, oauth_token=None, allow_network=False):
         tc=usage_rollouts.newest_token_count([Path(account.home)])
         if not tc:return {**base,'supported':True,'reason':'no_local_observation'}
         windows=[]
+        limits = tc.get('rate_limits')
+        limits = limits if isinstance(limits, dict) else {}
         for name in ('primary','secondary'):
-            win=(tc.get('rate_limits') or {}).get(name)
+            win=limits.get(name)
             if isinstance(win,dict):windows.append({'name':name,**win})
         stamp=tc.get('at')
-        try:age=now-datetime.fromisoformat(stamp.replace('Z','+00:00')).timestamp()
-        except (ValueError,AttributeError,TypeError):age=float('inf')
-        return {**base,'supported':True,'source':'codex_rollout','observed_at':stamp,'outdated':age>1800,
-                'windows':windows,'tokens':(tc.get('info') or {}),'reason':None if windows else 'quota_unknown'}
+        observed = timestamp(stamp)
+        age = now - observed if observed is not None else None
+        return {**base,'supported':True,'source':'codex_rollout','observed_at':stamp,
+                'outdated':age is None or age < 0 or age >= 1800,
+                'windows':windows,'tokens':tc.get('info') if isinstance(tc.get('info'), dict) else {},
+                'reason':None if windows else 'quota_unknown'}
     if account.engine=='claude':
         if not allow_network:return {**base,'supported':True,'reason':'network_not_requested'}
         if not oauth_token:return {**base,'supported':True,'reason':'oauth_token_required'}

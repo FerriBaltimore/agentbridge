@@ -10,7 +10,7 @@ import time
 
 
 def _text(value):
-    return value if isinstance(value, str) and 0 < len(value) <= 512 and all(ord(c) >= 32 for c in value) else None
+    return value if isinstance(value, str) and 0 < len(value) <= 512 and all(ord(c) >= 32 and ord(c) != 127 for c in value) else None
 
 
 def _boolean(value):

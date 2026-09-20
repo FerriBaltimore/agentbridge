@@ -21,8 +21,15 @@ def provider_version(account):
                                     timeout=2, text=True)
             if result.returncode:
                 return None
-            version = result.stdout[:256]
-        match = re.search(r'\b([0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5})\b', version)
+            if len(result.stdout) > 256:
+                return None
+            version = result.stdout
+        # Version labels are a compatibility boundary, not free-text search.
+        # Never assign prerelease/build/custom output to the stable version's rules.
+        number = r'([0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5})'
+        pattern = {'codex': r'codex-cli ' + number,
+                   'claude': number + r' \(Claude Code\)', 'cursor': number}[account.engine]
+        match = re.fullmatch(pattern, version.strip())
         return match.group(1) if match else None
     except (OSError, subprocess.TimeoutExpired, importlib.metadata.PackageNotFoundError):
         return None

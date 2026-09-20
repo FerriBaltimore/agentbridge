@@ -42,7 +42,7 @@ class Agent:
         yield {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'fixture-key-never-real'}]}}
 
     def wait(self):
-        return SimpleNamespace(status='success')
+        return SimpleNamespace(status='finished')
 
 
 sdk = SimpleNamespace(AgentOptions=Options, LocalAgentOptions=lambda **values: values, Agent=Agent)

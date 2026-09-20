@@ -19,7 +19,7 @@ def number(value, *, maximum=None):
 
 
 def text(value):
-    return value if isinstance(value, str) and 0 < len(value) <= 512 and all(ord(c) >= 32 for c in value) else None
+    return value if isinstance(value, str) and 0 < len(value) <= 512 and all(ord(c) >= 32 and ord(c) != 127 for c in value) else None
 
 
 def timestamp(value):
@@ -64,9 +64,9 @@ def codex(data, now):
     buckets = dict(buckets) if isinstance(buckets, dict) else {}
     legacy = raw.get('rateLimits')
     if isinstance(legacy, dict):
-        buckets.setdefault(legacy.get('limitId') or 'codex', legacy)
+        buckets.setdefault(text(legacy.get('limitId')) or 'codex', legacy)
     if not buckets and any(k in raw for k in ('primary', 'secondary')):
-        buckets[raw.get('limit_id') or raw.get('limitId') or 'codex'] = raw
+        buckets[text(raw.get('limit_id')) or text(raw.get('limitId')) or 'codex'] = raw
     rows = []
     for pool, bucket in list(buckets.items())[:100]:
         if not text(pool) or not isinstance(bucket, dict):
@@ -138,7 +138,7 @@ def claude_stream(data, now):
                      seconds=metadata['window_seconds'], scope=metadata['scope'], now=now)
         row = {**row, **metadata} if structural else {**metadata, **row}
         status = item.get('status', raw.get('status') if name == raw.get('rateLimitType') else None)
-        row['status'] = status if status in {'allowed', 'allowed_warning', 'rejected'} else None
+        row['status'] = status if isinstance(status, str) and status in {'allowed', 'allowed_warning', 'rejected'} else None
         if row['status'] == 'rejected':
             row['limit_reached'] = True
         rows.append(row)
@@ -186,11 +186,14 @@ def reset_credits(raw, now=None):
             if not isinstance(item, dict) or not text(item.get('id')):
                 continue
             expires = timestamp(item.get('expiresAt'))
+            no_expiry = 'expiresAt' in item and item['expiresAt'] is None
             rows.append({'id': item['id'], 'status': text(item.get('status')),
                          'reset_type': text(item.get('resetType')), 'granted_at': iso(item.get('grantedAt')),
+                         'title': text(item.get('title')), 'description': text(item.get('description')),
                          'expires_at': iso(expires),
                          'expires_in_seconds': max(0, math.ceil(expires - now)) if expires is not None else None,
-                         'expired': expires <= now if expires is not None else None})
+                         'expired': expires <= now if expires is not None else False if no_expiry else None,
+                         'expiry_status': 'no_expiry' if no_expiry else 'expires' if expires is not None else 'unknown'})
     return {'status': 'unknown' if count is None else 'available' if count else 'none',
             'available_count': count, 'credits': rows}
 
@@ -203,10 +206,13 @@ def project(engine, data, now=None):
     if rows or data.get('supported') or 'windows' in data:
         result['windows'] = rows
     observed = timestamp(data.get('observed_at', data.get('as_of')))
-    age = max(0, now - observed) if observed is not None else None
+    future_observation = observed is not None and observed > now
+    age = now - observed if observed is not None and not future_observation else None
     ttl = 1800 if data.get('source') == 'codex_rollout' else 60
     result['age_seconds'] = round(age, 3) if age is not None else None
-    result['stale'] = bool(data.get('stale', data.get('outdated', False)) or observed is None or age >= ttl)
+    result['stale'] = bool(data.get('stale', data.get('outdated', False)) or observed is None
+                           or future_observation or age >= ttl)
+    result['observation_in_future'] = future_observation
     if any(row['reset_due'] for row in rows):
         result['stale'] = True
     result['schema_version'] = 1

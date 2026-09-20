@@ -39,11 +39,15 @@ def unresolved(events):
     tasks={}
     for e in events:
         d=e.data
-        key=(e.run_id,d.get('parent_id'),d.get('call_id'))
+        call_id, parent = d.get('call_id'), d.get('parent_id')
+        identified = isinstance(call_id, str) and bool(call_id) and (parent is None or isinstance(parent, str))
+        key = (e.run_id, parent, call_id) if identified else (e.run_id, e.seq)
         if e.kind=='tool_call':pending[key]={'run_id':e.run_id,**d,'seq':e.seq}
         if e.kind=='tool_result':
-            if d.get('outcome')=='unknown':pending[key]={'run_id':e.run_id,**d,'seq':e.seq}
-            else:pending.pop(key,None)
+            if identified and d.get('outcome') in {'completed', 'failed'}:
+                pending.pop(key, None)
+            else:
+                pending[key] = {**d, 'run_id': e.run_id, 'seq': e.seq, 'outcome': 'unknown'}
         if e.kind=='subagent':
             key=(e.run_id,d.get('agent_id'))
             if d.get('status') in {'completed','success','succeeded','failed','cancelled','killed','stopped'}:tasks.pop(key,None)

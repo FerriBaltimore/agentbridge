@@ -12,6 +12,8 @@ from .security import base_environment
 
 
 def models(account):
+    if account.engine not in {'claude', 'cursor'}:
+        raise BridgeError('unsupported_operation', 'This provider has no supported model catalog adapter.')
     env = base_environment()
     env.update(environment(account))
     if account.engine == 'claude':
@@ -24,7 +26,9 @@ def models(account):
         values = result.get('models')
         if not isinstance(values, list):
             raise BridgeError('provider_catalog_unsupported', 'This Claude version does not report its model catalog.')
-        return [dict(item, id=item.get('value') or item.get('id')) for item in values if isinstance(item, dict)]
+        if any(not isinstance(item, dict) for item in values):
+            raise BridgeError('provider_protocol_error', 'Claude returned malformed model catalog entries.')
+        return [dict(item, id=item.get('value', item.get('id'))) for item in values]
     env['PYTHONPATH'] = os.path.dirname(os.path.dirname(__file__))
     try:
         result = subprocess.run([sys.executable, '-m', 'agentbridge.provider_catalog', account.key_env or CURSOR_KEY_ENV],

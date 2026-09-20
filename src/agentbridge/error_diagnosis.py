@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from .credentials import environment, CURSOR_KEY_ENV
 from .errors import BridgeError
-from .models import identifier
+from .models import identifier, model_id
 from .provider_errors import CANONICAL
 from .security import base_environment
 from .store import dumps
@@ -71,7 +71,7 @@ def get(store, idempotency_key):
 
 def diagnose(bridge, case_id, *, account_ref, model, idempotency_key, timeout=60):
     identifier(idempotency_key)
-    identifier(model)
+    model_id(model)
     if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
             or not math.isfinite(timeout) or not 1 <= timeout <= 120):
         raise BridgeError('invalid_timeout', 'Diagnosis timeout must be 1-120 seconds.')

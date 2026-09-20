@@ -57,11 +57,18 @@ def execute(payload, emit, sdk=None):
                      'truncated','task_id','text','request_id','usage'}
             emit({k:v for k,v in value.items() if k in allowed})
         result=run.wait()
+        run_usage = plain(getattr(result, 'usage', None))
+        if isinstance(run_usage, dict) and run_usage:
+            emit({'type': 'bridge_usage', 'scope': 'turn', 'usage': run_usage})
         if payload.get('collect_usage'):
             try:
                 # Local usage is session cumulative; do not mislabel it as this run's delta.
                 usage=plain(agent.get_usage()) or {}
-                emit({'type':'bridge_usage','scope':'session','usage':usage.get('usage'),'cost':usage.get('cost')})
+                if usage.get('usage') is not None or usage.get('cost') is not None:
+                    emit({'type':'bridge_usage','scope':'session','usage':usage.get('usage'),
+                          'cost':usage.get('cost'), 'aggregation': 'cumulative'})
+                else:
+                    emit({'type':'status','status':'usage_unavailable'})
             except Exception:
                 emit({'type':'status','status':'usage_unavailable'})
         status = getattr(result, 'status', 'unknown')

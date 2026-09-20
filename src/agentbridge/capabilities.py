@@ -64,8 +64,9 @@ def _limitations(engine, operation):
                 'classification_never_authorizes_retry']
     if operation == 'accounts.quota.reset':
         return ['explicit_consumption_only', 'persistent_idempotency_key_required', 'provider_acceptance_not_run'] if engine == 'codex' else ['provider_reset_api_unavailable']
-    if operation == 'models.list' and engine != 'codex':
-        return ['catalog_is_not_entitlement_verification', 'static_fallback_on_refresh_failure']
+    if operation == 'models.list':
+        return ['catalog_is_not_entitlement_verification', 'missing_catalog_is_unavailable',
+                'live_refresh_required']
     if operation == 'accounts.status' and engine == 'cursor':
         return ['cached_verification_only', 'no_live_account_reader']
     if operation == 'accounts.status' and engine == 'claude':
@@ -95,6 +96,8 @@ def payload(engine=None):
             raise KeyError(name)
         data = deepcopy(base.__dict__)
         data["contract_version"] = "v1"
+        data['declaration_scope'] = 'adapter_implementation'
+        data['runtime_provider_support_verified'] = False
         data["operations"] = {
             operation: {"support": _support(name, operation), "engine": name,
                         "maturity": _maturity(name, operation),

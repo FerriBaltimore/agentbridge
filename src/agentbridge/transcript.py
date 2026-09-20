@@ -1,5 +1,6 @@
 """Page transcript messages before reconstructing their provider observations."""
 import json
+import math
 from .errors import BridgeError, UnsupportedError
 from .models import page_values
 
@@ -10,7 +11,7 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
         raise UnsupportedError('before filtering is not supported by this adapter.')
     if role not in (None, 'user', 'assistant'):
         raise BridgeError('invalid_role', 'role must be user or assistant.')
-    if after is not None and (not isinstance(after, (int, float)) or isinstance(after, bool)):
+    if after is not None and (not isinstance(after, (int, float)) or isinstance(after, bool) or not math.isfinite(after)):
         raise BridgeError('invalid_params', 'after must be an epoch timestamp.')
     bridge.get_session(instance_id)
     # The cursor is a message offset, not a run rowid. Only selected assistant

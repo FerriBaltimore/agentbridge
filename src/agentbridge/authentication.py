@@ -8,6 +8,7 @@ from .grantbridge import GrantBridgeClient
 from .models import ENGINES, account_name_key, identifier
 from .auth_runtime import AuthRuntime
 from .auth_binding import bind_account
+from . import auth_contract
 
 
 TERMINAL = {'failed', 'cancelled', 'expired', 'interrupted', 'revoked', 'replaced'}
@@ -56,6 +57,7 @@ class AuthenticationService:
         try:
             remote = client.start(owner=attempt['owner'], engine=engine, mode=mode,
                                   browser=browser, request_key=attempt['id'])
+            remote = auth_contract.attempt(remote, engine=engine)
             stored = self.store.update_auth_attempt(
                 attempt['id'], attempt['owner'], grantbridge_id=remote.get('id'),
                 status=self._status(remote), data=remote)
@@ -83,6 +85,7 @@ class AuthenticationService:
                 with self._client(row) as probe:
                     remote = probe.find(attempt_id, row['owner'])
                 if remote:
+                    remote = auth_contract.attempt(remote, engine=row['engine'])
                     row = self.store.update_auth_attempt(attempt_id, row['owner'],
                         grantbridge_id=remote['id'], status=self._status(remote), data=remote)
                     return self._public(row)
@@ -249,27 +252,29 @@ class AuthenticationService:
         row = self.store.get_auth_attempt(row['id'], row['owner'])
         if row['status'] in TERMINAL | {'bound', 'usable'}:
             return row
+        try:
+            remote = auth_contract.attempt(remote, engine=row['engine'], attempt_id=row['grantbridge_id'])
+        except BridgeError:
+            self.store.update_auth_attempt(row['id'], row['owner'], status='failed',
+                data={'error': {'code': 'provider_protocol_error'}})
+            raise
         return self.store.update_auth_attempt(row['id'], row['owner'],
                                               status=self._status(remote, row['status']),
                                               data=remote)
 
     @staticmethod
     def _status(remote, current=None):
-        status = remote.get('status') if isinstance(remote, dict) else None
-        if status in TERMINAL:
-            return status
-        verification = remote.get('verification') if isinstance(remote, dict) else {}
-        if status == 'authorized' and not remote.get('checking') and isinstance(verification, dict) and verification.get('freshProcess') == 'passed':
-            return 'verified'
-        return status or current or 'unknown'
+        return auth_contract.status(remote)
 
     @staticmethod
     def _public(row):
-        data = row.get('data') or {}
+        data = auth_contract.projection(row.get('data'))
         mapping = {
             'authorizationUrl': 'authorization_url', 'userCode': 'user_code',
             'createdAt': 'created_at', 'updatedAt': 'updated_at',
             'expiresAt': 'expires_at', 'probeError': 'probe_error',
+            'autoCheck': 'auto_check', 'autoChecked': 'auto_checked',
+            'manualCodeRequired': 'manual_code_required',
         }
         result = {
             'attempt_id': row['id'], 'owner_ref': row['owner'],

@@ -11,10 +11,17 @@ def initialize(channel, timeout=30):
     while True:
         value = channel.receive(max(0, deadline - time.monotonic()))
         response = value.get('response') or {}
+        if not isinstance(response, dict):
+            raise BridgeError('provider_protocol_error', 'Invalid Claude control response.',
+                              phase='launch', outcome='not_started')
         if value.get('type') == 'control_response' and response.get('request_id') == 'initialize':
             if response.get('subtype') != 'success':
                 raise BridgeError('provider_failed', 'Claude rejected initialization.')
-            return response.get('response') or {}
+            result = response.get('response')
+            if not isinstance(result, dict):
+                raise BridgeError('provider_protocol_error', 'Invalid Claude initialization result.',
+                                  phase='launch', outcome='not_started')
+            return result
 
 
 def execute(channel, payload, emit, approve):
@@ -30,8 +37,14 @@ def execute(channel, payload, emit, approve):
         if value.get('type') == 'control_request':
             request = value.get('request') or {}
             request_id = value.get('request_id')
+            if not isinstance(request, dict) or not isinstance(request_id, str) or not request_id:
+                raise BridgeError('provider_protocol_error', 'Invalid Claude control request.',
+                                  phase='execution', outcome='unknown')
             if request.get('subtype') == 'can_use_tool':
-                original = request.get('input') or {}
+                original = request.get('input')
+                if not isinstance(original, dict) or not isinstance(request.get('tool_name'), str):
+                    raise BridgeError('provider_protocol_error', 'Invalid Claude tool permission request.',
+                                      phase='execution', outcome='unknown')
                 def respond(decision):
                     result = {'behavior': 'allow', 'updatedInput': original} if decision == 'allow' else {
                         'behavior': 'deny', 'message': 'The host denied this request.'}

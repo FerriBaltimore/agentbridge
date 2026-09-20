@@ -14,6 +14,8 @@ from tempfile import TemporaryDirectory
 
 from .error_evidence import validate_evidence
 from .error_learning_contract import proposal
+from .models import model_id
+from .errors import BridgeError
 from .provider_errors import CANONICAL, exception, normalize
 
 
@@ -67,8 +69,11 @@ def _request(payload):
             or payload.get('engine') != 'cursor'):
         return None
     model, key_name = payload['model'], payload['key_env']
-    if (not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}', model)
-            or not isinstance(key_name, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', key_name)):
+    try:
+        model_id(model)
+    except BridgeError:
+        return None
+    if not isinstance(key_name, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', key_name):
         return None
     targets = payload['targets']
     if (not isinstance(targets, list) or not 1 <= len(targets) <= len(CANONICAL)

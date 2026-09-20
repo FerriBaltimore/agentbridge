@@ -93,7 +93,7 @@ def _structured(value, depth=0):
     for key in CODE_FIELDS:
         candidate = value.get(key)
         if isinstance(candidate, dict) and key == 'codexErrorInfo':
-            candidate = next(iter(candidate), None)
+            candidate = next(iter(candidate), None) if len(candidate) == 1 else None
         code, native = _structured(candidate, depth + 1)
         if code and code not in {'provider_failed', 'provider_error'}:
             return code, native
@@ -117,10 +117,11 @@ def _text_code(value):
     if any(s in text for s in ('blocked by our safety systems', 'potentially unintended activity',
                                'content policy violation', 'safety policy violation')):
         return 'safety_blocked'
-    if 'not your usage limit' in text or 'rate limit' in text or 'too many requests' in text:
+    if 'rate limit' in text or 'too many requests' in text:
         return 'rate_limited'
-    if any(s in text for s in ('usage limit', 'quota exhausted', 'insufficient quota',
-                               'quota exceeded', 'limit reached', 'out of usage')):
+    usage_limit = 'usage limit' in text and 'not your usage limit' not in text
+    if usage_limit or any(s in text for s in ('quota exhausted', 'insufficient quota',
+                                             'quota exceeded', 'out of usage')):
         return 'quota_exhausted'
     if any(s in text for s in ('context window exceeded', 'context length exceeded',
                                'prompt is too long', 'maximum context length')):
@@ -162,15 +163,15 @@ def normalize(engine, value, *, terminal=True, outcome=None, phase='execution', 
         code, detection = text_code, 'text_match'
     if code == 'provider_connection_lost' and status in {401, 403, 429}:
         code = {401: 'authentication_required', 403: 'authorization_denied', 429: 'rate_limited'}[status]
-    if not code:
-        code = text_code
-        detection = 'text_match' if code else 'unclassified'
     if not code and status:
         code = {401: 'authentication_required', 403: 'authorization_denied',
                 402: 'billing_required', 408: 'provider_timeout', 429: 'rate_limited'}.get(status)
         if status >= 500:
             code = 'provider_unavailable'
         detection = 'http_status' if code else detection
+    if not code:
+        code = text_code
+        detection = 'text_match' if code else 'unclassified'
     code = code or 'provider_failed'
     if outcome is None:
         outcome = 'unknown' if code in UNKNOWN_OUTCOMES or not terminal else 'failed'

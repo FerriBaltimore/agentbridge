@@ -115,16 +115,18 @@ def main():
                     if len(line)>MAX_LINE:
                         emit('gap',{'reason':'event_too_large'});reason=reason or 'protocol_error';continue
                     parse(line,parser)
-            # Detached grandchildren holding a pipe cannot extend a completed run forever.
-            if child.poll() is not None and not select.get_map():break
+            # The wrapper owns this run's process group. No background lifetime
+            # is promised after it exits; close descendants before draining EOF.
+            if child.poll() is not None:
+                try:os.killpg(child.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                if not select.get_map():break
             if term_at is not None and now-term_at>options.stop_grace+2:break
         if buffer:parse(buffer,parser)
         code=child.wait(timeout=2)
-        if reason:
-            # A duplex wrapper can exit before a native child that ignores TERM.
-            # Drain the whole supervised group even when its leader is gone.
-            try:os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:pass
+        # Also cover the case where every pipe closed before wrapper exit.
+        try:os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:pass
         writer.join(timeout=2)
         unresolved=parser.end()
         if stderr_bytes:emit('diagnostic',{'stderr_bytes':stderr_bytes,'content_stored':False})
@@ -136,7 +138,7 @@ def main():
             emit('error', issue)
         store.finish(run_id, state, failure, code)
     except BaseException as error:
-        if child and child.poll() is None:
+        if child:
             try:os.killpg(child.pid,signal.SIGKILL)
             except ProcessLookupError:pass
             child.wait(timeout=5)
@@ -150,7 +152,8 @@ def parse(line, parser):
     if not line.strip():return
     try:event=json.loads(line)
     except (ValueError,UnicodeDecodeError):
-        parser.event('gap',{'reason':'invalid_json'});return
+        parser.event('gap',{'reason':'invalid_json'})
+        parser.error({'code':'provider_protocol_error'},outcome='unknown');return
     try:parser.feed(event)
     except (TypeError,ValueError,AttributeError,KeyError):
         parser.event('gap',{'reason':'malformed_provider_event'})

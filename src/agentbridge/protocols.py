@@ -3,8 +3,18 @@ from .models import ENGINES
 from .provider_errors import normalize
 from .session_events import identifier, retry, routing
 
-SUCCESS = {'completed','success','succeeded','finished','ok'}
-FAILURE = {'failed','error','errored','killed','cancelled','canceled','stopped'}
+SUCCESS = {'completed', 'finished'}
+FAILURE = {'failed', 'error', 'errored', 'killed', 'cancelled', 'stopped', 'declined'}
+TASK_TERMINAL = {
+    'codex': {'completed', 'errored', 'interrupted', 'shutdown', 'notFound'},
+    'claude': {'completed', 'failed', 'stopped', 'killed'},
+    'cursor': {'completed', 'finished', 'error', 'cancelled', 'expired'},
+}
+CLAUDE_ERROR_RESULTS = {'error_during_execution', 'error_max_turns', 'error_max_budget_usd',
+                       'error_max_structured_output_retries'}
+CLAUDE_LIMIT_REASONS = {'prompt_too_long': 'context_window_exceeded',
+                       'max_turns': 'max_turns_exceeded', 'budget_exhausted': 'budget_exhausted',
+                       'structured_output_retry_exhausted': 'structured_output_failed'}
 
 
 class Parser:
@@ -42,6 +52,7 @@ class Parser:
     def feed(self, event):
         if not isinstance(event, dict):
             self.event('gap', {'reason':'non_object_event'})
+            self.error({'code': 'provider_protocol_error'}, outcome='unknown')
             return
         if event.get('type') == 'bridge_error':
             value = event.get('error') or event
@@ -49,7 +60,16 @@ class Parser:
             self.error(value, outcome=event.get('outcome', 'unknown'),
                        phase=phase if phase in {'admission', 'launch', 'execution', 'recovery'} else 'execution')
             return
-        getattr(self, '_'+self.engine)(event)
+        if event.get('type') == 'bridge_gap':
+            self.event('gap', {'reason': 'unsupported_provider_observation'})
+            return
+        try:
+            if not isinstance(event.get('type'), str):
+                raise ValueError('Missing provider event type.')
+            getattr(self, '_'+self.engine)(event)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            self.event('gap', {'reason': 'malformed_provider_event'})
+            self.error({'code': 'provider_protocol_error'}, outcome='unknown')
 
     def tool(self, id, name, arguments=None, *, done=False, result=None, status=None, parent=None):
         if not id:
@@ -78,7 +98,7 @@ class Parser:
     def end(self):
         for fields in self.open_tools.values():
             self.event('tool_result',{**fields,'outcome':'unknown','reason':'stream_ended_without_result'})
-        pending = [id for id,status in self.tasks.items() if status not in SUCCESS | FAILURE]
+        pending = [id for id,status in self.tasks.items() if status not in TASK_TERMINAL[self.engine]]
         for id in pending:
             self.event('subagent',{'agent_id':id,'status':'unknown','reason':'stream_ended_without_result'})
         unresolved = bool(self.open_tools or pending)
@@ -125,8 +145,11 @@ class Parser:
                 result={k:item[k] for k in ('aggregated_output','exit_code','result','error','changes','output','content') if k in item}
                 if 'error' in result:
                     result['error'] = normalize(self.engine, result['error'])
-                status=item.get('status','completed' if done else 'running')
+                    if self.error_handler:
+                        result['error'] = self.error_handler(result['error'])
+                status=item.get('status', 'unknown' if done else 'running')
                 if item.get('exit_code') not in (None,0) or item.get('error'): status='failed'
+                if item.get('success') is False: status='failed'
                 self.tool(item.get('id'),typ,args,done=done,result=result,status=status,parent=item.get('parent_thread_id'))
             elif typ in {'collab_agent_tool_call','collab_tool_call'}:
                 ids=item.get('receiver_thread_ids') or []
@@ -155,8 +178,14 @@ class Parser:
             if sub=='init':self.event('session',{'native_id':ev.get('session_id')})
             elif sub=='compact_boundary':self.event('compaction',{'observed':True})
             elif sub in {'task_started','task_notification','task_updated'}:
-                status = ev.get('status') or (ev.get('patch') or {}).get('status') or 'started'
-                self.task(ev.get('task_id'),status,parent_id=parent,description=ev.get('description'),background=ev.get('is_backgrounded'))
+                patch = ev.get('patch') or {}
+                task_id = ev.get('task_id')
+                status = ev.get('status') or patch.get('status')
+                if status is None:
+                    status = 'started' if sub == 'task_started' else self.tasks.get(str(task_id), 'unknown')
+                self.task(task_id,status,parent_id=parent,
+                    description=ev.get('description', patch.get('description')),
+                    background=ev.get('is_backgrounded', patch.get('is_backgrounded')))
             elif sub=='permission_denied':self.event('permission_denied',{'reason':'provider_denied'})
             elif sub == 'api_retry':
                 self.event('retry', retry('claude', ev))
@@ -194,15 +223,30 @@ class Parser:
             elif ev.get('type') == 'error':
                 self.error(ev.get('error') or ev, terminal=False)
         elif t=='result':
-            failed=bool(ev.get('is_error')) or str(ev.get('subtype','')).startswith('error')
+            subtype, terminal_reason = ev.get('subtype'), ev.get('terminal_reason')
+            failed = ev.get('is_error') is True or subtype in CLAUDE_ERROR_RESULTS
             interrupted = ev.get('terminal_reason') in {'aborted_streaming', 'aborted_tools'}
             output_limited = ev.get('stop_reason') == 'max_tokens'
-            failed |= output_limited
+            refusal = ev.get('stop_reason') == 'refusal'
+            limit_code = CLAUDE_LIMIT_REASONS.get(terminal_reason)
+            failed |= output_limited or refusal or limit_code is not None
+            invalid = (subtype not in CLAUDE_ERROR_RESULTS | {'success'}
+                       or ('is_error' in ev and not isinstance(ev['is_error'], bool)))
+            if not failed and not interrupted:
+                invalid |= terminal_reason not in {None, 'completed'}
+                invalid |= ev.get('stop_reason') not in {None, 'end_turn', 'stop_sequence', 'tool_use'}
+            if invalid:
+                self.terminal = 'failed'
+                self.event('gap', {'reason': 'unsupported_result_state'})
+                self.error({'code': 'provider_protocol_error'}, outcome='unknown')
+                return
             self.failed |= failed
             self.terminal='interrupted' if interrupted else 'failed' if failed else 'completed'
             self.event('turn',{'status':self.terminal})
             if failed or interrupted:
-                issue = normalize(self.engine, {'code': 'output_limit_exceeded'} if output_limited else ev)
+                code = ('safety_blocked' if refusal else 'output_limit_exceeded'
+                        if output_limited else limit_code)
+                issue = normalize(self.engine, {'code': code} if code else ev)
                 if issue['code'] == 'provider_failed' and self.last_error:
                     issue = self.last_error
                 if issue is self.last_error:
@@ -227,8 +271,13 @@ class Parser:
         if t=='bridge_session':self.event('session',{'native_id':ev.get('native_id')})
         elif t=='bridge_result':
             status=ev.get('status','unknown')
-            self.terminal = ('completed' if status in SUCCESS else 'interrupted'
-                             if status in {'cancelled', 'canceled', 'expired'} else 'failed')
+            if status not in {'finished', 'error', 'cancelled', 'expired'}:
+                self.terminal = 'failed'
+                self.event('gap', {'reason': 'unsupported_result_state'})
+                self.error({'code': 'provider_protocol_error'}, outcome='unknown')
+                return
+            self.terminal = ('completed' if status == 'finished' else 'interrupted'
+                             if status in {'cancelled', 'expired'} else 'failed')
             self.failed |= self.terminal=='failed'
             self.event('turn',{'status':self.terminal})
             if self.terminal != 'completed':
@@ -248,7 +297,8 @@ class Parser:
             self.task(ev.get('task_id'),ev.get('status','unknown'),parent_id=ev.get('agent_id'),description=ev.get('text'))
         elif t in {'usage','bridge_usage'}:
             self.event('usage',{'source':'cursor_sdk','scope':ev.get('scope','observation'),'tokens':ev.get('usage'),
-                                'cost':ev.get('cost'),'cost_kind':'provider_reported'})
+                                'cost':ev.get('cost'),'cost_kind':'provider_reported',
+                                'aggregation': ev.get('aggregation')})
         elif t=='request':self.event('permission_required',{'request_id':ev.get('request_id')})
         elif t in {'status','system'}:self.event('status',{'status':ev.get('status') or ev.get('subtype')})
         elif t in {'thinking','user'}:return
