@@ -30,8 +30,15 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
         ) SELECT * FROM transcript WHERE (? IS NULL OR role=?) AND (? IS NULL OR at>?)
           ORDER BY position,slot LIMIT ? OFFSET ?''',
                           (instance_id, instance_id, role, role, after, after, limit, cursor)).fetchall()
-    return [{'message_id': row['message_id'] + (':assistant' if row['role'] == 'assistant' else ''),
-             'instance_id': instance_id, 'role': row['role'],
-             'content': row['content'] if row['role'] == 'user' else bridge.run(row['id']).text,
-             'sequence': row['id'], 'created_at': row['at'],
-             'attachments': json.loads(row['attachments'] or '[]')} for row in rows]
+    result = []
+    for row in rows:
+        projection = bridge.run(row['id']).message if row['role'] == 'assistant' else None
+        value = {'message_id': row['message_id'] + (':assistant' if row['role'] == 'assistant' else ''),
+                 'instance_id': instance_id, 'role': row['role'],
+                 'content': row['content'] if projection is None else projection['text'],
+                 'sequence': row['id'], 'created_at': row['at'],
+                 'attachments': json.loads(row['attachments'] or '[]')}
+        if projection is not None:
+            value.update({key: projection[key] for key in ('incomplete', 'retracted', 'retracted_provider_message_ids')})
+        result.append(value)
+    return result

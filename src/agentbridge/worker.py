@@ -17,6 +17,8 @@ from .transports import command, duplex
 from .credentials import CURSOR_KEY_ENV
 from .attachments import text_prompt
 from dataclasses import asdict
+from .execution_outcome import finish
+from .provider_errors import normalize
 
 MAX_LINE=8*1024*1024
 
@@ -55,7 +57,7 @@ def main():
             payload=json.dumps({'prompt':prompt,'cwd':session['cwd'],'model':options.model or session['model'],
                 'native_id':session.get('native_id'),'key_env':account.key_env or CURSOR_KEY_ENV,
                 'sandbox':options.sandbox,'tools':list(options.allowed_tools),'collect_usage':options.collect_usage,
-                'attachments': options.attachments})
+                'attachments': options.attachments, 'effort': options.effort})
         elif duplex(account, options):
             payload = json.dumps({'engine': account.engine, 'prompt': prompt, 'cwd': session['cwd'],
                 'model': options.model or session.get('model'), 'native_id': session.get('native_id'),
@@ -77,7 +79,7 @@ def main():
         select=selectors.DefaultSelector()
         for pipe in (child.stdout,child.stderr):
             os.set_blocking(pipe.fileno(),False);select.register(pipe,selectors.EVENT_READ)
-        buffer=b'';stderr_bytes=0;start=time.monotonic();term_at=None;reason=None;last_tick=0
+        buffer=b'';stderr_bytes=0;stderr_tail=b'';start=time.monotonic();term_at=None;reason=None;last_tick=0
         while select.get_map() or child.poll() is None:
             now=time.monotonic()
             if now-last_tick>=0.1:
@@ -99,7 +101,10 @@ def main():
                 if not data:
                     select.unregister(key.fileobj);key.fileobj.close();continue
                 if key.fileobj is child.stderr:
-                    stderr_bytes+=len(data);continue # Raw provider error bodies may contain credentials.
+                    stderr_bytes += len(data)
+                    # Classify in memory only. Never store raw diagnostics, headers or credentials.
+                    stderr_tail = (stderr_tail + data)[-16384:]
+                    continue
                 buffer+=data
                 if len(buffer)>MAX_LINE and b'\n' not in buffer:
                     emit('gap',{'reason':'event_too_large'});reason=reason or 'protocol_error';buffer=b''
@@ -121,12 +126,11 @@ def main():
         writer.join(timeout=2)
         unresolved=parser.end()
         if stderr_bytes:emit('diagnostic',{'stderr_bytes':stderr_bytes,'content_stored':False})
-        if reason=='user_stop':state='cancelled'
-        elif reason or code!=0 or parser.failed:state='failed'
-        elif parser.terminal!='completed':state='interrupted';reason='missing_terminal_event'
-        elif unresolved:state='incomplete';reason='unresolved_work'
-        else:state='completed'
-        store.finish(run_id,state,reason or ('provider_failed' if state=='failed' else None),code)
+        state, failure, issue = finish(parser, reason=reason, exit_code=code, unresolved=unresolved,
+                                       stderr=stderr_tail.decode('utf-8', errors='replace'))
+        if issue:
+            emit('error', issue)
+        store.finish(run_id, state, failure, code)
     except BaseException as error:
         if child and child.poll() is None:
             try:os.killpg(child.pid,signal.SIGKILL)
@@ -134,8 +138,8 @@ def main():
             child.wait(timeout=5)
         if parser:parser.end()
         # Exception bodies can embed env, prompts and provider responses.
-        store.emit(run_id,'error',{'code':'worker_failed','exception_type':type(error).__name__})
-        store.finish(run_id,'failed','worker_failed')
+        store.emit(run_id, 'error', normalize(account.engine, {'code': 'worker_failed'}, outcome='unknown'))
+        store.finish(run_id,'interrupted','worker_failed')
 
 
 def parse(line, parser):

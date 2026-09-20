@@ -1,5 +1,7 @@
 """Translate observable provider protocols; preserve gaps instead of inventing data."""
 from .models import ENGINES
+from .provider_errors import normalize
+from .session_events import identifier, retry, routing
 
 SUCCESS = {'completed','success','succeeded','finished','ok'}
 FAILURE = {'failed','error','errored','killed','cancelled','canceled','stopped'}
@@ -16,17 +18,29 @@ class Parser:
         self.started_tools = set()
         self.completed_tools = set()
         self.failed = False
+        self.last_error = None
 
     def event(self, kind, data):
         self.emit(kind, data)
+
+    def error(self, value, *, terminal=True, provider_retrying=False, outcome=None, phase='execution'):
+        issue = normalize(self.engine, value, terminal=terminal, outcome=outcome,
+                          provider_retrying=provider_retrying, phase=phase)
+        self.last_error = issue
+        if terminal:
+            self.failed = True
+        self.event('error', issue)
+        return issue
 
     def feed(self, event):
         if not isinstance(event, dict):
             self.event('gap', {'reason':'non_object_event'})
             return
         if event.get('type') == 'bridge_error':
-            self.failed = True
-            self.event('error', {'code': event.get('code', 'provider_failed')})
+            value = event.get('error') or event
+            phase = value.get('phase') if isinstance(value, dict) else None
+            self.error(value, outcome=event.get('outcome', 'unknown'),
+                       phase=phase if phase in {'admission', 'launch', 'execution', 'recovery'} else 'execution')
             return
         getattr(self, '_'+self.engine)(event)
 
@@ -69,10 +83,15 @@ class Parser:
         if t == 'bridge_text_delta':
             self.event('text_delta', {'text': ev.get('text', '')})
         elif t == 'bridge_usage':
-            self.event('usage', {'source': 'codex_app_server', 'scope': ev['scope'], 'tokens': ev.get('tokens')})
+            self.event('usage', {'source': 'codex_app_server', 'scope': ev['scope'], 'tokens': ev.get('tokens'),
+                                'aggregation': ev.get('aggregation'), 'context_window': ev.get('context_window')})
+        elif t == 'bridge_quota':
+            self.event('quota', {'source': 'codex_app_server', 'scope': 'account', 'limits': ev.get('limits')})
+        elif t == 'bridge_model_changed':
+            self.event('model_changed', ev['change'])
         elif t == 'thread.started':
             self.event('session',{'native_id':ev.get('thread_id')})
-        elif t in ('turn.started','turn.completed','turn.failed'):
+        elif t in ('turn.started','turn.completed','turn.failed','turn.interrupted'):
             status=t.split('.')[1]
             self.event('turn',{'status':status})
             if status != 'started':
@@ -81,7 +100,11 @@ class Parser:
             if isinstance(ev.get('usage'),dict):
                 self.event('usage',{'source':'codex_exec','scope':'turn','tokens':ev['usage']})
             if ev.get('error'):
-                self.event('error',{'code':error_code(ev['error'])})
+                self.error(ev['error'])
+            elif status == 'interrupted':
+                self.error({'code': 'interrupted'})
+            elif status == 'failed' and not self.last_error:
+                self.error(ev)
         elif t.startswith('item.'):
             item=ev.get('item') or {}
             if not isinstance(item,dict):
@@ -93,6 +116,8 @@ class Parser:
             elif typ in {'command_execution','file_change','patch_apply','mcp_tool_call','dynamic_tool_call','web_search'}:
                 args={k:item[k] for k in ('command','cwd','changes','path','server','tool','arguments','query') if k in item}
                 result={k:item[k] for k in ('aggregated_output','exit_code','result','error','changes','output','content') if k in item}
+                if 'error' in result:
+                    result['error'] = normalize(self.engine, result['error'])
                 status=item.get('status','completed' if done else 'running')
                 if item.get('exit_code') not in (None,0) or item.get('error'): status='failed'
                 self.tool(item.get('id'),typ,args,done=done,result=result,status=status,parent=item.get('parent_thread_id'))
@@ -110,7 +135,8 @@ class Parser:
             elif typ not in {'reasoning','agent_message'} and done:
                 self.event('gap',{'reason':'unsupported_item','native_type':typ})
         elif t=='error':
-            self.event('error',{'code':error_code(ev.get('message')),'terminal':False})
+            self.error(ev.get('error') or ev, terminal=False,
+                       provider_retrying=ev.get('will_retry') is True)
         else:
             self.event('gap',{'reason':'unsupported_event','native_type':t})
 
@@ -125,15 +151,30 @@ class Parser:
                 status = ev.get('status') or (ev.get('patch') or {}).get('status') or 'started'
                 self.task(ev.get('task_id'),status,parent_id=parent,description=ev.get('description'),background=ev.get('is_backgrounded'))
             elif sub=='permission_denied':self.event('permission_denied',{'reason':'provider_denied'})
+            elif sub == 'api_retry':
+                self.event('retry', retry('claude', ev))
+            elif sub == 'model_refusal_fallback':
+                self.event('model_changed', routing('claude', ev))
+            elif sub == 'model_refusal_no_fallback':
+                self.error({'code': 'safety_blocked'})
             else:self.event('status',{'status':ev.get('status') or sub})
         elif t in {'assistant','user'}:
             msg=ev.get('message') or {}
             content=msg.get('content',[]) if isinstance(msg,dict) else []
+            if t == 'assistant' and ev.get('error'):
+                # Claude wraps API errors in assistant text; it is not assistant prose.
+                self.error({'code': ev['error'], 'message': content}, terminal=False)
+                return
             if isinstance(content,str):content=[{'type':'text','text':content}]
             for block in content:
                 if not isinstance(block,dict):continue
                 typ=block.get('type')
-                if typ=='text' and t=='assistant':self.event('assistant',{'text':block.get('text',''),'parent_id':parent})
+                if typ=='text' and t=='assistant':
+                    supersedes = ev.get('supersedes')
+                    self.event('assistant', {'text': block.get('text', ''), 'parent_id': parent,
+                        'provider_message_id': identifier(ev.get('uuid')), 'incomplete': ev.get('aborted') is True,
+                        'supersedes': [item for item in supersedes[:1000] if identifier(item)]
+                        if isinstance(supersedes, list) else []})
                 elif typ=='tool_use':self.tool(block.get('id'),block.get('name','tool'),block.get('input'),parent=parent)
                 elif typ=='tool_result':
                     self.tool(block.get('tool_use_id'),'tool',done=True,result=block.get('content'),status='failed' if block.get('is_error') else 'completed',parent=parent)
@@ -143,14 +184,27 @@ class Parser:
             delta=ev.get('delta') or {}
             if ev.get('type')=='content_block_delta' and delta.get('type')=='text_delta':
                 self.event('text_delta',{'text':delta.get('text',''),'parent_id':parent})
+            elif ev.get('type') == 'error':
+                self.error(ev.get('error') or ev, terminal=False)
         elif t=='result':
             failed=bool(ev.get('is_error')) or str(ev.get('subtype','')).startswith('error')
+            interrupted = ev.get('terminal_reason') in {'aborted_streaming', 'aborted_tools'}
+            output_limited = ev.get('stop_reason') == 'max_tokens'
+            failed |= output_limited
             self.failed |= failed
-            self.terminal='failed' if failed else 'completed'
-            self.event('turn',{'status':self.terminal,'subtype':ev.get('subtype')})
+            self.terminal='interrupted' if interrupted else 'failed' if failed else 'completed'
+            self.event('turn',{'status':self.terminal})
+            if failed or interrupted:
+                issue = normalize(self.engine, {'code': 'output_limit_exceeded'} if output_limited else ev)
+                if issue['code'] == 'provider_failed' and self.last_error:
+                    issue = self.last_error
+                self.error(issue, outcome=issue['outcome'])
             if ev.get('usage') or ev.get('total_cost_usd') is not None:
-                self.event('usage',{'source':'claude_result','scope':'turn','tokens':ev.get('usage'),
-                                    'cost_usd':ev.get('total_cost_usd'),'cost_kind':'provider_reported'})
+                self.event('usage',{'source':'claude_result','scope':'turn','tokens':ev.get('usage')})
+            if ev.get('total_cost_usd') is not None or ev.get('modelUsage') or ev.get('model_usage'):
+                self.event('usage', {'source': 'claude_result', 'scope': 'session',
+                    'cost_usd': ev.get('total_cost_usd'), 'cost_kind': 'provider_reported',
+                    'models': ev.get('modelUsage') or ev.get('model_usage'), 'aggregation': 'cumulative'})
             if ev.get('permission_denials'):self.event('permission_denied',{'count':len(ev['permission_denials'])})
         elif t=='rate_limit_event':
             self.event('quota',{'source':'claude_stream','scope':'account','limits':ev.get('rate_limit_info')})
@@ -163,9 +217,13 @@ class Parser:
         if t=='bridge_session':self.event('session',{'native_id':ev.get('native_id')})
         elif t=='bridge_result':
             status=ev.get('status','unknown')
-            self.terminal='completed' if status in SUCCESS else 'failed'
+            self.terminal = ('completed' if status in SUCCESS else 'interrupted'
+                             if status in {'cancelled', 'canceled', 'expired'} else 'failed')
             self.failed |= self.terminal=='failed'
             self.event('turn',{'status':self.terminal})
+            if self.terminal != 'completed':
+                self.error(ev.get('error') or {'code': 'interrupted' if self.terminal == 'interrupted'
+                                             else 'provider_failed'}, outcome='unknown')
         elif t=='bridge_error':
             self.failed=True
             self.event('error',{'code':ev.get('code','provider_failed')})
@@ -188,8 +246,4 @@ class Parser:
 
 
 def error_code(value):
-    text=str(value).lower()
-    if any(s in text for s in ('rate limit','usage limit','quota','429')):return 'usage_limit'
-    if any(s in text for s in ('unauthorized','401','authentication','not logged')):return 'authentication_required'
-    if any(s in text for s in ('timeout','timed out')):return 'provider_timeout'
-    return 'provider_error'
+    return normalize(None, value)['code']

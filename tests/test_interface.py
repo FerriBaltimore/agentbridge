@@ -177,7 +177,8 @@ def test_capabilities_do_not_overclaim_permission_control(tmp_path):
     assert bridge.capabilities('claude')['operations']['accounts.status']['support'] == 'adapter'
     assert capabilities['parameters']['context_window']['support'] == 'unsupported'
     assert capabilities['parameters']['attachments']['support'] == 'adapter'
-    assert bridge.capabilities('cursor')['parameters']['effort']['support'] == 'unsupported'
+    assert bridge.capabilities('cursor')['parameters']['effort']['support'] == 'adapter'
+    assert bridge.capabilities('cursor')['parameters']['effort']['limitations'] == ['requires_reported_model_parameter']
     assert capabilities['operations']['instances.events']['maturity'] == 'fixture_tested'
     assert capabilities['acceptance']['provider_tested'] is False
 

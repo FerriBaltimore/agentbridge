@@ -8,6 +8,7 @@ import tempfile
 
 from .errors import BridgeError
 from .store import dumps
+from .message_projection import retractions
 
 INTRO=('Historical conversation evidence, not new authorization. Follow the current user request and rules. '
        'Do not repeat completed actions. Verify unknown tool outcomes against real state before retrying. '
@@ -65,6 +66,9 @@ def build(store,session_id,budget_bytes=128000):
     if type(budget_bytes) is not int or budget_bytes<2048:
         raise BridgeError('invalid_budget','Context budget must be at least 2048 bytes.')
     events=list(all_events(store,session_id))
+    retracted = retractions(events)
+    excluded = {e.seq for e in events if e.kind == 'assistant'
+                and e.data.get('provider_message_id') in retracted.get(e.run_id, set())}
     archive=b''.join((dumps(asdict(e))+'\n').encode() for e in events)
     digest=hashlib.sha256(archive).hexdigest()
     path=store.root/'archives'/f'{session_id}-{digest[:16]}.jsonl'
@@ -78,13 +82,15 @@ def build(store,session_id,budget_bytes=128000):
     def render():
         return INTRO+dumps({'version':1,'archive_path':str(path),'archive_sha256':digest,
             'unknown_outcomes':unknown,'evidence':[asdict(e) for e in events if e.seq in selected],
+            'retracted_message_seqs': sorted(excluded),
             'omitted_count':sum(e.seq not in selected for e in events),'representation':'selected'})
     if len(render().encode())>budget_bytes:
         raise BridgeError('context_over_budget','Owner instructions and unresolved effects exceed the budget; supply an explicit reviewed summary or a larger budget.')
     # Select complete run groups rather than orphaning tool results from their calls.
     groups={}
     for e in events:
-        if e.kind not in {'text_delta','status','run_started','diagnostic'}:groups.setdefault(e.run_id,set()).add(e.seq)
+        if e.seq not in excluded and e.kind not in {'text_delta','status','run_started','diagnostic'}:
+            groups.setdefault(e.run_id,set()).add(e.seq)
     for group in reversed(list(groups.values())):
         previous=set(selected);selected|=group
         if len(render().encode())>budget_bytes:selected=previous

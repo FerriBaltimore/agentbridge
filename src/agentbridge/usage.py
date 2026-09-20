@@ -1,14 +1,16 @@
 """Quota snapshots are distinct from per-run tokens and monetary cost."""
 from datetime import datetime,timezone
-import json
 from pathlib import Path
 import time
-import urllib.request
-import urllib.error
 from . import usage_rollouts
+from .quota_windows import project
 
 
 def snapshot(account, *, oauth_token=None, allow_network=False):
+    return project(account.engine, _snapshot(account, oauth_token=oauth_token, allow_network=allow_network))
+
+
+def _snapshot(account, *, oauth_token=None, allow_network=False):
     now=time.time()
     base={'account_id':account.id,'engine':account.engine,'scope':'account','observed_at':None,
           'supported':False,'windows':[],'outdated':True}
@@ -27,15 +29,13 @@ def snapshot(account, *, oauth_token=None, allow_network=False):
     if account.engine=='claude':
         if not allow_network:return {**base,'supported':True,'reason':'network_not_requested'}
         if not oauth_token:return {**base,'supported':True,'reason':'oauth_token_required'}
-        req=urllib.request.Request('https://api.anthropic.com/api/oauth/usage',headers={
-            'Authorization':'Bearer '+oauth_token,'anthropic-beta':'oauth-2025-04-20','Accept':'application/json'})
+        from .claude_account import quota_request
+        from .errors import BridgeError
         try:
-            with urllib.request.urlopen(req,timeout=10) as response:data=json.load(response)
-        except (OSError,ValueError):return {**base,'supported':True,'reason':'provider_unavailable'}
-        windows=[{'name':k,'used_percent':v.get('utilization'),'resets_at':v.get('resets_at')}
-                 for k,v in data.items() if isinstance(v,dict) and 'utilization' in v]
-        return {**base,'supported':True,'source':'claude_oauth','observed_at':datetime.now(timezone.utc).isoformat(),
-                'outdated':False,'windows':windows,'reason':None if windows else 'quota_unknown'}
+            data = quota_request(oauth_token)
+        except BridgeError as error:
+            return {**base, 'supported': True, 'reason': error.code}
+        return {**base, **data, 'observed_at': datetime.now(timezone.utc).isoformat(), 'outdated': False}
     return {**base,'reason':'account_quota_unsupported'}
 
 

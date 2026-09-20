@@ -33,6 +33,12 @@ Authentication orchestration also uses `authentication_attempt_not_found`,
 `authentication_not_verified`, `activation_unsupported` and `login_timeout`.
 Inputs and observations also use `invalid_attachment`, `invalid_permissions`,
 `permission_expired`, `provider_catalog_unsupported` and `rate_limited`.
+Execution adapters additionally distinguish `safety_blocked`, `billing_required`,
+`budget_exhausted`, `context_window_exceeded`, `output_limit_exceeded`,
+`max_turns_exceeded`, `structured_output_failed` and `provider_connection_lost`.
+Reset redemption uses `reset_pending`, `account_changed`, `identity_missing`
+and `identity_changed`; unknown redemption outcomes retain the original key.
+See [usage and failures](../usage-and-failures.md) for scope and validation.
 They use the same envelope and never expose provider credentials or native home
 paths in RPC responses.
 

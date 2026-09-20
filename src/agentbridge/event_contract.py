@@ -11,6 +11,10 @@ EVENT_KINDS = {
     "subagent": "subagent.status",
     "usage": "usage.observed",
     "quota": "quota.observed",
+    "error": "run.error",
+    "compaction": "context.compacted",
+    "model_changed": "model.changed",
+    "retry": "run.retrying",
     "permission_required": "permission.required",
     "permission_denied": "permission.denied",
     "permission_response": "permission.responded",
@@ -23,6 +27,10 @@ EVENT_KINDS = {
 def public_event(event, engine=None):
     """Return the stable event shape without exposing provider event names."""
     kind = EVENT_KINDS.get(event.kind, "provider.event")
+    data = dict(event.data or {})
+    if event.kind == 'quota':
+        from .quota_windows import project
+        data = project(engine, {**data, 'observed_at': event.at, 'source': data.get('source', 'provider_event'), 'supported': True})
     return {
         "seq": event.seq,
         "turn_id": event.run_id,
@@ -31,6 +39,6 @@ def public_event(event, engine=None):
         "engine": engine,
         "kind": kind,
         "at": event.at,
-        "data": dict(event.data or {}),
-        "final": kind in {"message.completed", "run.finished"},
+        "data": data,
+        "final": kind == 'run.finished' or (kind == 'message.completed' and not data.get('incomplete')),
     }

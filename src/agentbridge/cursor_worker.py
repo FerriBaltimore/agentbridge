@@ -5,6 +5,10 @@ import os
 import signal
 import sys
 
+from .provider_errors import exception, normalize
+from .errors import BridgeError
+from .cursor_options import model_selection
+
 
 def plain(value):
     if is_dataclass(value):return plain(asdict(value))
@@ -23,7 +27,8 @@ def execute(payload, emit, sdk=None):
     kwargs={'cwd':payload['cwd'],'setting_sources':[]}
     # Cursor exposes its own sandbox controls. A read-only request uses an empty
     # tool set, so we never claim an OS read-only sandbox that the SDK cannot express.
-    options=sdk.AgentOptions(model=payload['model'],api_key=api_key,
+    model = model_selection(payload['model'], payload.get('effort'), sdk=sdk, api_key=api_key)
+    options=sdk.AgentOptions(model=model,api_key=api_key,
         local=sdk.LocalAgentOptions(**kwargs),
         tools=[] if payload.get('sandbox','read-only')=='read-only' else payload.get('tools') or None)
     agent=sdk.Agent.resume(payload['native_id'],options) if payload.get('native_id') else sdk.Agent.create(options)
@@ -45,6 +50,9 @@ def execute(payload, emit, sdk=None):
                 emit({'type':'unsupported_message'});continue
             kind=value.get('type')
             if kind=='thinking':continue
+            if kind == 'status' and value.get('status') in {'error', 'failed'}:
+                emit({'type': 'bridge_error', 'error': normalize('cursor', value)})
+                continue
             allowed={'type','agent_id','run_id','subtype','message','call_id','name','status','args','result',
                      'truncated','task_id','text','request_id','usage'}
             emit({k:v for k,v in value.items() if k in allowed})
@@ -56,14 +64,22 @@ def execute(payload, emit, sdk=None):
                 emit({'type':'bridge_usage','scope':'session','usage':usage.get('usage'),'cost':usage.get('cost')})
             except Exception:
                 emit({'type':'status','status':'usage_unavailable'})
-        emit({'type':'bridge_result','status':getattr(result,'status','unknown')})
+        status = getattr(result, 'status', 'unknown')
+        event = {'type': 'bridge_result', 'status': status}
+        if status == 'error':
+            event['error'] = normalize('cursor', {'message': getattr(result, 'result', '')})
+        emit(event)
 
 
 def main():
     emit=lambda event:print(json.dumps(event),flush=True)
     try:execute(json.load(sys.stdin),emit)
+    except BridgeError as error:
+        emit({'type': 'bridge_error', 'error': error.safe_data(), 'outcome': error.outcome})
+        raise SystemExit(1) from None
     except Exception as error:
-        emit({'type':'bridge_error','code':'cursor_sdk_unavailable' if isinstance(error,ImportError) else 'provider_failed'})
+        issue = normalize('cursor', {'code': 'cursor_sdk_unavailable'}) if isinstance(error, ImportError) else exception('cursor', error)
+        emit({'type': 'bridge_error', 'error': issue})
         raise SystemExit(1) from None
 
 

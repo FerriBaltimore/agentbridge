@@ -19,6 +19,14 @@ ACTION = {
     "authentication_not_verified": "check",
     "login_timeout": "login",
     "activation_unsupported": "change_account",
+    "safety_blocked": "inspect",
+    "billing_required": "inspect",
+    "context_window_exceeded": "inspect",
+    "output_limit_exceeded": "resume",
+    "budget_exhausted": "inspect",
+    "max_turns_exceeded": "resume",
+    "structured_output_failed": "inspect",
+    "provider_connection_lost": "inspect",
 }
 
 
@@ -42,6 +50,15 @@ class BridgeError(Exception):
             category = "auth"
         elif self.code in {"quota_exhausted", "rate_limited"}:
             category = "quota"
+        elif self.code == 'safety_blocked':
+            category = 'safety'
+        elif self.code == 'billing_required':
+            category = 'billing'
+        elif self.code in {'context_window_exceeded', 'output_limit_exceeded',
+                           'budget_exhausted', 'max_turns_exceeded', 'structured_output_failed'}:
+            category = 'limit'
+        elif self.code == 'unknown_outcome':
+            category = 'execution'
         elif self.code == 'provider_catalog_unsupported':
             category = 'capability'
         elif self.code.startswith("provider_") or self.code in {"grantbridge_failed", "grantbridge_timeout"}:

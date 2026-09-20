@@ -33,7 +33,8 @@ def main():
             else:
                 execute_claude(channel, payload, emit, approve)
     except BridgeError as error:
-        emit({'type': 'bridge_error', 'code': error.code})
+        emit({'type': 'bridge_error', 'error': error.safe_data(),
+              'outcome': 'not_started' if error.phase == 'launch' else 'unknown'})
         raise SystemExit(1) from None
 
 

@@ -9,6 +9,7 @@ from .account_probe import CodexAppServerProbe, stamp, safe_identity
 from .grantbridge import GrantBridgeClient
 from .errors import BridgeError
 from .models import Account, account_name_key, identifier, page_values
+from .quota_windows import project, timestamp
 
 
 class AccountService:
@@ -71,6 +72,9 @@ class AccountService:
 
     def usage(self, account_id, *, refresh=False):
         account = self.get(account_id)
+        return project(account.engine, self._usage(account, refresh=refresh))
+
+    def _usage(self, account, *, refresh=False):
         if refresh:
             observation = self._probe_account(account, include_usage=True)
             data = observation['data'].get('usage')
@@ -84,7 +88,8 @@ class AccountService:
         if account.engine == 'codex':
             data = usage.snapshot(account)
             self.store.usage_observation(account.id, data.get('source', 'codex_rollout'), 'account', data,
-                                         stale=bool(data.get('outdated', True)))
+                                         stale=bool(data.get('outdated', True)),
+                                         observed_at=timestamp(data.get('observed_at')))
             return {'account_id': account.id, 'observed_at': data.get('observed_at'),
                     'source': data.get('source', 'codex_rollout'), 'scope': 'account',
                     'stale': bool(data.get('outdated', True)), **data}
@@ -93,8 +98,11 @@ class AccountService:
                 'reason': 'sdk_account_quota_unavailable' if account.engine == 'cursor' else 'account_usage_unsupported'}
 
     def history(self, account_id, *, limit=100):
-        self.get(account_id)
-        return self.store.usage_history(account_id, limit=limit)
+        account = self.resolve(account_id)
+        rows = self.store.usage_history(account.id, limit=limit)
+        return [{**row, 'data': project(account.engine, {**row['data'],
+                 'source': row['source'], 'observed_at': stamp(row['observed_at']),
+                 'stale': row['stale']})} for row in rows]
 
     def _probe_account(self, account, *, include_usage):
         if account.engine == 'claude':
@@ -112,10 +120,22 @@ class AccountService:
         self.store.account_observation(account.id, CodexAppServerProbe.source, result['status'], result)
         if include_usage and (result.get('quota') is not None or result.get('account_usage') is not None):
             usage_data = {'supported': True, 'source': 'codex_app_server', 'quota': result.get('quota'),
-                          'account_usage': result.get('account_usage')}
+                          'account_usage': result.get('account_usage'),
+                          'quota_reason': result.get('quota_reason'),
+                          'account_usage_reason': result.get('account_usage_reason')}
             self.store.usage_observation(account.id, 'codex_app_server', 'account', usage_data, stale=False)
             result['usage'] = {'account_id': account.id, 'observed_at': stamp(), 'source': 'codex_app_server',
                                'scope': 'account', 'stale': False, **usage_data}
+        elif include_usage:
+            # Failed refresh must not leave an older snapshot looking current.
+            cached = self.store.latest_usage_observation(account.id)
+            if cached:
+                with self.store.connect() as db:
+                    db.execute('UPDATE usage_observations SET stale=1 WHERE id=?', (cached['id'],))
+            result['usage'] = {'account_id': account.id,
+                **(cached['data'] if cached else {'supported': False, 'scope': 'account'}),
+                'stale': True, 'reason': result.get('reason') or result.get('quota_reason') or 'quota_not_reported',
+                'observed_at': stamp(cached['observed_at']) if cached else None}
         return {'data': result, 'status': result['status']}
 
     def _claude_account(self, account, *, include_usage):

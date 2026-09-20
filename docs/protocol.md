@@ -18,6 +18,11 @@ A `tool_result` with `outcome: unknown` means that the provider was asked to per
 
 ## Core methods
 
+Normalized windows, scoped limits, reset credits, model metadata and execution
+failures are specified in [usage and failures](usage-and-failures.md).
+`accounts.quota.reset` explicitly consumes a Codex earned reset using a durable
+`idempotency_key`; normal account usage queries never perform this mutation.
+
 | Method | Purpose |
 | --- | --- |
 | `capabilities` | Return engine capability declarations. |

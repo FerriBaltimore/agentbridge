@@ -23,7 +23,11 @@ def test_claude_quota_uses_only_bound_credential_and_sanitizes_output(tmp_path, 
                                      'bad': {'utilization': True}, 'extra': {'token': 'fixture-secret'}}).encode())
     monkeypatch.setattr('urllib.request.build_opener', lambda *args: SimpleNamespace(open=request))
     value = quota(account)
-    assert value['windows'] == [{'name': 'five_hour', 'used_percent': 23, 'resets_at': '2026-09-21T00:00:00Z'}]
+    assert len(value['windows']) == 1
+    window = value['windows'][0]
+    assert window['name'] == 'five_hour' and window['used_percent'] == 23
+    assert window['remaining_percent'] == 77 and window['scope'] == 'account'
+    assert window['resets_at'] == '2026-09-21T00:00:00+00:00'
     assert 'fixture-secret' not in json.dumps(value)
     assert value['provider_contract'] == 'native_oauth_compatibility'
 

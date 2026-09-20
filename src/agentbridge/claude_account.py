@@ -8,6 +8,7 @@ import urllib.request
 from .credentials import environment
 from .errors import BridgeError
 from .security import base_environment
+from .quota_windows import normalize, number
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,6 +54,11 @@ def quota(account):
             raise ValueError()
     except (OSError, ValueError, AttributeError):
         raise BridgeError('credential_unavailable', 'The bound Claude profile has no OAuth credential.') from None
+    return quota_request(token)
+
+
+def quota_request(token):
+    """One bounded, no-redirect request shared by the SDK compatibility surface."""
     request = urllib.request.Request('https://api.anthropic.com/api/oauth/usage', headers={
         'Authorization': 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20', 'Accept': 'application/json'})
     try:
@@ -68,15 +74,14 @@ def quota(account):
         raise BridgeError(code, 'Claude did not provide a quota observation.') from None
     except (OSError, ValueError):
         raise BridgeError('provider_unavailable', 'Claude did not provide a quota observation.') from None
-    windows = []
-    for name, item in value.items():
-        if not isinstance(item, dict):
-            continue
-        used = item.get('utilization')
-        if isinstance(used, (int, float)) and not isinstance(used, bool) and 0 <= used <= 100:
-            reset = item.get('resets_at')
-            windows.append({'name': name, 'used_percent': used,
-                            'resets_at': reset if isinstance(reset, str) and len(reset) < 100 else None})
+    windows = [row for row in normalize('claude', value) if row['used_percent'] is not None]
+    extra = value.get('extra_usage')
+    extra = extra if isinstance(extra, dict) else {}
+    spend = {'enabled': extra.get('is_enabled') if type(extra.get('is_enabled')) is bool else None,
+             'monthly_limit': number(extra.get('monthly_limit')), 'used': number(extra.get('used_credits')),
+             'used_percent': number(extra.get('utilization')), 'unit': 'provider_credits',
+             'currency': extra.get('currency') if isinstance(extra.get('currency'), str)
+                         and len(extra['currency']) == 3 and extra['currency'].isalpha() else None}
     return {'windows': windows, 'reason': None if windows else 'quota_not_reported',
             'source': 'claude_oauth_usage', 'scope': 'account', 'supported': True,
-            'stale': False, 'provider_contract': 'native_oauth_compatibility'}
+            'stale': False, 'provider_contract': 'native_oauth_compatibility', 'extra_usage': spend}

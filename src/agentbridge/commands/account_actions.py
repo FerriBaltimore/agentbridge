@@ -26,6 +26,10 @@ def account_command(bridge, args):
         return account_dict(bridge.register(account))
     if command == "list":
         return [account_dict(account) for account in bridge.accounts()]
+    if command == 'quota-reset':
+        account = bridge.resolve_account(args.name)
+        args.account_name = account.name
+        return bridge.account_quota_reset(account.id, idempotency_key=args.idempotency_key, credit_id=args.credit_id)
     if command in {"status", "usage", "history", "check"}:
         account = bridge.resolve_account(args.name)
         args.account_name, args.id = account.name, account.id

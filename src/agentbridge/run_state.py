@@ -8,6 +8,7 @@ from .continuity import unresolved
 from .errors import BusyError
 from .models import RunOptions, TERMINAL
 from .store import dumps
+from .message_projection import text as project_text
 
 
 class Run:
@@ -28,11 +29,11 @@ class Run:
 
     @property
     def text(self):
-        events = list(self._observations())
-        finals = [e.data.get('text', '') for e in events
-                  if e.kind == 'assistant' and not e.data.get('parent_id')]
-        return '\n'.join(finals) if finals else ''.join(
-            e.data.get('text', '') for e in events if e.kind == 'text_delta')
+        return self.message['text']
+
+    @property
+    def message(self):
+        return project_text(self._observations())
 
     @property
     def consumption(self):

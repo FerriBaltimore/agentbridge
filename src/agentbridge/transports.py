@@ -44,8 +44,8 @@ def command(account, session, options, *, native_transport=False):
             cmd += ['--input-format', 'stream-json', '--permission-prompt-tool', 'stdio']
             return cmd if native_transport else [sys.executable, '-m', 'agentbridge.interactive_worker']
         return cmd
-    if options.max_turns is not None or options.max_budget_usd is not None or options.effort:
-        raise UnsupportedError('Cursor adapter does not map turn/dollar caps or effort yet.')
+    if options.max_turns is not None or options.max_budget_usd is not None:
+        raise UnsupportedError('Cursor adapter does not map turn or dollar caps.')
     if options.permission_mode != 'dontAsk':
         raise UnsupportedError('The supported Cursor SDK has no host approval response channel.')
     if options.sandbox == 'workspace-write':

@@ -429,5 +429,6 @@ class Store(AuthStoreMixin):
                 return
             if row['stop_requested'] and state not in ('interrupted',):
                 state,code='cancelled','user_stop'
-            self._event(db,id,row['session_id'],'run_finished',{'state':state,'code':code,'exit_code':exit_code})
+            from .turn_outcome import completion
+            self._event(db,id,row['session_id'],'run_finished',completion(db,id,state,code,exit_code))
             db.execute('UPDATE runs SET state=?,error=?,exit_code=?,updated=? WHERE id=?',(state,code,exit_code,time.time(),id))

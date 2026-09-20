@@ -27,9 +27,9 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
 | Stop/recovery | Persisted stop; observed worker identity; lost workers marked interrupted | Grace override at stop is unsupported; configure RunOptions.stop_grace before launch; no automatic replay of unknown effects |
 | Resume | Explicit new message/turn with native session or portable context | Not the same message_id with multiple attempts; native/reconcile modes are not separate provider workflows |
 | Transfer/export | Native version checks, explicit portable fallback, bounded omissions, destination idempotency | File copy and SQLite commit are not one crash-atomic transaction; replay metadata may be incomplete |
-| Models | Live Codex, Claude initialize and Cursor SDK catalogues; marked static fallback on failure | Catalogue membership does not verify model entitlement |
-| Usage | Provider observations; Codex account reader; Claude native OAuth quota windows and stale fallback | Cursor SDK account quota unavailable; no historical time filters or aggregation |
-| Errors | Structured error envelope; unknown outcome never retryable; safe adapter messages | Provider-native error classification is incomplete; compatibility codes remain |
+| Models | Live paginated Codex, Claude initialize and Cursor SDK catalogs; observed effort, parameters/variants and context metadata | Catalogue membership does not verify model entitlement; absent sizes remain unknown |
+| Usage | Normalized windows, countdowns, scoped Claude limits and Codex spend pools/reset credits; explicit durable Codex reset redemption | Cursor SDK account quota unavailable; no historical time filters or aggregation; reset mutation tested with fixtures |
+| Errors | Structured native failures, safety blocks, quota/auth/billing/context/output limits, cut streams and safe terminal outcomes | Unrecognized provider failures remain generic; no claim of exhaustive future error coverage |
 
 ## Explicitly unsupported or unfinished
 
@@ -44,8 +44,8 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
   collection envelopes.
 - Shared message identity across execution retries, active-turn message steering,
   comprehensive transfer crash recovery and retention/deletion operations.
-- Complete mapping of provider authentication, quota and permission failures into
-  the target error catalogue. Generic provider_failed remains possible.
+- Exhaustive future provider error mapping. Known codes and bounded compatibility
+  messages are mapped; unknown failures retain generic safe codes.
 - Network transports. This build delivers Python SDK, CLI and JSON-RPC over stdio.
   A future transport should share the same dispatcher and event store.
 - A completely fresh mobile Claude login after the scroll fix. The corrected
@@ -76,3 +76,6 @@ supported feature subset. General production readiness is not established.
 The permission, attachment and catalogue subset is specified in
 [interactive-inputs.md](interactive-inputs.md). Fullbrain implementation is
 outside this repository and outside the current delivery scope.
+
+The normalized quota, reset, model and failure subset is specified in
+[usage and failures](../usage-and-failures.md), including evidence boundaries.

@@ -14,6 +14,7 @@ It currently has adapters for Codex, Claude Code and Cursor. It separates the ap
 - Restart-safe idempotency for instance creation, message admission, authentication and transfers.
 - Normalized text, tool, result, quota, usage, subagent and permission events.
 - Optional quota and usage readers. Tokens, limits and monetary cost stay separate and carry their observation source.
+- Quota windows and reset countdowns, explicit Codex earned resets, model-scoped Claude limits and safe session failure classification. See [usage and failures](docs/usage-and-failures.md).
 - An independent account service for configured identity, authentication observations, quota snapshots and usage history. It does not supervise worker processes or choose fallback accounts.
 - Python, command-line and JSON-RPC 2.0 stdio entry points. No network server is opened by the library.
 

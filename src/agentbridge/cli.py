@@ -8,7 +8,14 @@ from .commands.account_output import print_account_human
 from .commands.help import PrettyHelpFormatter  # Compatibility for existing callers.
 from .commands.model_actions import model_command, print_models
 from .commands.parser import build_parser
+from .commands.usage_output import print_usage, print_consumption
 from .rpc import dispatch, rpc, serial
+
+
+def error_payload(error):
+    if isinstance(error, BridgeError):
+        return {'error': error.code, 'message': str(error), 'data': error.safe_data()}
+    return {'error': 'invalid_params', 'message': 'Invalid parameters.'}
 
 
 def main(argv=None):
@@ -25,12 +32,28 @@ def main(argv=None):
         return
     with Bridge(args.root) as bridge:
         if args.action=='rpc':rpc(bridge,sys.stdin,sys.stdout)
+        elif args.action=='usage':
+            try:
+                scope = 'account' if args.account_ref else 'instance' if args.instance_id else 'turn'
+                if args.refresh and scope != 'account':
+                    raise BridgeError('unsupported_parameter', 'Refresh applies to account observations only.')
+                result = bridge.usage(scope, account_ref=args.account_ref, instance_id=args.instance_id,
+                                      turn_id=args.turn_id, refresh=args.refresh)
+                if args.json:
+                    print(json.dumps(result, default=serial, indent=2, ensure_ascii=False))
+                elif scope == 'account':
+                    print_usage(result, args.account_ref)
+                else:
+                    print_consumption(result)
+            except (BridgeError, ValueError, TypeError, KeyError) as error:
+                print(json.dumps(error_payload(error), ensure_ascii=False), file=sys.stderr)
+                raise SystemExit(1) from None
         elif args.action=='capabilities':print(json.dumps(bridge.capabilities(),indent=2))
         elif args.action=='models':
             try:
                 print_models(model_command(bridge,args), getattr(args, 'json', False))
             except (BridgeError,ValueError,TypeError,KeyError) as error:
-                print(json.dumps({'error':getattr(error,'code','invalid_params'),'message':str(error)},ensure_ascii=False),file=sys.stderr)
+                print(json.dumps(error_payload(error),ensure_ascii=False),file=sys.stderr)
                 raise SystemExit(1) from None
         elif args.action=='accounts':
             try:
@@ -38,12 +61,12 @@ def main(argv=None):
                 if getattr(args,'json',False):print(json.dumps(result,default=serial,indent=2,ensure_ascii=False))
                 else:print_account_human(args.accounts_command,result,getattr(args,'account_name',None))
             except (BridgeError,ValueError,TypeError,KeyError) as error:
-                print(json.dumps({'error':getattr(error,'code','invalid_params'),'message':str(error)},ensure_ascii=False),file=sys.stderr)
+                print(json.dumps(error_payload(error),ensure_ascii=False),file=sys.stderr)
                 raise SystemExit(1) from None
         else:
             try:result=dispatch(bridge,args.method,json.load(sys.stdin));print(json.dumps(result,default=serial))
             except (BridgeError,ValueError,TypeError,KeyError) as e:
-                print(json.dumps({'error':getattr(e,'code','invalid_params'),'message':str(e) if isinstance(e,BridgeError) else 'Invalid parameters'}))
+                print(json.dumps(error_payload(e)))
                 raise SystemExit(1) from None
 
 

@@ -64,8 +64,8 @@ class Bridge(DiscoveryMixin, TransferMixin):
         if scope == 'account':
             account_id = self._account_id(None, account_ref)
             value = self.account_usage(account_id, refresh=refresh)
-            if include_quota:
-                value = {**value, 'quota': self.quota(account_id)}
+            # Account usage already includes quota. Never replace a live snapshot
+            # with the older rollout-only compatibility surface.
             return {**value, 'scope': 'account'}
         if scope == 'turn':
             if not turn_id:
@@ -88,6 +88,10 @@ class Bridge(DiscoveryMixin, TransferMixin):
             raise UnsupportedError('Historical usage filters are not supported by this adapter.')
         values = self.account_service.history(account_id, limit=limit + cursor)
         return values[cursor:cursor + limit]
+
+    def account_quota_reset(self, account_ref, *, idempotency_key, credit_id=None):
+        from .quota_resets import consume
+        return consume(self.store, self.resolve_account(account_ref), idempotency_key, credit_id)
 
     def account_login(self, **options):return self.authentication.login(**options)
     def account_login_start(self, **options):return self.authentication.start(**options)
@@ -223,11 +227,14 @@ class Bridge(DiscoveryMixin, TransferMixin):
         value['message_id'] = value.get('message_id', value['id'])
         value['created_at'] = value['created']
         value['updated_at'] = value['updated']
-        value['outcome'] = value['error'] or value['state']
+        from .turn_outcome import detail
+        with self.store.connect() as db:
+            issue = detail(db, turn_id, value['state'], value.get('error'))
+        value['outcome'] = issue['outcome'] if issue else value['state']
         if include_usage:
             value['usage'] = run.consumption
         if include_error and value.get('error'):
-            value['error_detail'] = {'code': value['error'], 'outcome': value['state']}
+            value['error_detail'] = issue
         return value
 
     def turns(self, *, instance_id=None, state=None, limit=100, cursor=0):

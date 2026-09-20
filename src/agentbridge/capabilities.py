@@ -8,7 +8,7 @@ OPERATIONS = (
     "capabilities.get", "accounts.list", "accounts.status", "accounts.login",
     "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel",
-    "models.list", "usage.get", "instances.create", "instances.get",
+    "models.list", "usage.get", "accounts.quota.reset", "instances.create", "instances.get",
     "instances.list", "instances.update", "instances.archive", "instances.events", "messages.create",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
@@ -16,6 +16,8 @@ OPERATIONS = (
 
 
 def _support(engine, operation):
+    if operation == 'accounts.quota.reset':
+        return 'native' if engine == 'codex' else 'unsupported'
     if operation == "permissions.respond":
         return "adapter" if engine in {"codex", "claude"} else "unsupported"
     if operation == "accounts.status":
@@ -32,6 +34,8 @@ def _support(engine, operation):
 
 
 def _maturity(engine, operation):
+    if operation == 'accounts.quota.reset':
+        return 'fixture_tested' if engine == 'codex' else 'unsupported'
     if operation == 'permissions.respond':
         return 'fixture_tested' if engine in {'codex', 'claude'} else 'unsupported'
     tested = {
@@ -47,6 +51,8 @@ def _maturity(engine, operation):
 
 
 def _limitations(engine, operation):
+    if operation == 'accounts.quota.reset':
+        return ['explicit_consumption_only', 'persistent_idempotency_key_required', 'provider_acceptance_not_run'] if engine == 'codex' else ['provider_reset_api_unavailable']
     if operation == 'models.list' and engine != 'codex':
         return ['catalog_is_not_entitlement_verification', 'static_fallback_on_refresh_failure']
     if operation == 'accounts.status' and engine == 'cursor':
@@ -87,9 +93,9 @@ def payload(engine=None):
         data["parameters"] = {
             "model": {"support": "native" if name == "codex" else "adapter",
                       "maturity": "fixture_tested"},
-            "effort": {"support": "native" if name == "codex" else
-                       "adapter" if name == "claude" else "unsupported",
-                       "maturity": "fixture_tested" if name != "cursor" else "unsupported"},
+            "effort": {"support": "native" if name == "codex" else "adapter",
+                       "maturity": "fixture_tested",
+                       "limitations": ['requires_reported_model_parameter'] if name == 'cursor' else []},
             "context_window": {"support": "unsupported", "maturity": "unsupported"},
             "attachments": {"support": "adapter", "maturity": "fixture_tested",
                             "types": ["text", "image"], "max_count": 8, "max_bytes": 5242880,

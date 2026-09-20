@@ -42,6 +42,7 @@ class CodexAppServerProbe:
         self.timeout = timeout
         self.process = None
         self.next_id = 0
+        self.buffer = b''
 
     def _command(self):
         return list(self.account.command or ("codex",)) + ["app-server", "--stdio"]
@@ -73,17 +74,23 @@ class CodexAppServerProbe:
             self.process.stdin.flush()
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
-                ready, _, _ = select.select([self.process.stdout], [], [], max(0, deadline - time.monotonic()))
-                if not ready:
-                    break
-                line = self.process.stdout.readline()
-                if not line:
-                    break
+                if b'\n' not in self.buffer:
+                    ready, _, _ = select.select([self.process.stdout], [], [], max(0, deadline - time.monotonic()))
+                    if not ready:
+                        break
+                    chunk = os.read(self.process.stdout.fileno(), 65536)
+                    if not chunk:
+                        break
+                    self.buffer += chunk
+                    if len(self.buffer) > 8 * 1024 * 1024:
+                        raise BridgeError('provider_protocol_error', 'The provider response is too large.')
+                    continue
+                line, self.buffer = self.buffer.split(b'\n', 1)
                 try:
                     message = json.loads(line)
                 except (TypeError, ValueError):
                     continue
-                if message.get("id") != request["id"]:
+                if not isinstance(message, dict) or message.get("id") != request["id"]:
                     continue
                 if isinstance(message.get("error"), dict):
                     raise BridgeError("provider_failed", "The provider rejected the account query.")
@@ -125,11 +132,20 @@ class CodexAppServerProbe:
         try:
             self._rpc("initialize", {"clientInfo": {"name": "agentbridge", "title": "AgentBridge", "version": "0.1"}})
             self._notify("initialized", {})
-            result = self._rpc("model/list", {})
-            models = result.get("data", result.get("models", []))
-            if not isinstance(models, list):
-                raise BridgeError("provider_protocol_error", "The provider returned an invalid model catalog.")
-            return models
+            models, cursor, seen = [], None, set()
+            for _ in range(100):
+                result = self._rpc('model/list', {'cursor': cursor, 'limit': 100, 'includeHidden': True})
+                page = result.get('data', result.get('models', []))
+                if not isinstance(page, list) or len(models) + len(page) > 10000:
+                    raise BridgeError('provider_protocol_error', 'The provider returned an invalid model catalog.')
+                models.extend(page)
+                cursor = result.get('nextCursor')
+                if cursor is None:
+                    return models
+                if not isinstance(cursor, str) or not cursor or len(cursor) > 4096 or cursor in seen:
+                    raise BridgeError('provider_protocol_error', 'The provider returned an invalid model cursor.')
+                seen.add(cursor)
+            raise BridgeError('provider_protocol_error', 'The provider model catalog exceeds the page limit.')
         finally:
             self.close()
 

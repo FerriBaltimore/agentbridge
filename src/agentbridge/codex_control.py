@@ -1,6 +1,8 @@
 """Codex app-server execution and one-request approvals over its native protocol."""
 from .attachments import images
 from .errors import BridgeError
+from .provider_errors import normalize
+from .session_events import routing
 
 
 class CodexControl:
@@ -16,7 +18,10 @@ class CodexControl:
             value = self.channel.receive(self.payload['options']['timeout'])
             if value.get('id') == request_id and 'method' not in value:
                 if 'error' in value:
-                    raise BridgeError('provider_failed', 'Codex rejected the native operation.')
+                    issue = normalize('codex', value['error'], phase='launch', outcome='not_started')
+                    raise BridgeError(issue['code'], 'Codex rejected the native operation.',
+                                      phase='launch', outcome='not_started', retryable=False,
+                                      details=issue['details'])
                 return value.get('result', {})
             self.event(value)
 
@@ -36,13 +41,28 @@ class CodexControl:
             return
         if params.get('threadId') not in (None, self.thread_id):
             return
+        if self.turn_id and params.get('turnId') not in (None, self.turn_id):
+            return
         if method == 'turn/completed':
             turn = params.get('turn') or {}
             if self.turn_id and turn.get('id') != self.turn_id:
                 return
-            success = turn.get('status') == 'completed'
-            self.emit({'type': 'turn.completed' if success else 'turn.failed'})
+            status = turn.get('status')
+            if status not in {'completed', 'interrupted', 'failed'}:
+                status = 'failed'
+            event = {'type': 'turn.' + status}
+            if turn.get('error'):
+                event['error'] = normalize('codex', turn['error'])
+            self.emit(event)
             self.done = True
+        elif method == 'error':
+            self.emit({'type': 'error', 'error': normalize('codex', params.get('error'),
+                       terminal=False, provider_retrying=params.get('willRetry') is True),
+                       'will_retry': params.get('willRetry') is True})
+        elif method == 'account/rateLimits/updated' and isinstance(params.get('rateLimits'), dict):
+            self.emit({'type': 'bridge_quota', 'limits': {'rateLimits': params['rateLimits']}})
+        elif method == 'model/rerouted':
+            self.emit({'type': 'bridge_model_changed', 'change': routing('codex', params)})
         elif method == 'item/agentMessage/delta':
             self.emit({'type': 'bridge_text_delta', 'text': params.get('delta', '')})
         elif method in {'item/started', 'item/completed'}:
@@ -59,12 +79,19 @@ class CodexControl:
                         safe[public] = item[native]
                 self.emit({'type': method.replace('/', '.'), 'item': {'type': kind, **safe}})
         elif method == 'thread/tokenUsage/updated':
-            total = (params.get('tokenUsage') or {}).get('total')
-            if isinstance(total, dict):
-                tokens = {public: total[native] for native, public in
+            usage = params.get('tokenUsage') or {}
+            for key, scope, aggregation in [('total', 'session', 'cumulative'), ('last', 'observation', 'latest')]:
+                counters = usage.get(key)
+                if not isinstance(counters, dict):
+                    continue
+                tokens = {public: counters[native] for native, public in
                           [('inputTokens', 'input_tokens'), ('outputTokens', 'output_tokens'),
-                           ('cachedInputTokens', 'cached_input_tokens')] if native in total}
-                self.emit({'type': 'bridge_usage', 'scope': 'session', 'tokens': tokens})
+                           ('cachedInputTokens', 'cached_input_tokens'), ('totalTokens', 'total_tokens'),
+                           ('reasoningOutputTokens', 'reasoning_output_tokens'),
+                           ('cacheWriteInputTokens', 'cache_write_input_tokens')]
+                          if isinstance(counters.get(native), int) and not isinstance(counters[native], bool)}
+                self.emit({'type': 'bridge_usage', 'scope': scope, 'tokens': tokens,
+                           'aggregation': aggregation, 'context_window': usage.get('modelContextWindow')})
 
     def execute(self):
         options = self.payload['options']

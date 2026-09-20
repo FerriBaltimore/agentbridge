@@ -1,5 +1,6 @@
 """Render safe account results for a human terminal."""
 import json
+from .usage_output import print_usage
 
 
 def print_account_human(command, value, account_name=None):
@@ -30,15 +31,7 @@ def print_account_human(command, value, account_name=None):
             print(f"Reason: {value['reason']}")
         return
     if command == "usage":
-        print(f"Account: {account_name or value.get('account_id')}")
-        print(f"Source: {value.get('source') or '-'}")
-        print(f"Observed at: {value.get('observed_at') or '-'}")
-        print(f"Stale: {'yes' if value.get('stale') else 'no'}")
-        if value.get("reason"):
-            print(f"Reason: {value['reason']}")
-        details = {key: value[key] for key in ("quota", "account_usage") if key in value}
-        if details:
-            print(json.dumps(details, indent=2, ensure_ascii=False))
+        print_usage(value, account_name)
         return
     if command == "history":
         print(f"Account: {account_name or '-'}")
@@ -48,7 +41,8 @@ def print_account_human(command, value, account_name=None):
         print("Observed at | Source | Stale")
         print("---|---|---")
         for observation in value:
-            print(" | ".join(str(observation.get(key) or "-") for key in ("observed_at", "source", "stale")))
+            print(" | ".join(str(observation.get(key)) for key in ("observed_at", "source", "stale")))
+            print_usage(observation.get('data', {}), account_name)
         return
     if command == "check":
         print(f"Account: {account_name or '-'}")
