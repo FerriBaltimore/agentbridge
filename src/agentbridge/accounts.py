@@ -72,7 +72,9 @@ class AccountService:
 
     def usage(self, account_id, *, refresh=False):
         account = self.get(account_id)
-        return project(account.engine, self._usage(account, refresh=refresh))
+        observed = self._usage(account, refresh=refresh)
+        return {**project(account.engine, observed),
+                'provider_compatibility': observed.get('provider_compatibility')}
 
     def _usage(self, account, *, refresh=False):
         if refresh:
@@ -105,24 +107,43 @@ class AccountService:
                  'stale': row['stale']})} for row in rows]
 
     def _probe_account(self, account, *, include_usage):
+        from .provider_contracts import ContractRegistry
+        registry = ContractRegistry(self.store)
+        receipt = registry.check(account)
+        if not receipt['native_operations_allowed']:
+            result = {'status': 'provider_contract_unverified', 'identity': {},
+                      'reason': 'provider_contract_unverified', 'provider_compatibility': receipt}
+            self.store.account_observation(account.id, 'agentbridge', result['status'], result)
+            if include_usage:
+                with self.store.connect() as db:
+                    db.execute('UPDATE usage_observations SET stale=1 WHERE account_id=?', (account.id,))
+                result['usage'] = {'account_id': account.id, 'supported': False, 'stale': True,
+                                  'reason': result['reason'], 'provider_compatibility': receipt}
+            return {'data': result, 'status': result['status']}
+        return self._probe_compatible_account(account, include_usage=include_usage, compatibility=receipt)
+
+    def _probe_compatible_account(self, account, *, include_usage, compatibility):
         if account.engine == 'claude':
-            return self._claude_account(account, include_usage=include_usage)
+            return self._claude_account(account, include_usage=include_usage, compatibility=compatibility)
         if account.engine == 'cursor' and account.credential_ref:
-            return self._cursor_binding(account)
+            return self._cursor_binding(account, compatibility=compatibility)
         if account.engine != 'codex':
-            data = {'status': 'unsupported', 'identity': {}, 'reason': 'provider_probe_unsupported'}
+            data = {'status': 'unsupported', 'identity': {}, 'reason': 'provider_probe_unsupported',
+                    'provider_compatibility': compatibility}
             self.store.account_observation(account.id, 'agentbridge', data['status'], data)
             return {'data': data, 'status': data['status']}
         try:
             result = CodexAppServerProbe(account).read(include_usage=include_usage)
         except BridgeError as error:
             result = {'status': error.code, 'identity': {}, 'reason': error.code}
+        result['provider_compatibility'] = compatibility
         self.store.account_observation(account.id, CodexAppServerProbe.source, result['status'], result)
         if include_usage and (result.get('quota') is not None or result.get('account_usage') is not None):
             usage_data = {'supported': True, 'source': 'codex_app_server', 'quota': result.get('quota'),
                           'account_usage': result.get('account_usage'),
                           'quota_reason': result.get('quota_reason'),
-                          'account_usage_reason': result.get('account_usage_reason')}
+                          'account_usage_reason': result.get('account_usage_reason'),
+                          'provider_compatibility': compatibility}
             self.store.usage_observation(account.id, 'codex_app_server', 'account', usage_data, stale=False)
             result['usage'] = {'account_id': account.id, 'observed_at': stamp(), 'source': 'codex_app_server',
                                'scope': 'account', 'stale': False, **usage_data}
@@ -138,7 +159,7 @@ class AccountService:
                 'observed_at': stamp(cached['observed_at']) if cached else None}
         return {'data': result, 'status': result['status']}
 
-    def _claude_account(self, account, *, include_usage):
+    def _claude_account(self, account, *, include_usage, compatibility):
         from .claude_account import identity, quota
         try:
             result = identity(account)
@@ -146,6 +167,7 @@ class AccountService:
                 raise BridgeError(result['status'], 'The bound profile cannot refresh usage.')
             if include_usage and result['status'] == 'loaded_only':
                 data = quota(account)
+                data['provider_compatibility'] = compatibility
                 self.store.usage_observation(account.id, data['source'], 'account', data, stale=False)
                 result['usage'] = {'account_id': account.id, 'observed_at': stamp(), **data}
         except BridgeError as error:
@@ -159,10 +181,11 @@ class AccountService:
                     **(cached['data'] if cached else {'supported': False, 'scope': 'account'}),
                     'stale': True, 'reason': error.code,
                     'observed_at': stamp(cached['observed_at']) if cached else None}
+        result['provider_compatibility'] = compatibility
         self.store.account_observation(account.id, 'claude_native_status', result['status'], result)
         return {'data': result, 'status': result['status']}
 
-    def _cursor_binding(self, account):
+    def _cursor_binding(self, account, *, compatibility):
         reference = account.credential_ref
         try:
             with GrantBridgeClient(**reference['connection']) as client:
@@ -177,5 +200,6 @@ class AccountService:
                       'credential_expires_at_ms': value.get('expires_at_ms')}
         except BridgeError as error:
             result = {'status': 'authentication_required', 'identity': {}, 'reason': error.code}
+        result['provider_compatibility'] = compatibility
         self.store.account_observation(account.id, 'grantbridge_binding', result['status'], result)
         return {'data': result, 'status': result['status']}

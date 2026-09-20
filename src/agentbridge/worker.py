@@ -20,6 +20,8 @@ from dataclasses import asdict
 from .execution_outcome import finish
 from .provider_errors import normalize
 from .error_observer import ErrorObserver
+from .errors import BridgeError
+from .provider_contracts import ContractRegistry
 
 MAX_LINE=8*1024*1024
 
@@ -27,18 +29,25 @@ MAX_LINE=8*1024*1024
 def main():
     os.umask(0o077)
     root,run_id=sys.argv[1:3]
-    store=Store(root)
-    if not store.claim(run_id,os.getpid(),identity(os.getpid())):return
-    run=store.get('runs',run_id)
-    session=store.get('sessions',run['session_id'])
-    account=Account(**json.loads(store.get('accounts',run['account_id'])['config']))
-    options=RunOptions(**json.loads(run['options']))
+    store=None
+    claimed=False
+    account=None
     child=None
     parser=None
+    writer=None
+    select=None
     stopped=[False]
     signal.signal(signal.SIGTERM,lambda *_:stopped.__setitem__(0,True))
     signal.signal(signal.SIGINT,lambda *_:stopped.__setitem__(0,True))
     try:
+        store=Store(root)
+        claimed=store.claim(run_id,os.getpid(),identity(os.getpid()))
+        if not claimed:return
+        run=store.get('runs',run_id)
+        session=store.get('sessions',run['session_id'])
+        account=Account(**json.loads(store.get('accounts',run['account_id'])['config']))
+        options=RunOptions(**json.loads(run['options']))
+        ContractRegistry(store).verify_run(account,run_id)
         # Values are passed over this private pipe, never stored or placed in argv.
         secrets=json.loads(sys.stdin.read())
         redactor=Redactor(secrets.values())
@@ -68,8 +77,12 @@ def main():
         else:payload=prompt
         if run['stop_requested'] or stopped[0]:
             store.finish(run_id,'cancelled','user_stop');return
-        child=subprocess.Popen(cmd,cwd=session['cwd'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE,start_new_session=True)
+        try:
+            child=subprocess.Popen(cmd,cwd=session['cwd'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,start_new_session=True)
+        except OSError:
+            raise BridgeError('provider_unavailable', 'The native provider could not be started.',
+                              phase='launch', outcome='not_started') from None
         store.update(run_id,child_pid=child.pid,child_identity=identity(child.pid),updated=time.time())
         emit('run_started',{'engine':account.engine,'account_id':account.id})
         writer_error=[]
@@ -128,6 +141,7 @@ def main():
         try:os.killpg(child.pid, signal.SIGKILL)
         except ProcessLookupError:pass
         writer.join(timeout=2)
+        if writer_error:reason=reason or 'input_delivery_failed'
         unresolved=parser.end()
         if stderr_bytes:emit('diagnostic',{'stderr_bytes':stderr_bytes,'content_stored':False})
         state, failure, issue = finish(parser, reason=reason, exit_code=code, unresolved=unresolved,
@@ -138,14 +152,47 @@ def main():
             emit('error', issue)
         store.finish(run_id, state, failure, code)
     except BaseException as error:
+        # Each recovery step is independent: a second storage failure must not
+        # skip cleanup or a terminal commit that could still succeed.
+        cleaned=True
         if child:
             try:os.killpg(child.pid,signal.SIGKILL)
             except ProcessLookupError:pass
-            child.wait(timeout=5)
-        if parser:parser.end()
+            except OSError:cleaned=False
+            try:child.wait(timeout=5)
+            except (OSError,subprocess.TimeoutExpired):cleaned=False
+        if parser:
+            try:parser.end()
+            except Exception:pass
         # Exception bodies can embed env, prompts and provider responses.
-        store.emit(run_id, 'error', normalize(account.engine, {'code': 'worker_failed'}, outcome='unknown'))
-        store.finish(run_id,'interrupted','worker_failed')
+        code=error.code if isinstance(error,BridgeError) else 'worker_failed'
+        issue=normalize(account.engine if account else None, {'code': code},
+                        phase='execution' if child else 'launch',
+                        outcome='unknown' if child else 'not_started')
+        if isinstance(error,BridgeError) and code in {
+                'provider_contract_unverified','provider_contract_changed','provider_contract_invalid'}:
+            issue={**error.safe_data(),'engine':account.engine if account else None,
+                   'terminal':True,'provider_retrying':False}
+        if claimed:
+            try:store.emit(run_id,'error',issue)
+            except Exception:pass
+            if cleaned:
+                try:store.finish(run_id,'interrupted' if child else 'failed',issue['code'])
+                except Exception:pass
+        # Persistent disk failure cannot be acknowledged as a saved result.
+        # A dead owner remains reconcilable once the store becomes writable.
+        raise SystemExit(1) from None
+    finally:
+        if select is not None:
+            try:select.close()
+            except OSError:pass
+        if writer is not None:
+            try:writer.join(timeout=2)
+            except RuntimeError:pass
+        if child is not None and child.poll() is not None:
+            for pipe in (child.stdin,child.stdout,child.stderr):
+                try:pipe.close()
+                except OSError:pass
 
 
 def parse(line, parser):
@@ -157,6 +204,7 @@ def parse(line, parser):
     try:parser.feed(event)
     except (TypeError,ValueError,AttributeError,KeyError):
         parser.event('gap',{'reason':'malformed_provider_event'})
+        parser.error({'code':'provider_protocol_error'},outcome='unknown')
 
 
 if __name__=='__main__':main()

@@ -6,6 +6,7 @@ from . import Bridge, BridgeError
 from .commands.account_actions import account_command
 from .commands.account_output import print_account_human
 from .commands.error_actions import error_command
+from .commands.contract_actions import contract_command
 from .commands.help import PrettyHelpFormatter  # Compatibility for existing callers.
 from .commands.model_actions import model_command, print_models
 from .commands.parser import build_parser
@@ -36,9 +37,9 @@ def main(argv=None):
         return
     with Bridge(args.root) as bridge:
         if args.action=='rpc':rpc(bridge,sys.stdin,sys.stdout)
-        elif args.action=='errors':
+        elif args.action in {'errors', 'contracts'}:
             try:
-                result = error_command(bridge, args)
+                result = (error_command if args.action == 'errors' else contract_command)(bridge, args)
                 print(json.dumps(result, default=serial, indent=2, ensure_ascii=False))
             except (BridgeError, ValueError, TypeError, KeyError) as error:
                 print(json.dumps(error_payload(error), ensure_ascii=False), file=sys.stderr)

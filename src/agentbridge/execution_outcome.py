@@ -7,7 +7,8 @@ def finish(parser, *, reason=None, exit_code=0, unresolved=False, stderr=''):
     if reason == 'user_stop':
         return 'cancelled', 'user_stop', None
     if reason:
-        code = {'timeout': 'provider_timeout', 'protocol_error': 'provider_protocol_error'}.get(
+        code = {'timeout': 'provider_timeout', 'protocol_error': 'provider_protocol_error',
+                'input_delivery_failed': 'provider_connection_lost'}.get(
             reason, 'unknown_outcome')
         return 'interrupted', code, normalize(engine, {'code': code}, outcome='unknown')
     if parser.terminal == 'interrupted':
@@ -30,8 +31,11 @@ def finish(parser, *, reason=None, exit_code=0, unresolved=False, stderr=''):
         state_code = issue['details'].get('unclassified_code', issue['code']) if (
             issue['details'].get('detection') == 'learned_rule') else issue['code']
         state = 'interrupted' if lost_unknown or state_code in {
-            'provider_timeout', 'provider_connection_lost', 'provider_protocol_error', 'unknown_outcome'
+            'provider_timeout', 'provider_connection_lost', 'provider_protocol_error', 'unknown_outcome',
+            'worker_failed'
         } else 'failed'
+        if issue['outcome'] == 'not_started':
+            state = 'failed'
         return state, issue['code'], issue
     if parser.terminal != 'completed' or unresolved:
         issue = normalize(engine, {'code': 'unknown_outcome'})

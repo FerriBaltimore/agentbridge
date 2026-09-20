@@ -81,6 +81,7 @@ class Run:
                 continue
             if not follow:
                 return
+            self.bridge.recover(turn_id=self.id)
             if self.status in TERMINAL:
                 yield from self.bridge.store.events(run_id=self.id, after=after, limit=remaining)
                 return
@@ -100,6 +101,7 @@ class Run:
                 yield event
             if batch:
                 continue
+            await asyncio.to_thread(self.bridge.recover, turn_id=self.id)
             if await asyncio.to_thread(lambda: self.status in TERMINAL):
                 events = await asyncio.to_thread(
                     lambda: self.bridge.store.events(run_id=self.id, after=after))
@@ -116,7 +118,7 @@ class Run:
         while self.status not in TERMINAL:
             if timeout is not None and time.monotonic() - started >= timeout:
                 raise TimeoutError('Wait timed out; the run remains active.')
-            self.bridge.recover()
+            self.bridge.recover(turn_id=self.id)
             time.sleep(0.05)
         self.bridge.close()
         return self.snapshot

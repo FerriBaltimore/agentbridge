@@ -20,6 +20,11 @@ It currently has adapters for Codex, Claude Code and Cursor. It separates the ap
 
 The package does not copy credentials, private reasoning or Fullbrain state. Account records contain credential references such as environment variable names, never their values. Provider capabilities include support and maturity, so fixture-tested behavior is not presented as live provider acceptance.
 
+Native operations use [reviewed provider release bindings](docs/provider-versioning.md).
+Use `agentbridge contracts list`, `contracts check ACCOUNT`, and
+`contracts inspect --engine codex` to inspect compatibility. Unknown releases
+require review; compatible releases share one content-addressed contract.
+
 Authentication integration with GrantBridge is available through a local stdio adapter. GrantBridge owns the browser flow, encrypted credentials and native profile. Public responses contain safe authorization state. The trusted execution layer receives a verified native home or temporarily resolves a Cursor key over a private pipe.
 
 ## Minimal Python use

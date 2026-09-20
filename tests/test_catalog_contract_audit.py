@@ -42,6 +42,7 @@ def test_upgrade_target_is_not_a_retirement_date_or_deprecation_claim():
 
 @pytest.mark.parametrize('items', [[{'id': 'ok'}, {'id': ['bad']}], [{'id': 'same'}, {'id': 'same'}], {}])
 def test_catalog_drift_does_not_return_a_fresh_partial_catalog(tmp_path, monkeypatch, items):
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
     monkeypatch.setattr(provider_catalog, 'models', lambda _: items)
     with Bridge(tmp_path) as bridge:
         bridge.register(Account('fixture', 'cursor'))

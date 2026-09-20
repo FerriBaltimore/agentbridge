@@ -35,6 +35,10 @@ def public_login(result):
 
 
 def dispatch(bridge,method,params):
+    contract_methods = {'contracts.list': 'provider_contracts', 'contracts.get': 'provider_contract',
+                        'contracts.check': 'provider_compatibility', 'contracts.inspect': 'provider_inspect'}
+    if method in contract_methods:
+        return getattr(bridge, contract_methods[method])(**params)
     error_methods = {
         'error_cases.list': 'error_cases', 'error_cases.get': 'error_case',
         'error_cases.diagnose': 'error_diagnose', 'error_diagnoses.get': 'error_diagnosis',

@@ -33,6 +33,10 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
 
 ## Explicitly unsupported or unfinished
 
+Provider release admission, immutable shared dialects and offline drift inspection
+are described in [provider versioning](../provider-versioning.md). Exact bindings
+do not certify the whole provider or silently accept later versions.
+
 - Cursor interactive permission responses and account quota: the supported SDK
   exposes neither host approval delivery nor remaining account capacity. These
   are explicit provider limits, not simulated successes.

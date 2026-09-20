@@ -22,7 +22,7 @@ def command(account, session, options, *, native_transport=False):
             raise UnsupportedError('Codex exec does not support AgentBridge turn, tool-list or dollar caps.')
         if duplex(account, options):
             return list(account.command or ('codex',)) + ['app-server', '--stdio'] if native_transport else [
-                sys.executable, '-m', 'agentbridge.interactive_worker']
+                sys.executable, '-P', '-m', 'agentbridge.interactive_worker']
         cmd=list(account.command or ('codex',))+['exec']
         if native:cmd+=['resume',native]
         cmd+=['--json','--skip-git-repo-check','-c','approval_policy="never"','-c',f'sandbox_mode={json.dumps(options.sandbox)}']
@@ -42,7 +42,7 @@ def command(account, session, options, *, native_transport=False):
         if options.max_budget_usd is not None:cmd+=['--max-budget-usd',str(options.max_budget_usd)]
         if duplex(account, options):
             cmd += ['--input-format', 'stream-json', '--permission-prompt-tool', 'stdio']
-            return cmd if native_transport else [sys.executable, '-m', 'agentbridge.interactive_worker']
+            return cmd if native_transport else [sys.executable, '-P', '-m', 'agentbridge.interactive_worker']
         return cmd
     if options.max_turns is not None or options.max_budget_usd is not None:
         raise UnsupportedError('Cursor adapter does not map turn or dollar caps.')
@@ -52,4 +52,4 @@ def command(account, session, options, *, native_transport=False):
         raise UnsupportedError('Cursor does not provide the same workspace-write policy as Codex.')
     if options.sandbox == 'read-only' and options.allowed_tools:
         raise UnsupportedError('Cursor read-only mode disables tools; a tool list would conflict.')
-    return list(account.command or (sys.executable,'-m','agentbridge.cursor_worker'))
+    return list(account.command or (sys.executable,'-P','-m','agentbridge.cursor_worker'))

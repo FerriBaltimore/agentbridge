@@ -89,7 +89,8 @@ def test_expired_permission_is_denied_and_cannot_be_revived(tmp_path):
     bridge.store.finish(turn, 'cancelled')
 
 
-def test_cursor_account_quota_does_not_claim_remaining_capacity(tmp_path):
+def test_cursor_account_quota_does_not_claim_remaining_capacity(tmp_path, monkeypatch):
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
     bridge = Bridge(tmp_path)
     bridge.register(Account('cursor-test', 'cursor'))
     value = bridge.account_usage('cursor-test', refresh=True)
@@ -100,6 +101,7 @@ def test_cursor_account_quota_does_not_claim_remaining_capacity(tmp_path):
 
 @pytest.mark.parametrize('failure', [False, True])
 def test_cursor_catalog_is_explicit_and_falls_back_without_inference(tmp_path, monkeypatch, failure):
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
     from agentbridge import provider_catalog
     bridge = Bridge(tmp_path)
     monkeypatch.setenv('FIXTURE_CURSOR_KEY', 'fixture-only-key')
@@ -107,9 +109,10 @@ def test_cursor_catalog_is_explicit_and_falls_back_without_inference(tmp_path, m
     def launch(command, **kwargs):
         assert command[-1] == 'FIXTURE_CURSOR_KEY'
         assert kwargs['env']['FIXTURE_CURSOR_KEY'] == 'fixture-only-key'
-        return SimpleNamespace(returncode=int(failure), stdout=json.dumps([
-            {'id': 'model-fixture', 'display_name': 'Fixture', 'description': 'fixture'}]))
-    monkeypatch.setattr(provider_catalog.subprocess, 'run', launch)
+        if failure:
+            raise BridgeError('provider_unavailable', 'The provider model catalog is unavailable.')
+        return json.dumps([{'id': 'model-fixture', 'display_name': 'Fixture', 'description': 'fixture'}]).encode()
+    monkeypatch.setattr(provider_catalog, 'read_output', launch)
     result = bridge.models('cursor', account_ref='cursor-test', refresh=True)
     assert result['source'] == ('static' if failure else 'live')
     assert result['stale'] is failure

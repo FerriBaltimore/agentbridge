@@ -57,12 +57,18 @@ class AuthRuntime:
                 env[name] = os.environ[name]
         try:
             child = subprocess.Popen(
-                [sys.executable, '-m', 'agentbridge.auth_worker', str(self.store.root), attempt_id, token],
+                [sys.executable, '-P', '-m', 'agentbridge.auth_worker', str(self.store.root), attempt_id, token],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 env=env, start_new_session=True)
             self.children.append(child)
         except OSError:
-            self.finish(attempt_id, token)
+            with self.store.connect() as db:
+                db.execute('BEGIN IMMEDIATE')
+                owned = db.execute('UPDATE auth_runtime SET finished=1 WHERE attempt_id=? AND job_id=?',
+                                   (attempt_id, token))
+                if owned.rowcount and kind == 'start':
+                    db.execute("UPDATE auth_attempts SET status='failed',data=?,updated=? WHERE id=? AND status='starting'",
+                               (json.dumps({'error': {'code': 'launch_failed'}}), time.time(), attempt_id))
             raise BridgeError('launch_failed', 'Could not start the authentication worker.') from None
         return True
 

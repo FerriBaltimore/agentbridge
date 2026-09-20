@@ -131,6 +131,8 @@ values, native paths or process output are returned or persisted here.
         probe = None
         uncertain = row["state"] == "submitted"
         try:
+            from .provider_contracts import ContractRegistry
+            ContractRegistry(store).check(account, enforce=True)
             probe = CodexAppServerProbe(account)
             probe._rpc("initialize", {"clientInfo": {"name": "agentbridge", "title": "AgentBridge", "version": "0.1"},
                                       "capabilities": {"experimentalApi": True}})

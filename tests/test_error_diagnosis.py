@@ -8,6 +8,7 @@ from agentbridge.error_evidence import capture
 
 
 def setup(tmp_path, monkeypatch):
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
     bridge = Bridge(tmp_path / 'store')
     bridge.register(Account('diagnostic', 'cursor', key_env='FIXTURE_CURSOR_KEY'))
     monkeypatch.setenv('FIXTURE_CURSOR_KEY', 'private-credential')
@@ -89,6 +90,20 @@ def test_insufficient_evidence_stays_unclassified(tmp_path, monkeypatch):
     assert proposal['status'] == 'insufficient_evidence'
     with pytest.raises(BridgeError):
         bridge.error_validate(proposal['id'])
+
+
+def test_unindexed_diagnostic_sdk_is_not_executed(tmp_path, monkeypatch):
+    bridge, case_id = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.32')
+    def unexpected(*args, **kwargs):
+        pytest.fail('Unknown diagnostic SDK must not access credentials or execute')
+    monkeypatch.setattr(error_diagnosis, 'environment', unexpected)
+    monkeypatch.setattr(error_diagnosis, 'execute', unexpected)
+    args = {'account_ref': 'diagnostic', 'model': 'fixture', 'idempotency_key': 'unknown-version'}
+    value = bridge.error_diagnose(case_id, **args)
+    assert value['state'] == 'failed'
+    assert value['result']['code'] == 'provider_contract_unverified'
+    assert bridge.error_diagnose(case_id, **args) == value
 
 
 @pytest.mark.parametrize('mode', ['completed', 'timeout', 'oversized'])

@@ -1,9 +1,9 @@
 """Read provider model catalogues without submitting a model turn."""
 import json
 import os
-import subprocess
 import sys
 
+from .catalog_process import read_output
 from .claude_control import initialize
 from .credentials import environment, CURSOR_KEY_ENV
 from .errors import BridgeError
@@ -30,16 +30,10 @@ def models(account):
             raise BridgeError('provider_protocol_error', 'Claude returned malformed model catalog entries.')
         return [dict(item, id=item.get('value', item.get('id'))) for item in values]
     env['PYTHONPATH'] = os.path.dirname(os.path.dirname(__file__))
+    output = read_output([sys.executable, '-P', '-m', 'agentbridge.provider_catalog', account.key_env or CURSOR_KEY_ENV],
+                         env=env)
     try:
-        result = subprocess.run([sys.executable, '-m', 'agentbridge.provider_catalog', account.key_env or CURSOR_KEY_ENV],
-                                input='', text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                env=env, timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        raise BridgeError('provider_timeout', 'The model catalog could not be read in time.') from None
-    if result.returncode or len(result.stdout) > 1024 * 1024:
-        raise BridgeError('provider_unavailable', 'The provider model catalog is unavailable.')
-    try:
-        value = json.loads(result.stdout)
+        value = json.loads(output)
         if not isinstance(value, list):
             raise ValueError()
         return value

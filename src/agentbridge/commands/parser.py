@@ -3,6 +3,7 @@ import argparse
 
 from .. import __version__
 from .error_actions import add_errors
+from .contract_actions import add_contracts
 from .help import PrettyHelpFormatter, add_parser
 
 
@@ -23,6 +24,7 @@ def build_parser():
     parser.add_argument('--root',default='.agentbridge',help='Private persistent state directory')
     sub=parser.add_subparsers(dest='action')
     add_errors(sub)
+    add_contracts(sub)
     add_parser(sub, 'capabilities',help='Show implemented capabilities per engine')
     add_parser(sub, 'rpc',help='Serve JSON-RPC 2.0 on stdin/stdout; no network listener')
     models = add_parser(sub, 'models', help='List normalized provider models')

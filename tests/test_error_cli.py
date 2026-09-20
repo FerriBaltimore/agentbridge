@@ -36,6 +36,7 @@ def test_case_queries_page_persistent_safe_evidence(tmp_path, capsys):
 
 
 def test_explicit_diagnostic_selection_replays_and_never_activates(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
     bridge, case, _ = seed(tmp_path)
     bridge.register(Account('diagnostic-cursor', 'cursor', key_env='FIXTURE_DIAGNOSIS_KEY'))
     monkeypatch.setenv('FIXTURE_DIAGNOSIS_KEY', 'fixture-only-credential')

@@ -13,10 +13,7 @@ from .store import Store
 
 
 def main():
-    payload = json.load(sys.stdin)
     emit = lambda value: print(json.dumps(value), flush=True)
-    broker = Permissions(Store(payload['root']))
-    redactor = Redactor(os.environ.get(key, '') for key in payload['secret_names'])
     def approve(details, deliver):
         if payload['options']['permission_mode'] == 'dontAsk':
             deliver('deny')
@@ -27,6 +24,9 @@ def main():
         deliver(decision)
         broker.delivered(payload['turn_id'], permission_id, decision)
     try:
+        payload = json.load(sys.stdin)
+        broker = Permissions(Store(payload['root']))
+        redactor = Redactor(os.environ.get(key, '') for key in payload['secret_names'])
         with ProviderChannel(payload['command'], cwd=payload['cwd'], env=os.environ.copy()) as channel:
             if payload['engine'] == 'codex':
                 CodexControl(channel, payload, emit, approve).execute()
@@ -35,6 +35,11 @@ def main():
     except BridgeError as error:
         emit({'type': 'bridge_error', 'error': error.safe_data(),
               'outcome': 'not_started' if error.phase == 'launch' else 'unknown'})
+        raise SystemExit(1) from None
+    except Exception:
+        # Persistence and wrapper exceptions may include sensitive native data.
+        # Keep the parent worker informed without printing a Python traceback.
+        emit({'type': 'bridge_error', 'error': {'code': 'worker_failed'}, 'outcome': 'unknown'})
         raise SystemExit(1) from None
 
 

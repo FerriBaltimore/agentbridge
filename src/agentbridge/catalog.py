@@ -153,8 +153,13 @@ class ModelCatalog:
         models = []
         reason = 'live_catalog_refresh_required' if account else 'live_catalog_requires_account'
         observed_at = None
+        compatibility = None
         if account and refresh:
             try:
+                from .provider_contracts import ContractRegistry
+                compatibility = ContractRegistry(self.accounts.store).check(account)
+                if not compatibility['native_operations_allowed']:
+                    raise BridgeError('provider_contract_unverified', 'The installed release needs contract review.')
                 from .provider_catalog import models as provider_models
                 items = CodexAppServerProbe(account).list_models() if engine == 'codex' else provider_models(account)
                 if not isinstance(items, (list, tuple)):
@@ -181,4 +186,5 @@ class ModelCatalog:
             "reason": reason,
             "refresh": bool(refresh),
             "generated_at": _stamp(),
+            "provider_compatibility": compatibility,
         }

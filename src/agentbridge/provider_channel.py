@@ -38,20 +38,26 @@ class ProviderChannel:
                         return value
                 except (ValueError, UnicodeDecodeError):
                     pass
-                raise BridgeError('provider_protocol_error', 'Invalid native provider message.')
+                raise BridgeError('provider_protocol_error', 'Invalid native provider message.',
+                                  phase='execution', outcome='unknown')
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise BridgeError('provider_timeout', 'The native provider did not answer in time.')
+                raise BridgeError('provider_timeout', 'The native provider did not answer in time.',
+                                  phase='execution', outcome='unknown')
             ready, _, _ = select.select([self.process.stdout], [], [], remaining)
             if not ready:
                 continue
             chunk = os.read(self.process.stdout.fileno(), 65536)
             if not chunk:
+                if self.buffer:
+                    raise BridgeError('provider_protocol_error', 'The native provider message was truncated.',
+                                      phase='execution', outcome='unknown')
                 raise BridgeError('provider_connection_lost', 'The native provider ended its stream.',
                                   phase='execution', outcome='unknown')
             self.buffer += chunk
             if len(self.buffer) > 8 * 1024 * 1024:
-                raise BridgeError('provider_protocol_error', 'The native provider message is too large.')
+                raise BridgeError('provider_protocol_error', 'The native provider message is too large.',
+                                  phase='execution', outcome='unknown')
 
     def close(self):
         try:

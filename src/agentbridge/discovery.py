@@ -6,6 +6,22 @@ from .models import CAPABILITIES, page_values
 
 
 class DiscoveryMixin:
+    def provider_contracts(self, engine=None):
+        from .provider_contracts import ContractRegistry
+        return ContractRegistry(self.store).list(engine)
+
+    def provider_contract(self, contract_id):
+        from .provider_contracts import ContractRegistry
+        return ContractRegistry(self.store).get(contract_id)
+
+    def provider_compatibility(self, account_ref):
+        from .provider_contracts import ContractRegistry
+        return ContractRegistry(self.store).check(self.resolve_account(account_ref))
+
+    def provider_inspect(self, engine):
+        from .provider_contracts import ContractRegistry
+        return ContractRegistry(self.store).inspect(engine)
+
     def capabilities(self, engine=None, account_ref=None, refresh=False, include_parameters=True):
         if refresh:
             raise UnsupportedError('Capability refresh is not supported by this adapter.')

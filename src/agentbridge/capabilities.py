@@ -5,6 +5,7 @@ from .models import CAPABILITIES
 
 
 OPERATIONS = (
+    "contracts.list", "contracts.get", "contracts.check", "contracts.inspect",
     "capabilities.get", "accounts.list", "accounts.status", "accounts.login",
     "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel",
@@ -37,6 +38,8 @@ def _support(engine, operation):
 
 
 def _maturity(engine, operation):
+    if operation.startswith('contracts.'):
+        return 'fixture_tested'
     if operation.startswith(('error_cases.', 'error_diagnoses.', 'error_proposals.', 'error_rules.')):
         return 'fixture_tested'
     if operation == 'accounts.quota.reset':

@@ -1,6 +1,5 @@
 """Contract drift must not invent provider success, identity or compatible versions."""
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -80,8 +79,7 @@ def test_future_grantbridge_error_is_safe_and_known_error_stays_actionable():
     ('codex-cli 0.153.0' + ' ' * 256 + 'custom build', None)])
 def test_error_rules_never_treat_future_version_formats_as_stable(tmp_path, monkeypatch, output, expected):
     import agentbridge.error_observer as observer
-    monkeypatch.setattr(observer.subprocess, 'run', lambda *a, **kw:
-                        SimpleNamespace(returncode=0, stdout=output))
+    monkeypatch.setattr(observer, 'read_output', lambda *a, **kw: output.encode())
     assert provider_version(Account('fixture', 'codex', home=tmp_path)) == expected
 
 

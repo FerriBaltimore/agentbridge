@@ -98,6 +98,9 @@ def diagnose(bridge, case_id, *, account_ref, model, idempotency_key, timeout=60
     if old:
         return get(store, idempotency_key)
     try:
+        from .provider_contracts import ContractRegistry
+        from dataclasses import replace
+        ContractRegistry(store).check(replace(account, command=()), enforce=True)
         # The diagnostic sees safe vocabulary and structural hints, never the original error.
         evidence = case['evidence']
         request = {'engine': 'cursor', 'model': model, 'evidence': evidence,
@@ -111,7 +114,8 @@ def diagnose(bridge, case_id, *, account_ref, model, idempotency_key, timeout=60
                 'source': 'ai_session', 'operation_id': operation_id})
             state, result = 'completed', {'proposal_id': proposal['id']}
     except BridgeError as error:
-        allowed = CANONICAL | {'diagnosis_timeout', 'diagnosis_invalid', 'credential_unavailable'}
+        allowed = CANONICAL | {'diagnosis_timeout', 'diagnosis_invalid', 'credential_unavailable',
+                               'provider_contract_unverified', 'provider_contract_changed', 'provider_contract_invalid'}
         state, result = 'failed', {'code': error.code if error.code in allowed else 'diagnosis_failed',
                                   'retryable': False}
     except Exception:
@@ -131,7 +135,7 @@ def execute(payload, credentials, timeout):
         env['PYTHONPATH'] = str(Path(__file__).parent.parent)
         for name in ('HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'TMPDIR'):
             env[name] = folder
-        child = subprocess.Popen([sys.executable, '-m', 'agentbridge.error_diagnosis_worker'],
+        child = subprocess.Popen([sys.executable, '-P', '-m', 'agentbridge.error_diagnosis_worker'],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             env=env, cwd=folder, start_new_session=True)
         selector = selectors.DefaultSelector()

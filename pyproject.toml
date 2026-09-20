@@ -22,7 +22,7 @@ agentbridge = "agentbridge.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agentbridge = ["py.typed"]
+agentbridge = ["py.typed", "provider_contract_index.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

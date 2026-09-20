@@ -27,6 +27,9 @@ ACTION = {
     "max_turns_exceeded": "resume",
     "structured_output_failed": "inspect",
     "provider_connection_lost": "inspect",
+    "provider_contract_unverified": "inspect",
+    "provider_contract_changed": "inspect",
+    "provider_contract_invalid": "inspect",
 }
 
 

@@ -1,0 +1,125 @@
+{
+  "format_version": 1,
+  "policy": "exact_release_bindings",
+  "contracts": [
+    {
+      "id": "sha256:b126deacb85c79914c3d9b9f54fc0e27ee902d695ceafed7c2bf198bb8c363ad",
+      "manifest": {
+        "format_version": 1,
+        "engine": "codex",
+        "adapter_dialect": 1,
+        "normalized_contract": "v1",
+        "surfaces": {
+          "execution": "exec-json-and-app-server-v2",
+          "catalog": "model/list",
+          "quota": "account/rateLimits/read",
+          "reset": "account/rateLimitResetCredit/consume",
+          "permissions": "app-server-server-request",
+          "continuity": "private-native-layout"
+        },
+        "invariants": [
+          "unknown_terminal_is_unknown_outcome",
+          "unknown_fields_do_not_authorize_actions",
+          "structured_metadata_before_text",
+          "no_automatic_retry_for_unknown_outcome",
+          "bounded_provider_output",
+          "explicit_stop_and_recovery"
+        ],
+        "limitations": [
+          "not_a_complete_provider_schema",
+          "remote_behavior_not_version_pinned",
+          "fixture_coverage_not_universal_live_acceptance"
+        ]
+      }
+    },
+    {
+      "id": "sha256:82a9cbdaed74a7be3d9fdccebbb811a2b58d3b736f89b5c8ec43b8a456799ff2",
+      "manifest": {
+        "format_version": 1,
+        "engine": "claude",
+        "adapter_dialect": 1,
+        "normalized_contract": "v1",
+        "surfaces": {
+          "execution": "stream-json-and-control-protocol",
+          "catalog": "control-initialize-models",
+          "quota": "oauth-usage-native-compatibility",
+          "reset": "unsupported",
+          "permissions": "control-request-can-use-tool",
+          "continuity": "private-native-layout"
+        },
+        "invariants": [
+          "unknown_terminal_is_unknown_outcome",
+          "unknown_fields_do_not_authorize_actions",
+          "structured_metadata_before_text",
+          "no_automatic_retry_for_unknown_outcome",
+          "bounded_provider_output",
+          "explicit_stop_and_recovery"
+        ],
+        "limitations": [
+          "not_a_complete_provider_schema",
+          "remote_behavior_not_version_pinned",
+          "fixture_coverage_not_universal_live_acceptance"
+        ]
+      }
+    },
+    {
+      "id": "sha256:e23a3aa3de212582d4ec120c540cb3026dc079c2e0939f17d83c818ab148955a",
+      "manifest": {
+        "format_version": 1,
+        "engine": "cursor",
+        "adapter_dialect": 1,
+        "normalized_contract": "v1",
+        "surfaces": {
+          "execution": "cursor-sdk-python",
+          "catalog": "models.list",
+          "quota": "session-usage-only",
+          "reset": "unsupported",
+          "permissions": "unsupported",
+          "continuity": "portable-context-only"
+        },
+        "invariants": [
+          "unknown_terminal_is_unknown_outcome",
+          "unknown_fields_do_not_authorize_actions",
+          "structured_metadata_before_text",
+          "no_automatic_retry_for_unknown_outcome",
+          "bounded_provider_output",
+          "explicit_stop_and_recovery"
+        ],
+        "limitations": [
+          "not_a_complete_provider_schema",
+          "remote_behavior_not_version_pinned",
+          "fixture_coverage_not_universal_live_acceptance"
+        ]
+      }
+    }
+  ],
+  "bindings": [
+    {
+      "engine": "codex",
+      "component": "codex-cli",
+      "version": "0.153.0",
+      "contract_id": "sha256:b126deacb85c79914c3d9b9f54fc0e27ee902d695ceafed7c2bf198bb8c363ad",
+      "review": "adapter-fixture-baseline",
+      "evidence_kind": "codex_json_schema_default_v1",
+      "structural_hash": "90591313b73518e3deefe3799fe88e52cc09513ebf90a9c9a8a198c8d09db297"
+    },
+    {
+      "engine": "claude",
+      "component": "claude-cli",
+      "version": "2.1.266",
+      "contract_id": "sha256:82a9cbdaed74a7be3d9fdccebbb811a2b58d3b736f89b5c8ec43b8a456799ff2",
+      "review": "adapter-fixture-baseline",
+      "evidence_kind": "cli_help_observation_v1",
+      "structural_hash": "3d7b971cdff75b3cd66f018d23d84e76fc6c63c83f2ba418113580885a59bb92"
+    },
+    {
+      "engine": "cursor",
+      "component": "cursor-sdk",
+      "version": "1.0.31",
+      "contract_id": "sha256:e23a3aa3de212582d4ec120c540cb3026dc079c2e0939f17d83c818ab148955a",
+      "review": "adapter-fixture-baseline",
+      "evidence_kind": "cursor_python_ast_bridge_v1",
+      "structural_hash": "7789f3a10a7e2f377d9ab6bf0f6688f952a1815121bacc64125e72470bfa62ba"
+    }
+  ]
+}

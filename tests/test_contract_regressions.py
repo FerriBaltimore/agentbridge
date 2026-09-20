@@ -81,6 +81,7 @@ def test_grantbridge_timeout_bounds_partial_unterminated_lines(tmp_path):
 
 
 def test_cursor_does_not_fall_back_to_operator_credentials(tmp_path, monkeypatch):
+    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
     monkeypatch.setenv('CURSOR_API_KEY', 'operator-key-not-for-this-account')
     bridge = Bridge(tmp_path / 'state')
     bridge.register(Account('cursor', 'cursor'))

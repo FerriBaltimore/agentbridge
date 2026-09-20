@@ -3,8 +3,6 @@ import json
 from dataclasses import replace
 import os
 from pathlib import Path
-import subprocess
-import sys
 import time
 from uuid import uuid4
 
@@ -17,8 +15,8 @@ from .errors import BridgeError, BusyError, UnsupportedError
 from .models import Account, RunOptions, TERMINAL, identifier, page_values
 from .transfer import TransferMixin
 from .process import alive
-from .security import Redactor, base_environment
-from .store import Store, dumps
+from .security import Redactor
+from .store import Store
 from .transports import command
 from . import usage
 from .accounts import AccountService
@@ -26,6 +24,7 @@ from .authentication import AuthenticationService
 from .run_state import Run
 from .transcript import messages as transcript_messages
 from .error_management import ErrorManagementMixin
+from .provider_contracts import ContractRegistry
 
 
 class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
@@ -235,6 +234,7 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         with self.store.connect() as db:
             issue = detail(db, turn_id, value['state'], value.get('error'))
         value['outcome'] = issue['outcome'] if issue else value['state']
+        value['provider_compatibility'] = ContractRegistry(self.store).run(turn_id)
         if include_usage:
             value['usage'] = run.consumption
         if include_error and value.get('error'):
@@ -325,6 +325,8 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             raise BridgeError('instance_archived', 'Archived instances cannot accept new messages.')
         account=self.account(session['account_id'])
         command(account,session,options) # Refuse unsupported controls before recording a request.
+        contracts = ContractRegistry(self.store)
+        receipt = contracts.check(account, enforce=True)
         secrets=environment(account)
         redactor = Redactor(secrets.values())
         prompt = redactor.clean(prompt)
@@ -337,16 +339,13 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             run = Run(self, id)
             run.replayed = True
             return run
-        env=base_environment()
-        env['PYTHONPATH']=str(Path(__file__).resolve().parent.parent)
         try:
-            proc=subprocess.Popen([sys.executable,'-m','agentbridge.worker',str(self.root),id],env=env,
-                stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-            self._children[id]=proc
-            proc.stdin.write(dumps(secrets).encode());proc.stdin.close()
-        except (OSError,BrokenPipeError):
+            contracts.record_run(id, receipt)
+        except Exception:
             self.store.finish(id,'failed','launch_failed')
-            raise BridgeError('launch_failed','Could not start the AgentBridge worker.') from None
+            raise BridgeError('launch_failed', 'Could not persist provider compatibility before execution.') from None
+        from .run_launcher import launch
+        self._children[id] = launch(self.store, id, secrets)
         run = Run(self, id)
         run.replayed = False
         return run
@@ -362,8 +361,11 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         return self.export_context(instance_id, budget_bytes=budget_bytes)
 
     def quota(self, account_id, *, allow_network=False, oauth_env=None):
+        account = self.account(account_id)
+        if allow_network:
+            ContractRegistry(self.store).check(account, enforce=True)
         token=os.environ.get(oauth_env) if oauth_env else None
-        return usage.snapshot(self.account(account_id),oauth_token=token,allow_network=allow_network)
+        return usage.snapshot(account,oauth_token=token,allow_network=allow_network)
 
     def recover(self, instance_id=None, turn_id=None):
         """Reattach live workers. Never repeat an interrupted request automatically."""
