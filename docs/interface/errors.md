@@ -31,6 +31,8 @@ stable AgentBridge code:
 Authentication orchestration also uses `authentication_attempt_not_found`,
 `authentication_owner_required`, `authentication_attempt_not_ready`,
 `authentication_not_verified`, `activation_unsupported` and `login_timeout`.
+Inputs and observations also use `invalid_attachment`, `invalid_permissions`,
+`permission_expired`, `provider_catalog_unsupported` and `rate_limited`.
 They use the same envelope and never expose provider credentials or native home
 paths in RPC responses.
 

@@ -8,7 +8,7 @@ import sqlite3
 import time
 
 from .errors import BridgeError, BusyError
-from .models import Event, TERMINAL, account_name_key
+from .models import Event, TERMINAL, RunOptions, account_name_key
 from .auth_store import AuthStoreMixin
 
 
@@ -337,7 +337,7 @@ class Store(AuthStoreMixin):
             return None
         with self.connect() as db:
             row = db.execute('SELECT * FROM runs WHERE request_key=?', (key,)).fetchone()
-        if row and (row['session_id'], row['prompt'], row['options']) == (session_id, prompt, dumps(asdict(options))):
+        if row and (row['session_id'], row['prompt'], dumps(asdict(RunOptions(**json.loads(row['options']))))) == (session_id, prompt, dumps(asdict(options))):
             return row['id']
         return None  # Admission still validates mismatches after secret redaction.
 
@@ -348,7 +348,7 @@ class Store(AuthStoreMixin):
             if key:
                 old = db.execute('SELECT * FROM runs WHERE request_key=?',(key,)).fetchone()
                 if old:
-                    if (old['session_id'],old['prompt'],old['options']) != (session_id,prompt,dumps(asdict(options))):
+                    if (old['session_id'],old['prompt'],dumps(asdict(RunOptions(**json.loads(old['options']))))) != (session_id,prompt,dumps(asdict(options))):
                         raise BridgeError('idempotency_conflict', 'Request key already belongs to different input.')
                     return old['id'], False
             session = db.execute('SELECT * FROM sessions WHERE id=?',(session_id,)).fetchone()
@@ -367,7 +367,9 @@ class Store(AuthStoreMixin):
                             prompt,dumps(asdict(options)),key,now,now))
             except sqlite3.IntegrityError as e:
                 raise BusyError() from e
-            self._event(db,id,session_id,'user',{'text':prompt})
+            from .attachments import descriptors
+            self._event(db, id, session_id, 'user', {'text': prompt, 'attachments': descriptors(options.attachments),
+                        'attachment_content_omitted': bool(options.attachments)})
         return id, True
 
     def claim(self, id, pid, identity):

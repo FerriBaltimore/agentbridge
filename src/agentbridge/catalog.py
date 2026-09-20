@@ -41,10 +41,10 @@ def _model(item):
         effort = []
     return {
         "id": model_id,
-        "display_name": item.get("displayName") or item.get("display_name") or model_id,
+        "display_name": item.get("displayName") or item.get("display_name") or item.get('label') or model_id,
         "description": item.get("description"),
         "is_default": bool(item.get("isDefault") or item.get("is_default")),
-        "availability": item.get("visibility") or item.get("availability") or "available",
+        "availability": item.get("visibility") or item.get("availability") or "unknown",
         "deprecated": bool(item.get("deprecated") or item.get("isDeprecated")),
         "retirement": item.get("retirement") or item.get("upgradeTo"),
         "reasoning_efforts": effort,
@@ -68,22 +68,20 @@ class ModelCatalog:
         if engine not in ENGINES:
             raise BridgeError("invalid_engine", "Unknown engine.")
         account = self.accounts.resolve(account_ref) if account_ref else None
+        if account and account.engine != engine:
+            raise BridgeError("invalid_engine", "The account engine does not match the requested engine.")
         source = "static"
         models = STATIC[engine]
         reason = "live_catalog_requires_account"
         observed_at = None
         if account and refresh:
-            if account.engine != engine:
-                raise BridgeError("invalid_engine", "The account engine does not match the requested engine.")
-            if engine == "codex":
-                try:
-                    models = [_model(item) for item in CodexAppServerProbe(account).list_models()]
-                    models = [item for item in models if item]
-                    source, reason, observed_at = "live", None, _stamp()
-                except BridgeError as error:
-                    reason = error.code
-            else:
-                reason = "provider_catalog_unsupported"
+            try:
+                from .provider_catalog import models as provider_models
+                items = CodexAppServerProbe(account).list_models() if engine == 'codex' else provider_models(account)
+                models = [value for item in items if (value := _model(item))]
+                source, reason, observed_at = "live", None, _stamp()
+            except BridgeError as error:
+                reason = error.code
         models = [dict(item, source=source) for item in models]
         if not include_hidden:
             models = [item for item in models if item.get("availability") not in {"hidden", "unlisted"}]

@@ -51,8 +51,10 @@ usage = bridge.account_usage("codex-main", refresh=True)
 
 The first Codex adapter uses the documented app-server account and rate-limit
 reads. It stores observations with their source and timestamp. A missing or
-stale observation remains unknown, never zero. Live account and usage readers for
-Claude and Cursor remain incomplete. Managed Cursor bindings can be checked for
+stale observation remains unknown, never zero. Claude now reads bound-profile identity and native OAuth usage windows. Cursor
+provides live model catalogues and session usage; its SDK has no account quota
+reader or interactive approval response channel. See
+[the supported input and observation contract](docs/interface/interactive-inputs.md). Managed Cursor bindings can be checked for
 local expiry/revocation; that observation is marked as cached provider verification.
 
 The same checks are available from the CLI. Account homes and credential

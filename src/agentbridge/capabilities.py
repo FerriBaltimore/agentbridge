@@ -17,13 +17,13 @@ OPERATIONS = (
 
 def _support(engine, operation):
     if operation == "permissions.respond":
-        return "unsupported"
+        return "adapter" if engine in {"codex", "claude"} else "unsupported"
     if operation == "accounts.status":
         return "native" if engine == "codex" else "adapter"
     if operation == "usage.get":
         return "adapter"
     if operation == "models.list":
-        return "native" if engine == "codex" else "fallback"
+        return "native" if engine == "codex" else "adapter"
     if operation == "instances.transfer":
         return "native" if engine in {"codex", "claude"} else "portable"
     if operation == "messages.create":
@@ -31,9 +31,9 @@ def _support(engine, operation):
     return "adapter"
 
 
-def _maturity(operation):
+def _maturity(engine, operation):
     if operation == 'permissions.respond':
-        return 'unsupported'
+        return 'fixture_tested' if engine in {'codex', 'claude'} else 'unsupported'
     tested = {
         'capabilities.get', 'accounts.list', 'accounts.status', 'accounts.login',
         'accounts.login.start', 'accounts.login.status', 'accounts.login.check',
@@ -48,11 +48,15 @@ def _maturity(operation):
 
 def _limitations(engine, operation):
     if operation == 'models.list' and engine != 'codex':
-        return ['static_fallback_only', 'availability_unknown']
-    if operation == 'accounts.status' and engine != 'codex':
+        return ['catalog_is_not_entitlement_verification', 'static_fallback_on_refresh_failure']
+    if operation == 'accounts.status' and engine == 'cursor':
         return ['cached_verification_only', 'no_live_account_reader']
-    if operation == 'usage.get' and engine != 'codex':
-        return ['account_usage_unsupported', 'turn_usage_provider_dependent']
+    if operation == 'accounts.status' and engine == 'claude':
+        return ['native_status_is_local_only']
+    if operation == 'usage.get' and engine == 'cursor':
+        return ['sdk_account_quota_unavailable', 'session_usage_is_not_remaining_quota']
+    if operation == 'usage.get' and engine == 'claude':
+        return ['oauth_usage_is_native_compatibility', 'quota_depends_on_bound_profile']
     if operation == 'accounts.login.check' and engine == 'claude':
         return ['inference_required_for_activation', 'inference_consumes_provider_usage']
     if operation == 'instances.transfer':
@@ -60,7 +64,8 @@ def _limitations(engine, operation):
     if operation in {'instances.create', 'instances.update'}:
         return ['model_not_verified_at_admission', 'advanced_instance_defaults_unsupported']
     if operation == 'permissions.respond':
-        return ['provider_response_transport_missing']
+        return ['provider_approval_channel_unavailable'] if engine == 'cursor' else [
+            'one_request_allow_or_deny_only', 'pending_requests_require_live_worker']
     return []
 
 
@@ -75,7 +80,7 @@ def payload(engine=None):
         data["contract_version"] = "v1"
         data["operations"] = {
             operation: {"support": _support(name, operation), "engine": name,
-                        "maturity": _maturity(operation),
+                        "maturity": _maturity(name, operation),
                         'limitations': _limitations(name, operation)}
             for operation in OPERATIONS
         }
@@ -86,7 +91,9 @@ def payload(engine=None):
                        "adapter" if name == "claude" else "unsupported",
                        "maturity": "fixture_tested" if name != "cursor" else "unsupported"},
             "context_window": {"support": "unsupported", "maturity": "unsupported"},
-            "attachments": {"support": "unsupported", "maturity": "unsupported"},
+            "attachments": {"support": "adapter", "maturity": "fixture_tested",
+                            "types": ["text", "image"], "max_count": 8, "max_bytes": 5242880,
+                            "limitations": ["inline_only", "model_must_support_images", "portable_transfer_omits_content"]},
             "provider_options": {"support": "unsupported", "maturity": "unsupported"},
         }
         data["acceptance"] = {"fixture_tested": True, "provider_tested": False,

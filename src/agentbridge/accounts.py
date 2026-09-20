@@ -80,7 +80,7 @@ class AccountService:
         if cached:
             return {'account_id': account.id, 'observed_at': stamp(cached['observed_at']),
                     'source': cached['source'], 'scope': cached['scope'],
-                    'stale': cached['stale'], **cached['data']}
+                    **cached['data'], 'stale': cached['stale']}
         if account.engine == 'codex':
             data = usage.snapshot(account)
             self.store.usage_observation(account.id, data.get('source', 'codex_rollout'), 'account', data,
@@ -90,13 +90,15 @@ class AccountService:
                     'stale': bool(data.get('outdated', True)), **data}
         return {'account_id': account.id, 'engine': account.engine, 'supported': False,
                 'source': None, 'scope': 'account', 'stale': True,
-                'reason': 'account_usage_unsupported'}
+                'reason': 'sdk_account_quota_unavailable' if account.engine == 'cursor' else 'account_usage_unsupported'}
 
     def history(self, account_id, *, limit=100):
         self.get(account_id)
         return self.store.usage_history(account_id, limit=limit)
 
     def _probe_account(self, account, *, include_usage):
+        if account.engine == 'claude':
+            return self._claude_account(account, include_usage=include_usage)
         if account.engine == 'cursor' and account.credential_ref:
             return self._cursor_binding(account)
         if account.engine != 'codex':
@@ -114,6 +116,30 @@ class AccountService:
             self.store.usage_observation(account.id, 'codex_app_server', 'account', usage_data, stale=False)
             result['usage'] = {'account_id': account.id, 'observed_at': stamp(), 'source': 'codex_app_server',
                                'scope': 'account', 'stale': False, **usage_data}
+        return {'data': result, 'status': result['status']}
+
+    def _claude_account(self, account, *, include_usage):
+        from .claude_account import identity, quota
+        try:
+            result = identity(account)
+            if include_usage and result['status'] != 'loaded_only':
+                raise BridgeError(result['status'], 'The bound profile cannot refresh usage.')
+            if include_usage and result['status'] == 'loaded_only':
+                data = quota(account)
+                self.store.usage_observation(account.id, data['source'], 'account', data, stale=False)
+                result['usage'] = {'account_id': account.id, 'observed_at': stamp(), **data}
+        except BridgeError as error:
+            result = {'status': error.code, 'identity': {}, 'reason': error.code}
+            if include_usage:
+                cached = self.store.latest_usage_observation(account.id)
+                if cached:
+                    with self.store.connect() as db:
+                        db.execute('UPDATE usage_observations SET stale=1 WHERE id=?', (cached['id'],))
+                result['usage'] = {'account_id': account.id,
+                    **(cached['data'] if cached else {'supported': False, 'scope': 'account'}),
+                    'stale': True, 'reason': error.code,
+                    'observed_at': stamp(cached['observed_at']) if cached else None}
+        self.store.account_observation(account.id, 'claude_native_status', result['status'], result)
         return {'data': result, 'status': result['status']}
 
     def _cursor_binding(self, account):

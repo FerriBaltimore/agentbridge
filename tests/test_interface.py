@@ -171,11 +171,12 @@ def test_usage_scopes_and_export_options_are_explicit(tmp_path):
 def test_capabilities_do_not_overclaim_permission_control(tmp_path):
     bridge = bridge_for_interface(tmp_path)
     capabilities = bridge.capabilities('codex')
-    assert capabilities['operations']['permissions.respond']['support'] == 'unsupported'
+    assert capabilities['operations']['permissions.respond']['support'] == 'adapter'
+    assert bridge.capabilities('cursor')['operations']['permissions.respond']['support'] == 'unsupported'
     assert capabilities['operations']['usage.get']['support'] == 'adapter'
     assert bridge.capabilities('claude')['operations']['accounts.status']['support'] == 'adapter'
     assert capabilities['parameters']['context_window']['support'] == 'unsupported'
-    assert capabilities['parameters']['attachments']['support'] == 'unsupported'
+    assert capabilities['parameters']['attachments']['support'] == 'adapter'
     assert bridge.capabilities('cursor')['parameters']['effort']['support'] == 'unsupported'
     assert capabilities['operations']['instances.events']['maturity'] == 'fixture_tested'
     assert capabilities['acceptance']['provider_tested'] is False

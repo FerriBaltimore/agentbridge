@@ -10,6 +10,7 @@ ACTION = {
     "identity_missing": "login",
     "authentication_interrupted": "inspect",
     "quota_exhausted": "wait",
+    "rate_limited": "wait",
     "model_not_found": "change_model",
     "model_unavailable": "change_model",
     "interrupted": "resume",
@@ -39,8 +40,10 @@ class BridgeError(Exception):
                 or self.code in {'credential_expired', 'identity_changed', 'identity_missing', 'activation_invalid'}
                 or self.code.startswith("authentication_") or self.code in {"activation_unsupported", "login_timeout"}):
             category = "auth"
-        elif self.code in {"quota_exhausted"}:
+        elif self.code in {"quota_exhausted", "rate_limited"}:
             category = "quota"
+        elif self.code == 'provider_catalog_unsupported':
+            category = 'capability'
         elif self.code.startswith("provider_") or self.code in {"grantbridge_failed", "grantbridge_timeout"}:
             category = "provider"
         elif self.code in {"busy", "instance_busy", "account_busy"}:

@@ -1,0 +1,82 @@
+"""Claude profile identity and explicit account quota refresh, without inference."""
+import json
+from pathlib import Path
+import subprocess
+import urllib.error
+import urllib.request
+
+from .credentials import environment
+from .errors import BridgeError
+from .security import base_environment
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_):
+        return None
+
+
+def identity(account):
+    env = base_environment()
+    env.update(environment(account))
+    env['CLAUDE_CONFIG_DIR'] = account.home
+    try:
+        result = subprocess.run(list(account.command or ('claude',)) + ['auth', 'status'],
+                                cwd=account.home, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=15)
+        if len(result.stdout) > 65536:
+            raise ValueError()
+        value = json.loads(result.stdout)
+        if not isinstance(value, dict):
+            raise ValueError()
+        email = value.get('email')
+        if result.returncode or not value.get('loggedIn') or not isinstance(email, str):
+            return {'status': 'authentication_required', 'identity': {}, 'live_request': False}
+        if account.email and account.email != email:
+            return {'status': 'identity_changed', 'identity': {}, 'live_request': False}
+        return {'status': 'loaded_only', 'identity': {'email': email}, 'live_request': False,
+                'reason': 'native_profile_loaded'}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        raise BridgeError('provider_unavailable', 'Claude account status is unavailable.') from None
+
+
+def quota(account):
+    # Only the explicitly bound native profile is consulted; no ambient login discovery.
+    path = Path(account.home) / '.credentials.json'
+    try:
+        with path.open('rb') as file:
+            raw = file.read(65537)
+        if len(raw) > 65536:
+            raise ValueError()
+        value = json.loads(raw).get('claudeAiOauth') or {}
+        token = value.get('accessToken')
+        if not isinstance(token, str) or not token:
+            raise ValueError()
+    except (OSError, ValueError, AttributeError):
+        raise BridgeError('credential_unavailable', 'The bound Claude profile has no OAuth credential.') from None
+    request = urllib.request.Request('https://api.anthropic.com/api/oauth/usage', headers={
+        'Authorization': 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20', 'Accept': 'application/json'})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+            raw = response.read(65537)
+        if len(raw) > 65536:
+            raise ValueError()
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError()
+    except urllib.error.HTTPError as error:
+        code = 'authentication_required' if error.code in {401, 403} else 'rate_limited' if error.code == 429 else 'provider_unavailable'
+        raise BridgeError(code, 'Claude did not provide a quota observation.') from None
+    except (OSError, ValueError):
+        raise BridgeError('provider_unavailable', 'Claude did not provide a quota observation.') from None
+    windows = []
+    for name, item in value.items():
+        if not isinstance(item, dict):
+            continue
+        used = item.get('utilization')
+        if isinstance(used, (int, float)) and not isinstance(used, bool) and 0 <= used <= 100:
+            reset = item.get('resets_at')
+            windows.append({'name': name, 'used_percent': used,
+                            'resets_at': reset if isinstance(reset, str) and len(reset) < 100 else None})
+    return {'windows': windows, 'reason': None if windows else 'quota_not_reported',
+            'source': 'claude_oauth_usage', 'scope': 'account', 'supported': True,
+            'stale': False, 'provider_contract': 'native_oauth_compatibility'}

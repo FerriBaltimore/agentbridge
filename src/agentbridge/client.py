@@ -1,5 +1,6 @@
 """Public SDK. No server, event loop or Fullbrain installation required."""
 import json
+from dataclasses import replace
 import os
 from pathlib import Path
 import subprocess
@@ -185,7 +186,7 @@ class Bridge(DiscoveryMixin, TransferMixin):
                        permission_mode='dontAsk', sandbox_mode='read-only', allowed_tools=(),
                        max_turns=None, max_budget=None, timeout_ms=None, attachments=None,
                        provider_options=None, metadata=None, idempotency_key=None):
-        prompt = self._message_text(content, attachments)
+        prompt = self._message_text(content)
         if provider_options or metadata:
             raise UnsupportedError('Provider-specific options and metadata require an adapter contract.')
         options = RunOptions(
@@ -193,7 +194,7 @@ class Bridge(DiscoveryMixin, TransferMixin):
             sandbox=sandbox_mode, permission_mode=permission_mode,
             allowed_tools=tuple(allowed_tools), model=model,
             context_window=context_window, effort=effort, max_turns=max_turns,
-            max_budget_usd=max_budget, collect_usage=True,
+            max_budget_usd=max_budget, collect_usage=True, attachments=attachments,
         )
         run = self.submit(instance_id, prompt, options=options, request_key=idempotency_key)
         message_id = run.snapshot.get('message_id', run.id)
@@ -201,9 +202,7 @@ class Bridge(DiscoveryMixin, TransferMixin):
                 'state': run.status, 'replayed': bool(getattr(run, 'replayed', False))}
 
     @staticmethod
-    def _message_text(content, attachments):
-        if attachments:
-            raise UnsupportedError('Attachments are not supported by every configured engine.')
+    def _message_text(content):
         if isinstance(content, str) and content.strip():
             return content
         if isinstance(content, list) and all(isinstance(item, dict) and item.get('type') == 'text' for item in content):
@@ -287,7 +286,13 @@ class Bridge(DiscoveryMixin, TransferMixin):
                 'state': resumed.status, 'mode': mode}
 
     def permission_respond(self, turn_id, permission_id, decision, *, reason=None, expires_at=None):
-        raise UnsupportedError('Interactive permission responses are not connected to these provider transports.')
+        from .permissions import Permissions
+        from .transports import duplex
+        run = self.run(turn_id)
+        if not duplex(self.account(run.snapshot['account_id']), RunOptions(**json.loads(run.snapshot['options']))):
+            raise UnsupportedError('This turn has no interactive permission transport.')
+        return Permissions(self.store).respond(turn_id, permission_id, decision,
+                                               reason=reason, expires_at=expires_at)
 
     def get_session(self, id):return self.store.get('sessions',identifier(id))
     def sessions(self):return self.store.list('sessions')
@@ -310,7 +315,11 @@ class Bridge(DiscoveryMixin, TransferMixin):
         account=self.account(session['account_id'])
         command(account,session,options) # Refuse unsupported controls before recording a request.
         secrets=environment(account)
-        prompt=Redactor(secrets.values()).clean(prompt)
+        redactor = Redactor(secrets.values())
+        prompt = redactor.clean(prompt)
+        options = replace(options, attachments=tuple(
+            {key: redactor.clean(value) if key in {'name', 'text'} else value for key, value in item.items()}
+            for item in options.attachments))
         id,created=self.store.admit(uuid4().hex,session_id,prompt,options,request_key,
                                     message_id=message_id or uuid4().hex)
         if not created:

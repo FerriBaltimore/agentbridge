@@ -34,7 +34,10 @@ def execute(payload, emit, sdk=None):
             except Exception:pass
     if __name__=='__main__':signal.signal(signal.SIGTERM,cancel)
     with agent:
-        run=agent.send(payload['prompt']);active[0]=run
+        pictures = [{'data': item['data'], 'mime_type': item['media_type']}
+                    for item in payload.get('attachments', []) if item['type'] == 'image']
+        message = {'text': payload['prompt'], 'images': pictures} if pictures else payload['prompt']
+        run=agent.send(message);active[0]=run
         emit({'type':'bridge_session','native_id':agent.agent_id})
         for message in run.messages():
             value=plain(message)

@@ -91,6 +91,7 @@ class RunOptions:
     max_turns: int | None = None
     max_budget_usd: float | None = None
     collect_usage: bool = False
+    attachments: tuple[dict, ...] = ()
 
     def __post_init__(self):
         if not 0 < self.timeout <= 86400 or not 0 <= self.stop_grace <= 60:
@@ -108,6 +109,8 @@ class RunOptions:
         if self.context_window is not None and not isinstance(self.context_window, (str, int)):
             raise BridgeError("invalid_context_window", "context_window must be a named value or token count.")
         object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
+        from .attachments import normalize
+        object.__setattr__(self, "attachments", normalize(self.attachments))
 
 
 @dataclass(frozen=True)

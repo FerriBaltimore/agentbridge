@@ -19,34 +19,38 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
 | Cursor account status | Checks binding, local revocation and expiry on refresh | Cached provider verification; does not make a new remote identity request |
 | Account RPC | Safe account projection; arbitrary registration disabled | Administrative SDK/CLI registration is a separate trusted local surface |
 | Instances | Explicit account, durable create idempotency, get/list/model update/archive/version checks | No model availability validation, metadata or persistent advanced defaults |
-| Text messages | Distinct accepted message and turn IDs; durable admission; detached execution | One active turn per account; no attachments or steering of an active turn |
+| Text messages | Distinct accepted message and turn IDs; durable admission; detached execution | One active turn per account; no steering of an active turn |
+| Attachments | Bounded inline text and images for all three engines; durable idempotency and safe descriptors | No path/URL inputs or PDFs; portable transfer explicitly omits attachment content |
+| Interactive permissions | Native Codex/Claude request and one-use allow/deny delivery; expiry, replay and Stop | Cursor SDK has no host response channel; no session-wide grants |
 | Transcript | Bounded message count, numeric offset and role filtering before reconstruction | Snapshot view, not a durable incremental message projection; before unsupported |
 | Events | Per-turn and per-instance sequence queries, bounded pages | Store-global sequence gaps between filtered events are normal; no HTTP/SSE/WebSocket server |
 | Stop/recovery | Persisted stop; observed worker identity; lost workers marked interrupted | Grace override at stop is unsupported; configure RunOptions.stop_grace before launch; no automatic replay of unknown effects |
 | Resume | Explicit new message/turn with native session or portable context | Not the same message_id with multiple attempts; native/reconcile modes are not separate provider workflows |
 | Transfer/export | Native version checks, explicit portable fallback, bounded omissions, destination idempotency | File copy and SQLite commit are not one crash-atomic transaction; replay metadata may be incomplete |
-| Models | Live Codex app-server catalog when requested, marked static fallback otherwise | Claude and Cursor live catalog readers are not implemented |
-| Usage | Provider observations per turn; Codex account reader; stored observation history | Claude/Cursor account readers, time filters and aggregation are incomplete |
+| Models | Live Codex, Claude initialize and Cursor SDK catalogues; marked static fallback on failure | Catalogue membership does not verify model entitlement |
+| Usage | Provider observations; Codex account reader; Claude native OAuth quota windows and stale fallback | Cursor SDK account quota unavailable; no historical time filters or aggregation |
 | Errors | Structured error envelope; unknown outcome never retryable; safe adapter messages | Provider-native error classification is incomplete; compatibility codes remain |
 
 ## Explicitly unsupported or unfinished
 
-- Interactive permission response delivery. permissions.respond now refuses the
-  operation instead of recording a response that the provider never receives.
-- Images, other attachments, context-window selection, metadata/provider_options,
+- Cursor interactive permission responses and account quota: the supported SDK
+  exposes neither host approval delivery nor remaining account capacity. These
+  are explicit provider limits, not simulated successes.
+- PDFs/other binary attachments, context-window selection, metadata/provider_options,
   persistent effort/tool/sandbox defaults and changing these defaults on instances.
-- Live model enumeration for Claude and Cursor; model entitlement verification at
-  instance creation. A static entry has unknown availability, not proof of access.
-- Full account usage/quota readers for Claude and Cursor, historical time filters,
-  quota aggregation and uniform paginated collection envelopes.
+- Model entitlement verification at instance creation. Missing catalogue metadata
+  remains unknown; a static entry is not proof of access.
+- Historical usage time filters, quota aggregation and uniform paginated
+  collection envelopes.
 - Shared message identity across execution retries, active-turn message steering,
   comprehensive transfer crash recovery and retention/deletion operations.
 - Complete mapping of provider authentication, quota and permission failures into
   the target error catalogue. Generic provider_failed remains possible.
 - Network transports. This build delivers Python SDK, CLI and JSON-RPC over stdio.
   A future transport should share the same dispatcher and event store.
-- A Fullbrain client end-to-end deployment test and an unassisted mobile Claude
-  login. The bounded live-provider acceptance described above has passed.
+- A completely fresh mobile Claude login after the scroll fix. The corrected
+  viewer passes the scroll-and-dismiss regression on a physical Galaxy; this
+  does not repeat the earlier real-provider authorization journey.
 
 ## Evidence and integration boundary
 
@@ -68,3 +72,7 @@ Production enablement still requires a pinned pair of repository revisions,
 installation of the optional SDK/native CLIs, live acceptance for the selected
 provider, restart/stop tests through the actual Fullbrain client and an agreed
 supported feature subset. General production readiness is not established.
+
+The permission, attachment and catalogue subset is specified in
+[interactive-inputs.md](interactive-inputs.md). Fullbrain implementation is
+outside this repository and outside the current delivery scope.

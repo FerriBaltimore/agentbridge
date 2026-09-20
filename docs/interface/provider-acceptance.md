@@ -57,3 +57,34 @@ python -m pip wheel . --no-deps --wheel-dir /tmp/agentbridge-wheel
 The wheel and installed CLI checks are part of the release procedure. Live
 provider checks remain an operator-controlled step because they require access
 to disposable accounts and credentials.
+
+## Input and observation acceptance (2026-09-20)
+
+Tested versions: Codex CLI 0.153.0, Claude Code 2.1.266 and Cursor Python SDK
+1.0.31. These checks used the explicitly authorized accounts and isolated
+workspaces, through AgentBridge's public methods:
+
+- All three providers correctly identified a generated red image passed as an
+  inline attachment. No filesystem image path or public upload was supplied.
+- Codex and Claude resumed those sessions through the new duplex transport and
+  recalled the previous image, preserving the native session identity.
+- For each of Codex and Claude, one requested shell write was allowed and created
+  the expected isolated marker. A separate denied write did not create its file.
+  Decisions matched the exact expected command; no broad grant was issued.
+- Stop was exercised while each native provider awaited a permission. Both runs
+  became cancelled and no marker was created. A follow-up process check found
+  no remaining native group. A transient Claude child observed immediately after
+  cancellation prompted an additional worker cleanup guard; deterministic tests
+  now cover a native child that deliberately ignores SIGTERM.
+- Claude's initialize catalogue returned five models without inference. Its
+  bound OAuth profile returned three account utilization windows. Cursor's SDK
+  catalogue returned forty models without inference. Counts are dated
+  observations, not fixed catalogue assertions or entitlement guarantees.
+
+The initial Claude Stop prompt did not produce a tool request and is not counted
+as a pending-permission test. A second explicit request did, and was cancelled.
+Cursor interactive approval and account quota are still explicitly unavailable
+with the supported SDK. Claude quota uses native OAuth compatibility. PDFs,
+other binary attachment types and complete per-model metadata are not certified.
+The capability defaults remain fixture_tested until an embedding deployment
+records matching evidence. See interactive-inputs.md for the exact contract.

@@ -80,6 +80,9 @@ for explicit recovery and never repeats an unknown side effect silently.
 with `after_seq` and keep its own cursor; `follow=true` is intentionally not
 used by the first adapter.
 
+See [interactive-inputs.md](interactive-inputs.md) for the implemented attachment
+formats, per-provider permission modes and durable one-use response semantics.
+
 ## Continuity
 
     instances.transfer(instance_id, target_account_ref,

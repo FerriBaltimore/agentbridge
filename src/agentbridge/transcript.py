@@ -1,4 +1,5 @@
 """Page transcript messages before reconstructing their provider observations."""
+import json
 from .errors import BridgeError, UnsupportedError
 from .models import page_values
 
@@ -17,10 +18,13 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
     with bridge.store.connect() as db:
         rows = db.execute('''WITH transcript AS (
             SELECT rowid AS position, 0 AS slot, id, message_id, prompt AS content,
-                   created AS at, 'user' AS role FROM runs WHERE session_id=?
+                   created AS at, 'user' AS role,
+                   (SELECT json_extract(data,'$.attachments') FROM events
+                    WHERE run_id=runs.id AND kind='user' ORDER BY seq LIMIT 1) AS attachments
+                   FROM runs WHERE session_id=?
             UNION ALL
             SELECT rowid AS position, 1 AS slot, id, message_id, NULL AS content,
-                   updated AS at, 'assistant' AS role FROM runs WHERE session_id=?
+                   updated AS at, 'assistant' AS role, NULL AS attachments FROM runs WHERE session_id=?
               AND EXISTS (SELECT 1 FROM events WHERE run_id=runs.id
                 AND kind IN ('assistant','text_delta') AND json_extract(data,'$.text') <> '')
         ) SELECT * FROM transcript WHERE (? IS NULL OR role=?) AND (? IS NULL OR at>?)
@@ -29,4 +33,5 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
     return [{'message_id': row['message_id'] + (':assistant' if row['role'] == 'assistant' else ''),
              'instance_id': instance_id, 'role': row['role'],
              'content': row['content'] if row['role'] == 'user' else bridge.run(row['id']).text,
-             'sequence': row['id'], 'created_at': row['at']} for row in rows]
+             'sequence': row['id'], 'created_at': row['at'],
+             'attachments': json.loads(row['attachments'] or '[]')} for row in rows]

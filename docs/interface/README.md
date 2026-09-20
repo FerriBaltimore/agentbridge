@@ -11,6 +11,7 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - operations.md: method names, parameters and return values.
 - capabilities.md: native, adapted, fallback and unsupported behavior.
 - events.md: event envelope and stream semantics.
+- interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
 - errors.md: stable error envelope and retry behavior.
 - review.md: completeness checklist and acceptance evidence.
 - provider-acceptance.md: release matrix and live-provider gate.

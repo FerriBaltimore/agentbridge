@@ -13,8 +13,10 @@ from .process import identity
 from .protocols import Parser
 from .security import Redactor, base_environment
 from .store import Store
-from .transports import command
+from .transports import command, duplex
 from .credentials import CURSOR_KEY_ENV
+from .attachments import text_prompt
+from dataclasses import asdict
 
 MAX_LINE=8*1024*1024
 
@@ -48,10 +50,17 @@ def main():
         prompt=run['prompt']
         if session.get('context') and not session.get('native_id'):
             prompt=session['context']+'\n\nCurrent user request:\n'+prompt
+        prompt = text_prompt(prompt, options.attachments)
         if account.engine=='cursor':
             payload=json.dumps({'prompt':prompt,'cwd':session['cwd'],'model':options.model or session['model'],
                 'native_id':session.get('native_id'),'key_env':account.key_env or CURSOR_KEY_ENV,
-                'sandbox':options.sandbox,'tools':list(options.allowed_tools),'collect_usage':options.collect_usage})
+                'sandbox':options.sandbox,'tools':list(options.allowed_tools),'collect_usage':options.collect_usage,
+                'attachments': options.attachments})
+        elif duplex(account, options):
+            payload = json.dumps({'engine': account.engine, 'prompt': prompt, 'cwd': session['cwd'],
+                'model': options.model or session.get('model'), 'native_id': session.get('native_id'),
+                'options': asdict(options), 'root': str(store.root), 'turn_id': run_id,
+                'command': command(account, session, options, native_transport=True), 'secret_names': list(secrets)})
         else:payload=prompt
         if run['stop_requested'] or stopped[0]:
             store.finish(run_id,'cancelled','user_stop');return
@@ -104,6 +113,11 @@ def main():
             if term_at is not None and now-term_at>options.stop_grace+2:break
         if buffer:parse(buffer,parser)
         code=child.wait(timeout=2)
+        if reason:
+            # A duplex wrapper can exit before a native child that ignores TERM.
+            # Drain the whole supervised group even when its leader is gone.
+            try:os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:pass
         writer.join(timeout=2)
         unresolved=parser.end()
         if stderr_bytes:emit('diagnostic',{'stderr_bytes':stderr_bytes,'content_stored':False})

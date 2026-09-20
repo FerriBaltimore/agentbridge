@@ -24,6 +24,10 @@ class Parser:
         if not isinstance(event, dict):
             self.event('gap', {'reason':'non_object_event'})
             return
+        if event.get('type') == 'bridge_error':
+            self.failed = True
+            self.event('error', {'code': event.get('code', 'provider_failed')})
+            return
         getattr(self, '_'+self.engine)(event)
 
     def tool(self, id, name, arguments=None, *, done=False, result=None, status=None, parent=None):
@@ -62,7 +66,11 @@ class Parser:
 
     def _codex(self, ev):
         t=ev.get('type','')
-        if t == 'thread.started':
+        if t == 'bridge_text_delta':
+            self.event('text_delta', {'text': ev.get('text', '')})
+        elif t == 'bridge_usage':
+            self.event('usage', {'source': 'codex_app_server', 'scope': ev['scope'], 'tokens': ev.get('tokens')})
+        elif t == 'thread.started':
             self.event('session',{'native_id':ev.get('thread_id')})
         elif t in ('turn.started','turn.completed','turn.failed'):
             status=t.split('.')[1]

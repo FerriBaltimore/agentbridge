@@ -50,15 +50,15 @@ was not observed. recover marks a lost worker interrupted and never retries it.
 
 permissions.respond is reserved for adapters that can pause and resume a
 provider request. It records the host decision only after matching a pending
-request. Current adapters report this operation as unsupported because none
-can yet deliver the decision to a paused provider call.
+request. Codex and Claude deliver one-request decisions through their native duplex
+protocols. Cursor reports unsupported because its SDK has no host response channel.
 
 ## Parameters and unsupported behavior
 
 model, effort, workspace_path, timeout_ms, permission_mode, sandbox_mode,
 allowed_tools, max_turns and max_budget are common parameters because they
-describe execution intent. Context-window selection and attachments remain
-explicitly unsupported by the current shared adapter. Provider-only switches
+describe execution intent. Context-window selection remains unsupported. Attachments accept bounded
+inline text and images, with explicit omissions on portable transfer. Provider-only switches
 belong under provider_options and remain opaque to the common layer.
 
 Every operation accepts only the parameters documented for that method.
