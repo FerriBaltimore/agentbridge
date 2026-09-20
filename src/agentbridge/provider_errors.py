@@ -2,6 +2,7 @@
 import re
 
 from .errors import BridgeError
+from .error_evidence import capture, from_issue
 
 
 NATIVE_CODES = {
@@ -188,6 +189,10 @@ def normalize(engine, value, *, terminal=True, outcome=None, phase='execution', 
         number = previous.get('http_status')
         if isinstance(number, int) and not isinstance(number, bool) and 400 <= number < 600:
             details['http_status'] = number
+    if detection == 'unclassified' and code == 'provider_failed':
+        details['unknown_evidence'] = from_issue(value) if isinstance(value, dict) else None
+        if details['unknown_evidence'] is None:
+            details['unknown_evidence'] = capture(value)
     data = BridgeError(code, 'The provider operation did not complete.', phase=phase,
                        outcome=outcome, retryable=False, details=details).safe_data()
     return {**data, 'engine': engine, 'terminal': bool(terminal),

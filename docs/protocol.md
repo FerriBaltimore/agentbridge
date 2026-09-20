@@ -41,5 +41,14 @@ failures are specified in [usage and failures](usage-and-failures.md).
 | `runs.usage`, `runs.subagents` | Read observed usage and subagent coverage. |
 | `accounts.quota` | Read the legacy local quota view. Prefer `accounts.usage` for account-service observations. |
 | `recover` | Mark a lost worker interrupted without retrying it. |
+| `error_cases.list/get` | Read safe deduplicated failures captured by execution workers. |
+| `error_cases.diagnose`, `error_diagnoses.get` | Explicit bounded diagnosis using a separate Cursor session and durable key; reconcile the receipt without repeating inference. |
+| `error_proposals.create/get/validate` | Review a declarative candidate and run structural invariant checks. |
+| `error_rules.get/activate/deactivate` | Explicit revision-checked activation or rollback of exact scoped classifications. |
+
+See [error learning](error-learning.md) for request fields, CLI examples and
+the difference between structural validation and verification of an error's
+meaning. Capturing an unknown failure never starts a diagnostic session or
+retries the original work automatically.
 
 The CLI validates provider-specific options before accepting a run. Unsupported controls are rejected. Account selection, retry policy, permissions and external side effects belong to the embedding application. Account status and usage are observations, not proof of future availability. Codex provides live account reads; Cursor provides cached binding checks; Claude reads bound-profile identity and native OAuth quota windows. Cursor SDK account quota remains unavailable. See interface/implementation-status.md for the implemented subset and remaining work.

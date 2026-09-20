@@ -33,11 +33,13 @@ def test_claude_shared_model_and_unknown_pools_keep_their_identity():
                       {'kind': 'weekly_model', 'percent': 60, 'scope': {'model': {'id': 'sonnet', 'display_name': 'Sonnet'}}}]}
     rows = normalize('claude', raw, now=1000)
     assert len(rows) == 6 and len({r['id'] for r in rows}) == 6
-    assert rows[0]['scope'] == 'account' and rows[0]['window_seconds'] == 18000
-    assert rows[2]['model_family'] == 'fable'
-    assert rows[3]['scope'] == 'unknown' and rows[3]['window_seconds'] is None
-    assert rows[4]['model_id'] == 'fable' and rows[4]['remaining_percent'] == 50
-    assert rows[5]['model_id'] == 'sonnet'
+    by_name = {row['name']: row for row in rows}
+    assert by_name['five_hour']['scope'] == 'account' and by_name['five_hour']['window_seconds'] == 18000
+    assert by_name['seven_day_fable']['model_family'] is None
+    assert by_name['seven_day_fable']['scope'] == 'unknown'
+    assert by_name['future_pool']['scope'] == 'unknown' and by_name['future_pool']['window_seconds'] is None
+    assert rows[1]['model_id'] == 'fable' and rows[1]['remaining_percent'] == 50
+    assert rows[2]['model_id'] == 'sonnet'
 
 
 def test_replay_recomputes_countdown_without_inventing_a_reset():
@@ -116,6 +118,6 @@ def test_usage_cli_shows_windows_and_reset_zero(tmp_path, capsys):
     main(['--root', str(tmp_path), 'accounts', 'usage', 'Quota fixture'])
     output = capsys.readouterr().out
     assert 'Remaining: 0%' in output and 'Reset in: 0s' in output
-    assert 'Model: fable' in output and 'Stale: yes' in output
+    assert 'Model: fable' not in output and 'Stale: yes' in output
     main(['--root', str(tmp_path), 'usage', '--account-ref', 'Quota fixture', '--json'])
     assert json.loads(capsys.readouterr().out)['windows'][0]['remaining_percent'] == 0

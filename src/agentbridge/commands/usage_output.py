@@ -39,8 +39,10 @@ def print_usage(value, account_name=None):
     credits = value.get('reset_credits')
     if isinstance(credits, dict):
         print(f"Reset credits: {shown(credits.get('available_count'))}")
+        print(f"Reset credits stale: {shown(credits.get('stale'))}")
         for row in credits.get('credits') or []:
             print(f"  {row['id']}: {shown(row.get('status'))}, expires {shown(row.get('expires_at'))}")
+            print(f"    Expires in: {duration(row.get('expires_in_seconds'))} | Expired: {shown(row.get('expired'))}")
     details = {key: value[key] for key in ('account_usage', 'tokens', 'extra_usage', 'pools')
                if value.get(key) is not None}
     if details:

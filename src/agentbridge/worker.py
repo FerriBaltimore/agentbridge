@@ -19,6 +19,7 @@ from .attachments import text_prompt
 from dataclasses import asdict
 from .execution_outcome import finish
 from .provider_errors import normalize
+from .error_observer import ErrorObserver
 
 MAX_LINE=8*1024*1024
 
@@ -42,7 +43,8 @@ def main():
         secrets=json.loads(sys.stdin.read())
         redactor=Redactor(secrets.values())
         emit=lambda kind,data:store.emit(run_id,kind,redactor.clean(data))
-        parser=Parser(account.engine,emit)
+        observe_error = ErrorObserver(store, account, run_id)
+        parser=Parser(account.engine,emit,error_handler=observe_error)
         env=base_environment()
         env.update(secrets)
         env['PYTHONPATH']=os.path.dirname(os.path.dirname(__file__))
@@ -129,6 +131,8 @@ def main():
         state, failure, issue = finish(parser, reason=reason, exit_code=code, unresolved=unresolved,
                                        stderr=stderr_tail.decode('utf-8', errors='replace'))
         if issue:
+            issue = observe_error(issue)
+            failure = issue['code']
             emit('error', issue)
         store.finish(run_id, state, failure, code)
     except BaseException as error:

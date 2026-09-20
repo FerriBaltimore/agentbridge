@@ -12,6 +12,9 @@ OPERATIONS = (
     "instances.list", "instances.update", "instances.archive", "instances.events", "messages.create",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
+    "error_cases.list", "error_cases.get", "error_cases.diagnose", "error_diagnoses.get",
+    "error_proposals.create", "error_proposals.get", "error_proposals.validate",
+    "error_rules.get", "error_rules.activate", "error_rules.deactivate",
 )
 
 
@@ -34,6 +37,8 @@ def _support(engine, operation):
 
 
 def _maturity(engine, operation):
+    if operation.startswith(('error_cases.', 'error_diagnoses.', 'error_proposals.', 'error_rules.')):
+        return 'fixture_tested'
     if operation == 'accounts.quota.reset':
         return 'fixture_tested' if engine == 'codex' else 'unsupported'
     if operation == 'permissions.respond':
@@ -51,6 +56,12 @@ def _maturity(engine, operation):
 
 
 def _limitations(engine, operation):
+    if operation == 'error_cases.diagnose':
+        return ['explicit_cursor_diagnostic_account_required', 'safe_structural_evidence_only',
+                'verified_tmpfs_required', 'no_token_or_monetary_budget', 'explicit_rule_review_required']
+    if operation == 'error_rules.activate':
+        return ['structural_validation_is_not_semantic_verification', 'exact_fingerprint_and_version_only',
+                'classification_never_authorizes_retry']
     if operation == 'accounts.quota.reset':
         return ['explicit_consumption_only', 'persistent_idempotency_key_required', 'provider_acceptance_not_run'] if engine == 'codex' else ['provider_reset_api_unavailable']
     if operation == 'models.list' and engine != 'codex':

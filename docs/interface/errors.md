@@ -39,6 +39,11 @@ Execution adapters additionally distinguish `safety_blocked`, `billing_required`
 Reset redemption uses `reset_pending`, `account_changed`, `identity_missing`
 and `identity_changed`; unknown redemption outcomes retain the original key.
 See [usage and failures](../usage-and-failures.md) for scope and validation.
+Reviewed learning additionally uses `invalid_error_evidence`,
+`invalid_error_proposal`, `error_record_not_found`, `error_proposal_not_ready`,
+`error_validation_failed`, `error_rule_conflict`, `version_conflict`,
+`diagnosis_failed`, `diagnosis_invalid` and `diagnosis_timeout`. A completed
+diagnostic proposal is not an active rule. See [error learning](../error-learning.md).
 They use the same envelope and never expose provider credentials or native home
 paths in RPC responses.
 

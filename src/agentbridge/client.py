@@ -25,9 +25,10 @@ from .accounts import AccountService
 from .authentication import AuthenticationService
 from .run_state import Run
 from .transcript import messages as transcript_messages
+from .error_management import ErrorManagementMixin
 
 
-class Bridge(DiscoveryMixin, TransferMixin):
+class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
     def __init__(self, root='.agentbridge'):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
         self.store=Store(root)

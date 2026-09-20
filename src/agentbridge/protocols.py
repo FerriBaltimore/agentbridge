@@ -8,7 +8,7 @@ FAILURE = {'failed','error','errored','killed','cancelled','canceled','stopped'}
 
 
 class Parser:
-    def __init__(self, engine, emit):
+    def __init__(self, engine, emit, error_handler=None):
         if engine not in ENGINES:
             raise ValueError(engine)
         self.engine, self.emit = engine, emit
@@ -19,6 +19,7 @@ class Parser:
         self.completed_tools = set()
         self.failed = False
         self.last_error = None
+        self.error_handler = error_handler
 
     def event(self, kind, data):
         self.emit(kind, data)
@@ -26,6 +27,12 @@ class Parser:
     def error(self, value, *, terminal=True, provider_retrying=False, outcome=None, phase='execution'):
         issue = normalize(self.engine, value, terminal=terminal, outcome=outcome,
                           provider_retrying=provider_retrying, phase=phase)
+        if self.error_handler:
+            issue = self.error_handler(issue)
+        return self.record_error(issue, terminal=terminal, provider_retrying=provider_retrying)
+
+    def record_error(self, issue, *, terminal=True, provider_retrying=False):
+        issue = {**issue, 'terminal': terminal, 'provider_retrying': provider_retrying}
         self.last_error = issue
         if terminal:
             self.failed = True
@@ -198,7 +205,10 @@ class Parser:
                 issue = normalize(self.engine, {'code': 'output_limit_exceeded'} if output_limited else ev)
                 if issue['code'] == 'provider_failed' and self.last_error:
                     issue = self.last_error
-                self.error(issue, outcome=issue['outcome'])
+                if issue is self.last_error:
+                    self.record_error(issue)
+                else:
+                    self.error(issue, outcome=issue['outcome'])
             if ev.get('usage') or ev.get('total_cost_usd') is not None:
                 self.event('usage',{'source':'claude_result','scope':'turn','tokens':ev.get('usage')})
             if ev.get('total_cost_usd') is not None or ev.get('modelUsage') or ev.get('model_usage'):

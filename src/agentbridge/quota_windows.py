@@ -3,11 +3,17 @@ from datetime import datetime, timezone
 import math
 import time
 
+from .quota_scope import claude_limit, legacy_window
+
 
 def number(value, *, maximum=None):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    if not math.isfinite(value) or value < 0 or (maximum is not None and value > maximum):
+    try:
+        valid = math.isfinite(value) and value >= 0 and (maximum is None or value <= maximum)
+    except OverflowError:
+        valid = False
+    if not valid:
         return None
     return value
 
@@ -76,24 +82,15 @@ def codex(data, now):
     return rows
 
 
-CLAUDE_WINDOWS = {'five_hour': (18000, 'account', None), 'seven_day': (604800, 'account', None),
-                 'seven_day_overage_included': (604800, 'model_pool', None),
-                 'seven_day_opus': (604800, 'model_family', 'opus'),
-                 'seven_day_sonnet': (604800, 'model_family', 'sonnet'),
-                 'seven_day_fable': (604800, 'model_family', 'fable')}
-
-
 def claude(data, now):
-    """Keep new provider pool names without guessing which models share them."""
+    """Prefer structural facts; unmatched legacy observations stay supplemental.
+
+An opaque legacy suffix cannot safely be matched to a model pool. Preserve
+such observations without implying they are additional independent capacity.
+"""
     rows = []
-    for name, item in data.items():
-        if not text(name) or not isinstance(item, dict) or not any(k in item for k in ('utilization', 'percent')):
-            continue
-        seconds, scope, family = CLAUDE_WINDOWS.get(name, (None, 'unknown', None))
-        rows.append(window(name, item, seconds=seconds, scope=scope, family=family, now=now))
     limits = data.get('limits')
     for item in limits[:100] if isinstance(limits, list) else []:
-        from .quota_scope import claude_limit
         metadata = claude_limit(item)
         if metadata is None:
             continue
@@ -103,6 +100,15 @@ def claude(data, now):
         row = window(name, item, model=metadata['model_id'], scope=metadata['scope'],
                      seconds=metadata['window_seconds'], now=now)
         rows.append({**row, **metadata})
+    structured = bool(rows)
+    for name, item in list(data.items())[:100]:
+        if name == 'extra_usage' or not text(name) or not isinstance(item, dict) or not any(k in item for k in ('utilization', 'percent')):
+            continue
+        if any(row['name'] == name for row in rows):
+            continue
+        metadata = legacy_window(name)
+        row = window(name, item, seconds=metadata['window_seconds'], scope=metadata['scope'], now=now)
+        rows.append({**metadata, **row, 'supplemental': structured})
     return rows
 
 
@@ -124,9 +130,13 @@ def claude_stream(data, now):
         if not text(name) or not isinstance(item, dict):
             continue
         used = number(item.get('utilization'))
-        seconds, scope, family = CLAUDE_WINDOWS.get(name, (None, 'unknown', None))
+        metadata = legacy_window(name)
+        structural = isinstance(item.get('scope'), dict)
+        if structural:
+            metadata = claude_limit({**item, 'kind': text(item.get('kind')) or name}) or metadata
         row = window(name, {**item, 'used_percent': used * 100 if used is not None else None},
-                     seconds=seconds, scope=scope, family=family, now=now)
+                     seconds=metadata['window_seconds'], scope=metadata['scope'], now=now)
+        row = {**row, **metadata} if structural else {**metadata, **row}
         status = item.get('status', raw.get('status') if name == raw.get('rateLimitType') else None)
         row['status'] = status if status in {'allowed', 'allowed_warning', 'rejected'} else None
         if row['status'] == 'rejected':
@@ -146,30 +156,43 @@ def normalize(engine, data, now=None):
         if not isinstance(item, dict) or not text(item.get('name')):
             continue
         name = item['name']
-        seconds, scope, family = CLAUDE_WINDOWS.get(name, (None, 'unknown', None)) if engine == 'claude' else (None, 'account_pool', None)
+        metadata = legacy_window(name) if engine == 'claude' else {'scope': 'account_pool', 'window_seconds': None}
+        scope, family = item.get('scope', metadata['scope']), item.get('model_family')
+        if engine == 'claude' and scope == 'model_family' and item.get('scope_source') != 'provider':
+            # Older stored rows inferred families from window suffixes. A read
+            # must not perpetuate that association without provider evidence.
+            scope, family = 'unknown', None
         normalized = window(name, item, pool=item.get('pool_id'),
-            scope=item.get('scope', scope), model=item.get('model_id'), family=item.get('model_family', family),
-            seconds=seconds, now=now)
+            scope=scope, model=item.get('model_id'), family=family,
+            seconds=metadata['window_seconds'], now=now)
         if text(item.get('id')):
             normalized['id'] = item['id']
         rows.append({**item, **normalized})
     return rows
 
 
-def reset_credits(raw):
+def reset_credits(raw, now=None):
+    now = time.time() if now is None else now
     if not isinstance(raw, dict):
         return {'status': 'unknown', 'available_count': None, 'credits': None}
     count = raw.get('availableCount')
     if type(count) is not int or count < 0:
-        return {'status': 'unknown', 'available_count': None, 'credits': None}
+        count = None
     details = raw.get('credits')
     rows = None
     if isinstance(details, list):
-        rows = [{'id': text(r.get('id')), 'status': text(r.get('status')),
-                 'reset_type': text(r.get('resetType')), 'granted_at': iso(r.get('grantedAt')),
-                 'expires_at': iso(r.get('expiresAt'))}
-                for r in details[:1000] if isinstance(r, dict) and text(r.get('id'))]
-    return {'status': 'available' if count else 'none', 'available_count': count, 'credits': rows}
+        rows = []
+        for item in details[:1000]:
+            if not isinstance(item, dict) or not text(item.get('id')):
+                continue
+            expires = timestamp(item.get('expiresAt'))
+            rows.append({'id': item['id'], 'status': text(item.get('status')),
+                         'reset_type': text(item.get('resetType')), 'granted_at': iso(item.get('grantedAt')),
+                         'expires_at': iso(expires),
+                         'expires_in_seconds': max(0, math.ceil(expires - now)) if expires is not None else None,
+                         'expired': expires <= now if expires is not None else None})
+    return {'status': 'unknown' if count is None else 'available' if count else 'none',
+            'available_count': count, 'credits': rows}
 
 
 def project(engine, data, now=None):
@@ -190,8 +213,11 @@ def project(engine, data, now=None):
     if engine == 'codex':
         from .quota_spend import codex_spend
         raw = data.get('quota') or data.get('limits') or data
-        result['reset_credits'] = reset_credits(raw.get('rateLimitResetCredits') if isinstance(raw, dict) else None)
+        credits = reset_credits(raw.get('rateLimitResetCredits') if isinstance(raw, dict) else None, now)
+        expired = any(row['expired'] and row['status'] in {None, 'available'} for row in credits['credits'] or [])
         result['pools'] = codex_spend(raw, now)
         if any((pool['individual_limit'] or {}).get('reset_due') for pool in result['pools']):
             result['stale'] = True
+        result['reset_credits'] = {**credits, 'observed_at': iso(observed),
+                                  'age_seconds': result['age_seconds'], 'stale': result['stale'] or expired}
     return result

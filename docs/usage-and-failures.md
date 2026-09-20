@@ -34,10 +34,20 @@ surface ID, provider kind and group. A label is not a model ID.
 - Codex reads every reported `rateLimitsByLimitId` bucket, including its
   primary and secondary windows. The legacy single bucket is deduplicated.
   Duration comes from the provider, never an assumed five-hour or weekly plan.
-- Claude reads five-hour, weekly and model-family windows, as well as dynamic
-  `limits[]` scoped by model, surface and group. Unknown future pool names
-  remain observable with unknown scope. It does not guess what models an
-  opaque pool covers or assume switching model will bypass a shared cap.
+- Claude prioritizes dynamic `limits[]` and their reported scope kind, model,
+  family, surface, group and duration. Model and family names are data, without
+  a built-in family-name table. Scope and duration provenance are exposed as
+  `scope_source` and `window_duration_source` when applicable.
+- Legacy window-name compatibility reads temporal grammar such as `five_hour`
+  or `seven_day_<suffix>`. A suffix never establishes a model or family.
+  Unmatched legacy observations remain visible with `supplemental: true` when
+  structural limits are also present. They may overlap those limits and must
+  not be treated as additional capacity. Sparse structural responses do not
+  discard unmatched legacy evidence.
+- Reported IDs are preserved. Otherwise IDs distinguish scope, group and
+  explicit duration without incorporating utilization or reset deadlines.
+  Display labels are never promoted to native model IDs. Unknown future scope
+  kinds remain reported metadata with unknown normalized scope when needed.
 - Claude stream events express utilization as a fraction, whereas the native
   OAuth quota response expresses percentages. The adapter normalizes both
   explicitly, including sparse events and `unifiedWindows`.
@@ -65,9 +75,17 @@ rate limits and team billing APIs are not substitutes for account quota.
 ## Explicit Codex earned resets
 
 Quota responses expose `reset_credits.available_count` and optional details.
-Null count means unknown. Null details means only a count was reported; an
-empty array means the provider returned no detail rows. Never derive the
-available count from a possibly truncated detail list.
+Null count means unknown. Null details means no detail list was reported; an
+empty array means the provider returned no detail rows. Detail rows remain
+available even when the provider omits its total. Never derive the available
+count from a possibly truncated detail list.
+
+Each detail preserves its ID, reported status/type, grant time and expiry.
+`expires_in_seconds` and `expired` are recomputed on read. The reset-credit
+observation also exposes `observed_at`, `age_seconds` and `stale`. An available
+credit passing its expiry marks that observation stale; it does not decrement
+the last reported count or pretend a redemption occurred. Refresh before
+deciding whether to consume a credit.
 
 ```sh
 agentbridge accounts quota-reset "My Codex" \
@@ -141,8 +159,10 @@ Terminal execution failures are not automatically retried, and a safety block
 never triggers an AgentBridge fallback to evade the block.
 
 Unknown future failures still return a safe generic code; the adapter does not
-claim exhaustive knowledge of future provider messages. See the remaining
-scope in [implementation status](interface/implementation-status.md).
+claim exhaustive knowledge of future provider messages. They can enter the
+[reviewed error-learning workflow](error-learning.md), with separate bounded
+AI diagnosis and explicit activation. See the remaining scope in
+[implementation status](interface/implementation-status.md).
 
 ## Protocol evidence
 

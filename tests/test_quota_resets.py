@@ -27,6 +27,8 @@ def setup(tmp_path, monkeypatch):
         def _rpc(self, method, params=None):
             state["calls"].append((method, params))
             if method == "account/read":
+                if state.get("change_binding"):
+                    store.replace_account_home(replace(account, home=account.home + "-changed"))
                 return {"account": {"type": "chatgpt", "email": state["email"]}}
             if method == "account/rateLimitResetCredit/consume":
                 with store.connect() as db:
@@ -219,3 +221,89 @@ def test_prepared_crash_can_rebind_but_submitted_request_cannot(setup):
     with pytest.raises(BridgeError) as caught:
         quota_resets._prepare(store, account, 'crashed-before-submit', None)
     assert caught.value.code == 'account_changed' and caught.value.outcome == 'unknown'
+
+
+def test_binding_changed_during_identity_probe_does_not_submit(setup):
+    store, account, state = setup
+    state['change_binding'] = True
+    with pytest.raises(BridgeError) as caught:
+        quota_resets.consume(store, account, 'changed-during-probe')
+    assert caught.value.code == 'account_changed'
+    assert caught.value.outcome == 'not_started'
+    assert not any(method.endswith('/consume') for method, _ in state['calls'])
+    with store.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM quota_reset_requests').fetchone()[0] == 0
+
+
+def test_reconciliation_preserves_pending_result_if_binding_changes_during_probe(setup):
+    store, account, state = setup
+    state['error'] = BridgeError('provider_timeout', 'The fixture lost its response.')
+    with pytest.raises(BridgeError):
+        quota_resets.consume(store, account, 'pending-reset')
+    state['change_binding'] = True
+    del state['error']
+    with pytest.raises(BridgeError) as caught:
+        quota_resets.consume(Store(store.root), account, 'pending-reset')
+    assert caught.value.code == 'unknown_outcome'
+    assert caught.value.details['reason'] == 'account_changed'
+    assert len([method for method, _ in state['calls'] if method.endswith('/consume')]) == 1
+    with store.connect() as db:
+        assert db.execute('SELECT state FROM quota_reset_requests').fetchone()[0] == 'submitted'
+
+
+@pytest.mark.parametrize('email', [' ', '\t', 'invalid email', 'owner@example.test\x7f'])
+def test_invalid_native_identity_does_not_consume_reset_credit(setup, email):
+    store, account, state = setup
+    state['email'] = email
+    with pytest.raises(BridgeError) as caught:
+        quota_resets.consume(store, account, 'bad-identity')
+    assert caught.value.code == 'identity_missing'
+    assert not any(method.endswith('/consume') for method, _ in state['calls'])
+
+
+def test_probe_initialization_failure_removes_unsubmitted_request(setup, monkeypatch):
+    store, account, state = setup
+    def unavailable(_):
+        raise OSError('secret exception text')
+    monkeypatch.setattr(quota_resets, 'CodexAppServerProbe', unavailable)
+    with pytest.raises(BridgeError) as caught:
+        quota_resets.consume(store, account, 'unsubmitted-reset')
+    assert caught.value.code == 'provider_failed'
+    assert caught.value.outcome == 'not_started'
+    assert 'secret' not in str(caught.value)
+    with store.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM quota_reset_requests').fetchone()[0] == 0
+    assert not state['calls']
+
+
+def test_pending_probe_initialization_failure_keeps_unknown_outcome(setup, monkeypatch):
+    store, account, state = setup
+    state['error'] = BridgeError('provider_timeout', 'The fixture lost its response.')
+    with pytest.raises(BridgeError):
+        quota_resets.consume(store, account, 'pending-reset')
+    def unavailable(_):
+        raise OSError('secret exception text')
+    monkeypatch.setattr(quota_resets, 'CodexAppServerProbe', unavailable)
+    with pytest.raises(BridgeError) as caught:
+        quota_resets.consume(store, account, 'pending-reset')
+    assert caught.value.code == 'unknown_outcome'
+    assert caught.value.retryable is False
+    with store.connect() as db:
+        assert db.execute('SELECT state FROM quota_reset_requests').fetchone()[0] == 'submitted'
+
+
+def test_reset_credit_rendering_reports_expiry_without_inventing_availability(capsys):
+    from agentbridge.commands.usage_output import print_usage
+    print_usage({'reset_credits': {'available_count': 2, 'credits': [
+        {'id': 'expires-soon', 'status': 'available', 'expires_at': '2030-01-01T00:00:00+00:00',
+         'expires_in_seconds': 3661, 'expired': False},
+        {'id': 'expired', 'status': 'available', 'expires_at': '2020-01-01T00:00:00+00:00',
+         'expires_in_seconds': 0, 'expired': True},
+        {'id': 'unknown', 'status': 'available', 'expires_at': None,
+         'expires_in_seconds': None, 'expired': None},
+    ]}})
+    output = capsys.readouterr().out
+    assert 'Reset credits: 2' in output
+    assert 'Expires in: 1h 1m 1s | Expired: False' in output
+    assert 'Expires in: 0s | Expired: True' in output
+    assert 'Expires in: unknown | Expired: unknown' in output

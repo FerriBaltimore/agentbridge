@@ -29,7 +29,7 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
 | Transfer/export | Native version checks, explicit portable fallback, bounded omissions, destination idempotency | File copy and SQLite commit are not one crash-atomic transaction; replay metadata may be incomplete |
 | Models | Live paginated Codex, Claude initialize and Cursor SDK catalogs; observed effort, parameters/variants and context metadata | Catalogue membership does not verify model entitlement; absent sizes remain unknown |
 | Usage | Normalized windows, countdowns, scoped Claude limits and Codex spend pools/reset credits; explicit durable Codex reset redemption | Cursor SDK account quota unavailable; no historical time filters or aggregation; reset mutation tested with fixtures |
-| Errors | Structured native failures, safety blocks, quota/auth/billing/context/output limits, cut streams and safe terminal outcomes | Unrecognized provider failures remain generic; no claim of exhaustive future error coverage |
+| Errors | Structured native failures, safety blocks, quota/auth/billing/context/output limits, cut streams and safe terminal outcomes; durable unknown cases and reviewed exact classifications | Diagnostic backend requires a separate explicit Cursor account; structural validation does not verify meaning; incomplete evidence stays unknown |
 
 ## Explicitly unsupported or unfinished
 
@@ -44,8 +44,10 @@ See provider-acceptance.md for the tested scope and remaining deployment limits.
   collection envelopes.
 - Shared message identity across execution retries, active-turn message steering,
   comprehensive transfer crash recovery and retention/deletion operations.
-- Exhaustive future provider error mapping. Known codes and bounded compatibility
-  messages are mapped; unknown failures retain generic safe codes.
+- Exhaustive future provider error mapping. Unknown failures are captured with
+  hashes and fixed vocabulary, without their original bodies. A separate AI
+  session can propose a classification; only explicitly reviewed rules become
+  active. Uncertain meanings stay unknown. See [error learning](../error-learning.md).
 - Network transports. This build delivers Python SDK, CLI and JSON-RPC over stdio.
   A future transport should share the same dispatcher and event store.
 - A completely fresh mobile Claude login after the scroll fix. The corrected

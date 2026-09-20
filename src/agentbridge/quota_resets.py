@@ -91,6 +91,8 @@ def _principal(account, result):
             or any(ord(char) < 32 for char in email)):
         raise BridgeError("identity_missing", "The provider did not identify the account for reset redemption.")
     email = email.strip().casefold()
+    if not email or any(char.isspace() or ord(char) == 127 for char in email):
+        raise BridgeError("identity_missing", "The provider did not identify the account for reset redemption.")
     if account.email and email != account.email.strip().casefold():
         raise BridgeError("identity_changed", "The provider account differs from the selected account.")
     value = {"email": email}
@@ -126,9 +128,10 @@ values, native paths or process output are returned or persisted here.
         row, replayed = _prepare(store, account, idempotency_key, credit_id)
         if row["state"] == "completed":
             return {**json.loads(row["receipt"]), "replayed": True}
-        probe = CodexAppServerProbe(account)
+        probe = None
         uncertain = row["state"] == "submitted"
         try:
+            probe = CodexAppServerProbe(account)
             probe._rpc("initialize", {"clientInfo": {"name": "agentbridge", "title": "AgentBridge", "version": "0.1"},
                                       "capabilities": {"experimentalApi": True}})
             probe._notify("initialized", {})
@@ -136,6 +139,10 @@ values, native paths or process output are returned or persisted here.
             if row["identity"] and json.loads(row["identity"]) != principal:
                 raise BridgeError("identity_changed", "The reset attempt belongs to a different provider account.")
             with store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT config FROM accounts WHERE id=?", (account.id,)).fetchone()
+                if current is None or json.loads(current["config"]) != json.loads(dumps(account.to_dict())):
+                    raise BridgeError("account_changed", "The selected account binding changed before reset submission.")
                 db.execute("UPDATE quota_reset_requests SET identity=?,state='submitted',updated=? WHERE request_key=?",
                            (dumps(principal), time.time(), idempotency_key))
                 # Even a lost response can mean a credit was consumed. The
@@ -169,4 +176,5 @@ values, native paths or process output are returned or persisted here.
             _discard_prepared(store, idempotency_key)
             raise BridgeError("provider_failed", "The provider reset request could not be prepared.") from None
         finally:
-            probe.close()
+            if probe is not None:
+                probe.close()

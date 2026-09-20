@@ -14,12 +14,19 @@ def finish(parser, *, reason=None, exit_code=0, unresolved=False, stderr=''):
         return 'interrupted', 'interrupted', normalize(engine, {'code': 'interrupted'})
     if exit_code != 0 or parser.failed:
         issue = parser.last_error or normalize(engine, stderr)
-        if issue['code'] == 'provider_failed' and parser.terminal != 'failed':
-            issue = normalize(engine, {'code': 'unknown_outcome'})
+        lost_unknown = (parser.terminal != 'failed' and
+                        issue.get('details', {}).get('detection') in {'unclassified', 'learned_rule'})
+        if issue['code'] == 'provider_failed' and lost_unknown:
+            unknown = normalize(engine, {'code': 'unknown_outcome'})
+            issue = {**unknown, 'details': issue['details']}
+        if lost_unknown:
+            issue = {**issue, 'outcome': 'unknown', 'action': 'inspect', 'retryable': False}
         if unresolved:
             issue = {**issue, 'outcome': 'unknown', 'action': 'inspect', 'retryable': False}
         issue = {**issue, 'terminal': True, 'provider_retrying': False}
-        state = 'interrupted' if issue['code'] in {
+        state_code = issue['details'].get('unclassified_code', issue['code']) if (
+            issue['details'].get('detection') == 'learned_rule') else issue['code']
+        state = 'interrupted' if lost_unknown or state_code in {
             'provider_timeout', 'provider_connection_lost', 'provider_protocol_error', 'unknown_outcome'
         } else 'failed'
         return state, issue['code'], issue

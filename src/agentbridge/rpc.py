@@ -35,6 +35,15 @@ def public_login(result):
 
 
 def dispatch(bridge,method,params):
+    error_methods = {
+        'error_cases.list': 'error_cases', 'error_cases.get': 'error_case',
+        'error_cases.diagnose': 'error_diagnose', 'error_diagnoses.get': 'error_diagnosis',
+        'error_proposals.create': 'error_propose', 'error_proposals.get': 'error_proposal',
+        'error_proposals.validate': 'error_validate', 'error_rules.get': 'error_rule',
+        'error_rules.activate': 'error_activate', 'error_rules.deactivate': 'error_deactivate',
+    }
+    if method in error_methods:
+        return getattr(bridge, error_methods[method])(**params)
     if method.startswith('accounts.login') and set(params) & {'client', 'grantbridge_root', 'data_dir', 'on_attempt'}:
         raise BridgeError('unsupported_parameter', 'Authentication transport configuration belongs to the local host.')
     if method=='capabilities':return bridge.capabilities(**params)
