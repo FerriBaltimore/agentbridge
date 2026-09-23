@@ -1,5 +1,11 @@
 # Fullbrain integration
 
+For a Fullbrain v1 adapter, start with the
+[v2 migration guide](fullbrain-v2-migration.md) and
+[implemented RPC examples](fullbrain-v2-rpc.md). This page describes the host
+loop after its migration gates are met; it does not certify Fullbrain feature
+parity or live provider acceptance.
+
 Fullbrain should treat AgentBridge as a local execution kernel over JSON-RPC
 stdio. It owns the model picker, permissions, product retries and UI.
 AgentBridge owns automatic account selection for v2 proxy instances, provider
@@ -32,6 +38,10 @@ Record the account on each accepted turn and display route changes when useful.
 AgentBridge fixes one route for the entire turn, including tool calls. On an
 automatic account switch it starts a fresh Codex thread with bounded portable
 context and reports omissions; Fullbrain should surface those omissions.
+The current v2 `messages.create` does not accept Fullbrain's existing
+`context_package` or `mcp` fields. Fullbrain must resolve those requirements
+through a reviewed contract before claiming rules, skills, tools or evaluation
+isolation parity. Do not silently drop the fields during migration.
 
 On reconnect, reopen the same instance and cursor. A timeout or disconnect is
 not permission to submit the message again. Reuse the same idempotency key and
@@ -57,9 +67,12 @@ Resume an attempt after restart with the saved references, or cancel it with
 provide `proxy_base_url`, `key_env` and `management_key_env` together to the
 same login flow. These key arguments are environment variable names, not
 values. The management reference is required for pinned and automatic routes
-and is never sent to Codex. Managed key values stay in local supervisor
-memory and never enter the AgentBridge database. The initial browser flow is
-same-host; real OAuth acceptance is pending.
+and is never sent to Codex. Managed key values pass over private local
+channels during login and execution and never enter the
+AgentBridge database. The initial browser flow is
+same-host; real OAuth acceptance is pending. A remote Fullbrain browser cannot
+complete the current flow without a separately implemented and accepted remote
+browser path.
 
 ## Errors and capability gates
 

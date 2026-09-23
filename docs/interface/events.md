@@ -3,17 +3,18 @@
 For new v2 turns, `engine` is always `codex`; upstream provider and selected
 account are separate route evidence. Older direct events remain readable.
 
-Every stored event has:
+Every public event has:
 
-    seq, instance_id, message_id?, turn_id, engine, kind, at, data, final
+    seq, instance_id, message_id, turn_id, engine, kind, at, data, final
 
-seq is monotonic per store. Clients resume a stream using after_seq, not a
-provider cursor. Provider fields that are not understood become a gap event;
-the adapter must not invent a successful result.
+`seq` is monotonic per store. Clients resume using `after_seq`, not a provider
+cursor. An unknown provider event uses `provider.event` after safe projection;
+a known unreadable or lost segment uses `recovery.gap`. The adapter must not
+invent a successful result.
 
-## Common kinds
+## Normalized kinds
 
-    run.accepted
+    message.created
     run.started
     session.started
     message.delta
@@ -23,27 +24,37 @@ the adapter must not invent a successful result.
     subagent.status
     usage.observed
     quota.observed
+    context.compacted
+    model.changed
+    route.selected
+    run.retrying
     permission.required
     permission.denied
-    warning
-    error
+    permission.responded
+    run.error
     run.finished
     recovery.observed
     recovery.gap
     provider.event
 
 The existing legacy event names remain readable during migration. New methods
-use these normalized names. Unknown provider events use provider.event and
-keep only redacted adapter data.
+use these normalized names. `route.selected` records the account decision
+before execution and may include `account_changed`, `portable_context_used`
+and `context_omitted_count`. Read `messages.create.account_ref` or
+`turns.get.account_ref` for the selected public account reference.
 
 ## Terminal behavior
 
-run.finished is committed with the terminal turn state. A lost worker emits a
-recovery event, marks unfinished tool results as unknown, and finishes as
-interrupted. No provider request is rerun automatically.
+`final` marks the end of one complete message or a finished run. It is true
+for `run.finished` and can also be true for `message.completed`; consumers
+must not treat every `final: true` event as a terminal turn. `run.finished` is
+committed with the terminal turn state; `turns.get.state` is an authoritative
+snapshot. A lost worker emits a recovery event, marks unfinished tool results
+as unknown, and finishes as interrupted. No provider request is rerun
+automatically.
 
 ## Permissions
 
-permission.required contains the bounded action and tool identifier. It never
-contains a secret, private reasoning or an unbounded provider payload. The host
-decides whether and how a permission is granted.
+`permission.required` contains the bounded action and tool identifier. It
+never contains a secret, private reasoning or an unbounded provider payload.
+The host decides whether and how a permission is granted.

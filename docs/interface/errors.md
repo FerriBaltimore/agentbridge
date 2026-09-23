@@ -10,11 +10,10 @@ stable AgentBridge code:
       category: auth
       retryable: false
       action: login
-      provider: codex
-      account_ref: development
-      phase: launch
+      phase: admission
       outcome: not_started
       retry_after_ms: null
+      details: {}
 
 ## Stable codes
 
@@ -31,7 +30,11 @@ stable AgentBridge code:
 Authentication orchestration also uses `authentication_attempt_not_found`,
 `authentication_owner_required`, `authentication_attempt_not_ready`,
 `authentication_not_verified`, `authentication_in_progress`,
-`activation_unsupported` and `login_timeout`. Account retirement may return
+`authentication_outcome_unknown`, `activation_unsupported` and
+`login_timeout`. Proxy onboarding and routing additionally use
+`account_migration_required`, `proxy_binding_unverified`,
+`proxy_binding_changed`, `proxy_endpoint_shared`, `model_required` and
+`context_stale`. Account retirement may return
 `busy` when a turn is active; `account_unavailable` identifies an incompatible
 historical account record.
 Inputs and observations also use `invalid_attachment`, `invalid_permissions`,
@@ -62,5 +65,7 @@ describe old records; they do not enable a direct execution path.
 Unknown provider stderr, tokens, prompts, private reasoning and unbounded
 response bodies are never included in the public error.
 
-Adapters map their errors once. Retry classification and account fallback stay
-in the host, so the provider layer does not make business decisions.
+Adapters map their errors once. AgentBridge owns automatic account selection
+before each admitted turn. The host owns product retry policy and explicit
+recovery or new-turn decisions after a failure; no layer silently reruns an
+uncertain turn on another account.

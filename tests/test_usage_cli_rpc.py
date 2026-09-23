@@ -28,6 +28,31 @@ def test_quota_reset_is_unsupported_in_rpc_and_absent_from_cli(tmp_path, capsys)
     assert bridge.capabilities()["operations"]["accounts.quota.reset"]["support"] == "unsupported"
 
 
+def test_account_usage_methods_match_capability_discovery_and_rpc_dispatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("FIXTURE_MANAGEMENT_KEY", secrets.token_hex(16))
+    with local_management(proxy_responses(used_percent="50")) as (port, _):
+        bridge = Bridge(tmp_path)
+        configured_proxy(bridge, port)
+        operations = dispatch(bridge, "capabilities.get", {})["operations"]
+        for method in ("accounts.usage", "accounts.usage_history", "usage.history"):
+            assert operations[method]["support"] == "adapter"
+            assert operations[method]["maturity"] == "fixture_tested"
+
+        usage = dispatch(bridge, "accounts.usage", {
+            "account_ref": "codex-test", "refresh": True})
+        account_history = dispatch(bridge, "accounts.usage_history", {
+            "account_ref": "codex-test"})
+        usage_history = dispatch(bridge, "usage.history", {
+            "account_ref": "codex-test"})
+
+    assert usage["supported"] is True
+    assert usage["quota_windows"][0]["used_percent"] == 50
+    assert account_history[0]["id"] == usage_history[0]["id"]
+    assert account_history[0]["observed_at"] == usage_history[0]["observed_at"]
+    assert account_history[0]["data"]["quota_windows"][0]["used_percent"] == 50
+    assert usage_history[0]["data"]["quota_windows"][0]["used_percent"] == 50
+
+
 def test_usage_include_quota_keeps_live_proxy_observation(tmp_path, monkeypatch):
     monkeypatch.setenv("FIXTURE_MANAGEMENT_KEY", secrets.token_hex(16))
     with local_management(proxy_responses(used_percent="50")) as (port, _):

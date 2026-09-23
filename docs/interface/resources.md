@@ -12,32 +12,40 @@ owns the upstream OAuth credential and its auth directory. Historical direct
 account records remain readable only. Configuration stores references, never
 key values or upstream credentials.
 
-    account_ref, provider, supported_models, name, email,
-    proxy_base_url, key_env, management_key_env,
-    authentication, identity, observed_at
+`accounts.list` returns safe public items with `account_ref`, `name`, `email`
+and, when present, `provider`, `supported_models`, `authentication`,
+`identity` and `reason`. `accounts.status` adds a configured reference summary
+and observations; it is not a credential export.
 
 Authentication is an observation, not a promise that a future model request
-will succeed. The proxy URL and key environment references are omitted from
-the public RPC projection. Managed key values exist only in supervisor memory,
-not the AgentBridge database. The management key is required for local login,
+will succeed. Internal account configuration references `proxy_base_url`,
+`key_env` and `management_key_env`; these are omitted from the public RPC
+projection. The supervisor generates managed keys and passes them to local
+processes when required; values are never stored in the AgentBridge database.
+The management key is required for local login,
 identity, route and quota checks on both automatic and pinned accounts. It is
 never passed to Codex. Historical `engine` and home fields may appear only in
 old stored records; they do not enable direct execution.
 
 ## Model
 
-    id, display_name, description, is_default, availability,
-    deprecated, retirement, reasoning_efforts, context_windows,
-    input_modalities, tool_support, subagent_support, service_tiers,
-    source, observed_at, stale, provider_extensions
+An implemented `models.list` item has:
 
-source is live, cache or static. stale is explicit. Missing model metadata is
-unknown, never an invented default. A configured proxy model is a routing
-declaration, not a live model catalog or entitlement observation. Aggregate v2
-models add `providers`, `candidate_account_refs`, and `observed_account_refs`;
-the latter requires fresh local proxy evidence. Its `availability` is
-`configured_unverified` or `proxy_observed`, neither of which certifies live
-provider acceptance.
+    id, display_name, availability, source, providers,
+    candidate_account_refs, observed_account_refs, reasoning_efforts,
+    context_windows, input_modalities, account_capabilities
+
+Each `account_capabilities` item has `account_ref`, `provider`, `observed`,
+`reasoning_efforts`, `default_reasoning_effort`, `context_windows`,
+`input_modalities` and `metadata_source`. The aggregate result also has
+`source`, `stale`, `models`, `items`, `next_cursor` and `has_more`.
+`candidate_account_refs` are declarations; `observed_account_refs` have fresh
+local proxy evidence. The item's `source` is `account_configuration` and its
+`availability` is `configured_unverified` or `proxy_observed`. Neither
+availability proves live entitlement. Missing metadata is an empty list or
+null source, never an invented default. Generic target fields such as
+`description`, `is_default`, retirement, tool support and service tier are not
+returned by the current v2 model item.
 
 ## Instance
 

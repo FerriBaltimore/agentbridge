@@ -14,9 +14,10 @@ the provider's browser authorization through CLIProxyAPI's Management API.
 AgentBridge prepares an empty, dedicated loopback sidecar for each account by
 default. CLIProxyAPI owns and renews the upstream credential in its isolated
 authentication directory. AgentBridge stores only route and key references,
-plus safe identity and model evidence; generated proxy keys remain transient
-in the local supervisor's memory and never enter the AgentBridge database. No
-account is created until the sidecar reports one verified upstream identity
+plus safe identity and model evidence. Generated proxy keys pass over a
+private local channels during login and execution; they never enter the
+AgentBridge database or public account projections. No account is created
+until the sidecar reports one verified upstream identity
 and a usable model catalogue.
 
 Install a compatible CLIProxyAPI executable on `PATH`, or set
@@ -106,6 +107,9 @@ The [interface contract](docs/interface/README.md) describes accounts, models,
 instances, messages, turns, usage and events. The Python SDK, CLI and JSON-RPC
 stdio API expose the same account flow. AgentBridge's managed CLIProxyAPI
 sidecars bind to loopback; the SDK does not expose a public network server.
+Fullbrain's v1-to-v2 work is mapped in the
+[migration guide](docs/interface/fullbrain-v2-migration.md) and
+[implemented RPC reference](docs/interface/fullbrain-v2-rpc.md).
 For a JSON-RPC caller:
 
 ```bash

@@ -62,9 +62,14 @@ protocol. Historical direct Claude behavior is not a v2 execution path.
 
 model, effort, workspace_path, timeout_ms, permission_mode, sandbox_mode,
 allowed_tools, max_turns and max_budget are common parameters because they
-describe execution intent. Context-window selection remains unsupported. Attachments accept bounded
-inline text and images, with explicit omissions on portable transfer. Provider-only switches
-belong under provider_options and remain opaque to the common layer.
+describe execution intent. They are not all usable in the v2 adapter:
+`allowed_tools`, `max_budget` and advanced instance defaults are unsupported.
+The adapter accepts a positive numeric `context_window` per turn; a host should
+expose it only when a model maximum has been observed. Provider acceptance
+remains pending. Attachments
+accept bounded inline text and images, with explicit omissions on portable
+transfer. Provider-only switches belong under provider_options and remain
+unsupported without a reviewed contract.
 
 Every operation accepts only the parameters documented for that method.
 Unsupported values fail before a provider request and return a stable error
@@ -73,8 +78,10 @@ does not become an empty list, a successful turn or a retry.
 
 ## Response and error invariants
 
-Resources expose durable identifiers and observation timestamps. Collections
-return bounded pages and a cursor when more data exists. Events retain their
+Resources expose durable identifiers and observation timestamps. Implemented
+collection envelopes vary: `models.list` includes `items`, `next_cursor` and
+`has_more`, while accounts, instances, events and usage history return arrays
+with method-specific limits. Events retain their
 sequence, instance, turn, engine and normalized kind.
 
 Errors contain a stable code, category, phase, outcome, retryability and

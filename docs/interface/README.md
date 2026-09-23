@@ -16,6 +16,9 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - review.md: completeness checklist and acceptance evidence.
 - provider-acceptance.md: release matrix and live-provider gate.
 - v2-model-routing.md: model-first Codex proxy routing and evidence limits.
+- fullbrain-integration.md: host integration principles.
+- fullbrain-v2-migration.md: Fullbrain v1 to v2 migration gates and data changes.
+- fullbrain-v2-rpc.md: implemented JSON-RPC calls and response shapes for Fullbrain.
 - rationale.md: why each operation exists and how unsupported parameters behave.
 
 ## Contract rules

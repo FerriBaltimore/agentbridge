@@ -24,8 +24,9 @@ Claude's final consent required direct control of the hosted browser, so a fully
 unassisted mobile journey is not certified. Fullbrain's actual integration was
 not exercised, and the temporary acceptance host was shut down after the checks.
 
-`capabilities.get` still defaults to `acceptance.provider_tested: false`: these
-operator results do not certify another installation, version or feature set.
+`capabilities.get` reports `runtime_provider_support_verified: false` and
+fixture maturity for the v2 route: these operator results do not certify
+another installation, version or feature set.
 No provider is marked usable solely because a browser URL exists. See
 implementation-status.md for unimplemented features and deployment requirements.
 

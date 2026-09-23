@@ -3,10 +3,12 @@
 OPERATIONS = (
     "contracts.list", "contracts.get", "contracts.check", "contracts.inspect",
     "capabilities.get", "accounts.list", "accounts.status", "accounts.delete",
+    "accounts.usage", "accounts.usage_history",
     "accounts.login",
     "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel",
-    "models.list", "usage.get", "accounts.quota.reset", "instances.create", "instances.get",
+    "models.list", "usage.get", "usage.history", "accounts.quota.reset",
+    "instances.create", "instances.get",
     "instances.list", "instances.update", "instances.archive", "instances.events", "messages.create",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",

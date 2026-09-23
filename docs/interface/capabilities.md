@@ -47,7 +47,11 @@ Stop and recovery never trigger a hidden account switch or rerun.
 
 Common parameters include model, effort, workspace_path, timeout_ms,
 permission_mode, sandbox_mode, allowed_tools, max_turns and max_budget where
-supported. Context-window selection remains unsupported. Bounded inline
-attachments and Codex host approvals are specified in
+supported. The v2 adapter accepts a positive numeric `context_window` on
+`messages.create` and passes it to Codex as a per-turn setting. The model
+maximum must be observed before a host exposes this control, and live upstream
+acceptance is pending. Advanced instance defaults, `allowed_tools` and
+`max_budget` are unsupported. Bounded inline attachments and Codex host
+approvals are specified in
 [interactive-inputs.md](interactive-inputs.md). The reserved provider_options
 surface is unsupported until its parameters have a reviewed contract.

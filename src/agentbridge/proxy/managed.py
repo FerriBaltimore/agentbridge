@@ -1,8 +1,8 @@
-"""Client for the local, secret-free managed proxy control socket.
+"""Client for the protected local managed proxy control socket.
 
-Only the supervisor holds generated proxy keys. This client installs them in
-the current process environment when an account route needs them. Neither
-key is returned through the public AgentBridge account projection.
+The supervisor generates proxy keys and returns them over its private socket.
+This client installs them in the current process environment when an account
+route needs them. Neither key enters public AgentBridge account projections.
 """
 
 from hashlib import sha256

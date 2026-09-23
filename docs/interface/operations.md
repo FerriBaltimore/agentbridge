@@ -10,12 +10,16 @@ where the implementation declares support.
     accounts.list(authentication?, limit?, cursor?)
     accounts.status(account_ref, refresh?)
     accounts.delete(account_ref)
-    accounts.login.start(provider, name, request_key?, proxy_base_url?,
-                         key_env?, management_key_env?)
+    accounts.login.start(provider, name, request_key?, owner_ref?, email?,
+                         mode?, browser?, proxy_base_url?, key_env?,
+                         management_key_env?)
     accounts.login.status(attempt_id, owner_ref?, account_ref?)
     accounts.login.check(attempt_id, owner_ref?, account_ref?)
     accounts.login.complete(attempt_id, owner_ref?, account_ref?)
     accounts.login.cancel(attempt_id, owner_ref?, account_ref?)
+    accounts.usage(account_ref, refresh?)
+    accounts.usage_history(account_ref, since?, until?, granularity?,
+                           limit?, cursor?, refresh?)
     models.list(account_ref?, refresh?, include_hidden?,
                 include_deprecated?, limit?, cursor?)
 
@@ -31,9 +35,12 @@ credential, stable identity and an observed model catalogue. `login.complete`
 repeats required checks and atomically creates the account. An ambiguous,
 failed or cancelled attempt cannot be promoted. The blocking `accounts.login`
 wrapper runs this same flow. The initial browser route is local and same-host.
+In v2, `mode` must be `browser` and `browser` must be `same_host`; the other
+login methods require the returned `owner_ref` or an account reference to
+resolve ownership. Remote browser and device modes are not implemented.
 Neither API-key values nor OAuth tokens enter public account configuration or the AgentBridge
-database. Managed client and management key values are transient in the local
-supervisor.
+database. The supervisor generates client and management key values and
+delivers them over private local channels during login and execution.
 
 `accounts.delete` retires the local route. Historical instances, turns and
 observations remain readable; active turns and pending login attempts block
@@ -56,7 +63,9 @@ selector or independent native catalogue route in v2.
 
 Scope is account, instance or turn. Usage and quota are separate objects;
 monetary cost is returned only when its source is known. Missing or stale
-usage is unknown, never zero.
+usage is unknown, never zero. `accounts.usage` and `usage.get(scope="account")`
+read the same proxy quota surface. Account history methods return arrays;
+historical time filters and aggregation are unsupported by this adapter.
 
 ## Instances
 
@@ -81,6 +90,11 @@ in the local catalogue and an available client key. Historical direct accounts
 cannot create executable instances. Creation validates declared support before
 writing durable state; it does not prove live entitlement or spend a model turn.
 `idempotency_key` makes lost-response retries safe.
+The signature above includes target optional controls. The current v2 adapter
+rejects nondefault effort, context-window, permission, sandbox and tool
+controls on `instances.create`; send supported controls with each
+`messages.create` call instead. `instances.update` currently changes only
+model or state; its listed advanced defaults are unsupported.
 
 ## Messages and turns
 
@@ -106,6 +120,10 @@ it never replays an uncertain side effect or changes account silently.
 
 `instances.events` is the incremental conversation feed. Clients should
 page with `after_seq` and persist their cursor after consuming the page.
+The v2 adapter accepts a positive numeric per-turn `context_window`, subject
+to observed model metadata and live provider behavior. It rejects
+`allowed_tools`, `max_budget`, `provider_options` and arbitrary metadata.
+`context_package` and `mcp` are not `messages.create` parameters.
 See [interactive-inputs.md](interactive-inputs.md) for attachments and
 one-use permission responses.
 
