@@ -125,6 +125,8 @@ class RunOptions:
     max_budget_usd: float | None = None
     collect_usage: bool = False
     attachments: tuple[dict, ...] = ()
+    context_package_digest: str | None = None
+    mcp_binding_digest: str | None = None
 
     def __post_init__(self):
         if (not finite_number(self.timeout) or not finite_number(self.stop_grace)
@@ -145,6 +147,9 @@ class RunOptions:
             raise BridgeError("invalid_context_window", "context_window must be a positive token count.")
         if self.effort is not None and (not isinstance(self.effort, str) or not self.effort.strip()):
             raise BridgeError('unsupported_parameter', 'effort must be a provider-declared value.')
+        for value in (self.context_package_digest, self.mcp_binding_digest):
+            if value is not None and (not isinstance(value, str) or not re.fullmatch('[a-f0-9]{64}', value)):
+                raise BridgeError('invalid_context', 'Execution context digests must be SHA-256 values.')
         object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
         from .attachments import normalize
         object.__setattr__(self, "attachments", normalize(self.attachments))

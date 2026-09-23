@@ -97,6 +97,8 @@ def dispatch(bridge,method,params):
         return public_login(bridge.account_login_complete(**params))
     if method in ('accounts.login.cancel', 'accounts.login_cancel'):
         return bridge.account_login_cancel(**params)
+    if method=='accounts.login.callback':
+        return bridge.account_login_callback(**params)
     if method=='usage.get':
         value = dict(params)
         value['account_ref'] = value.pop('account_ref', value.pop('account_id', None))
@@ -111,6 +113,7 @@ def dispatch(bridge,method,params):
     if method=='instances.list':return bridge.instances(**params)
     if method=='instances.update':return bridge.instance_update(**params)
     if method=='instances.archive':return bridge.instance_archive(**params)
+    if method=='instances.discard_evaluation':return bridge.instance_discard_evaluation(**params)
     if method=='instances.events':return bridge.instance_events(**params)
     if method=='instances.export':
         value = dict(params)

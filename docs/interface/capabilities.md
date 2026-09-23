@@ -10,7 +10,7 @@ A fixture-tested route or model catalogue is not live provider acceptance.
 | Capability | V2 behavior | Acceptance limit |
 | --- | --- | --- |
 | Execute a turn | Codex Responses over a verified proxy route | Live acceptance by provider and model pending |
-| Account login | GrantBridge coordinates OAuth through CLIProxyAPI Management API | Same-host browser; live OAuth acceptance pending |
+| Account login | GrantBridge coordinates OAuth through CLIProxyAPI Management API; a one-use callback relays remote Codex/Claude redirects | Fixture tested; live OAuth acceptance pending |
 | Credential custody and refresh | CLIProxyAPI owns upstream credentials | Provider refresh behavior needs live acceptance |
 | Account status and model list | Fresh local sidecar identity and model observations | Presence does not prove entitlement |
 | Account usage and quota | Attributable observations where sidecar reports them | Missing values stay unknown |
@@ -18,6 +18,7 @@ A fixture-tested route or model catalogue is not live provider acceptance.
 | Stop | Explicit supervised cancellation | Unknown outcome is not retried |
 | Tool permissions | Codex host response channel | Provider and model behavior needs acceptance |
 | Images and subagents | Codex request and event mapping where supported | Provider and model support varies |
+| Selected context and MCP | Bounded package validation and private Unix-socket tool bridge | Fixture tested; live Codex and host-sandbox acceptance pending |
 
 The historical direct Codex and Claude Code adapter matrix is recorded
 as earlier implementation evidence in
@@ -55,3 +56,5 @@ acceptance is pending. Advanced instance defaults, `allowed_tools` and
 approvals are specified in
 [interactive-inputs.md](interactive-inputs.md). The reserved provider_options
 surface is unsupported until its parameters have a reviewed contract.
+Selected `context_package` and `mcp` parameters use the bounded
+[context and MCP contract](context-and-mcp.md).

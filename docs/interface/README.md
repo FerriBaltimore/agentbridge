@@ -12,6 +12,7 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - capabilities.md: v2 proxy behavior, support and acceptance maturity.
 - events.md: event envelope and stream semantics.
 - interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
+- context-and-mcp.md: bounded selected instructions, evidence and private execution tools.
 - errors.md: stable error envelope and retry behavior.
 - review.md: completeness checklist and acceptance evidence.
 - provider-acceptance.md: release matrix and live-provider gate.

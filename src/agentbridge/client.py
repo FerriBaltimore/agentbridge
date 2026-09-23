@@ -10,6 +10,7 @@ from .discovery import DiscoveryMixin
 from .event_contract import public_event
 from .errors import BridgeError, BusyError, UnsupportedError
 from .models import Account, RunOptions, TERMINAL, identifier, page_values
+from .message_submission import MessageSubmissionMixin
 from .transfer import TransferMixin
 from .process import alive
 from .store import Store
@@ -22,9 +23,11 @@ from .error_management import ErrorManagementMixin
 from .provider_contracts import ContractRegistry
 from .routing.service import RoutingService
 from .proxy.managed import ManagedProxyClient
+from .execution_context import verify
+from .evaluation.service import EvaluationMixin
 
 
-class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
+class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMixin, ErrorManagementMixin):
     def __init__(self, root='.agentbridge'):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
         self.store=Store(root)
@@ -129,6 +132,8 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
     def account_login_complete(self, attempt_id=None, **options):return self.authentication.complete(attempt_id or options.pop('attempt_id'), **options)
     def account_login_status(self, attempt_id=None, **options):return self.authentication.status(attempt_id or options.pop('attempt_id'), **options)
     def account_login_cancel(self, attempt_id=None, **options):return self.authentication.cancel(attempt_id or options.pop('attempt_id'), **options)
+    def account_login_callback(self, attempt_id=None, **options):
+        return self.authentication.callback(attempt_id or options.pop('attempt_id'), **options)
 
     def _account_id(self, account_id, account_ref):
         if account_id or account_ref:
@@ -150,18 +155,20 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         result['updated_at'] = result.get('updated', result['created'])
         return result
 
-    def session(self, account_id, cwd, *, model=None, request_key=None):
+    def session(self, account_id, cwd, *, model=None, request_key=None, evaluation=False):
         account=self.account(account_id)
         cwd=str(Path(cwd).expanduser().resolve())
         if not Path(cwd).is_dir():raise BridgeError('invalid_workspace','Workspace must be an existing directory.')
-        replayed = self.store.replay_pinned_session(request_key, account.id, cwd, model)
+        replayed = self.store.replay_pinned_session(request_key, account.id, cwd, model,
+                                                    evaluation=evaluation)
         if replayed:
             return {**self.get_session(replayed), 'replayed': True}
         from .routing.admission import verify_proxy_model
         verify_proxy_model(self.routes, account, model, refresh=True)
         id=uuid4().hex
         session_id, created = self.store.add_session(id, account_id, cwd, model,
-                                                     request_key=request_key)
+                                                     request_key=request_key,
+                                                     evaluation=evaluation)
         result = self.get_session(session_id)
         result['replayed'] = not created
         return result
@@ -170,7 +177,10 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
                         workspace_path=None, model=None,
                         effort=None, context_window=None, permission_mode='dontAsk',
                         sandbox_mode='read-only', allowed_tools=(), metadata=None,
-                        provider_options=None, continuity_mode=None, idempotency_key=None):
+                        provider_options=None, continuity_mode=None, idempotency_key=None,
+                        evaluation=False):
+        if type(evaluation) is not bool:
+            raise BridgeError('invalid_request', 'evaluation must be a boolean.')
         if provider_options or metadata or continuity_mode:
             raise UnsupportedError('Provider-specific options, metadata and continuity require an adapter contract.')
         if effort or context_window or permission_mode != 'dontAsk' or sandbox_mode != 'read-only' or allowed_tools:
@@ -184,10 +194,10 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             from .routing.admission import create_automatic_instance
             return create_automatic_instance(self, workspace_path=workspace_path, model=model,
                                              idempotency_key=idempotency_key,
-                                             provider=provider)
+                                             provider=provider, evaluation=evaluation)
         account = self.resolve_account(account_ref)
         result = self.session(account.id, workspace_path or '.', model=model,
-                              request_key=idempotency_key)
+                              request_key=idempotency_key, evaluation=evaluation)
         return self._public_instance(result)
 
     def instance_get(self, instance_id, *, include_last_turn=False, include_usage=False):
@@ -242,36 +252,6 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
 
     def instance_archive(self, instance_id, *, expected_version=None):
         return self._public_instance(self.store.update_session(instance_id, expected_version=expected_version, state='archived'))
-
-    def message_create(self, instance_id, content, *, model=None, effort=None, context_window=None,
-                       permission_mode='dontAsk', sandbox_mode='read-only', allowed_tools=(),
-                       max_turns=None, max_budget=None, timeout_ms=None, attachments=None,
-                       provider_options=None, metadata=None, idempotency_key=None):
-        prompt = self._message_text(content)
-        if provider_options or metadata:
-            raise UnsupportedError('Provider-specific options and metadata require an adapter contract.')
-        options = RunOptions(
-            timeout=(timeout_ms / 1000) if timeout_ms is not None else 600,
-            sandbox=sandbox_mode, permission_mode=permission_mode,
-            allowed_tools=tuple(allowed_tools), model=model,
-            context_window=context_window, effort=effort, max_turns=max_turns,
-            max_budget_usd=max_budget, collect_usage=True, attachments=attachments,
-        )
-        run = self.submit(instance_id, prompt, options=options, request_key=idempotency_key)
-        message_id = run.snapshot.get('message_id', run.id)
-        return {'turn_id': run.id, 'message_id': message_id, 'instance_id': instance_id,
-                'state': run.status, 'replayed': bool(getattr(run, 'replayed', False)),
-                'account_ref': self.account(run.snapshot['account_id']).name or run.snapshot['account_id']}
-
-    @staticmethod
-    def _message_text(content):
-        if isinstance(content, str) and content.strip():
-            return content
-        if isinstance(content, list) and all(isinstance(item, dict) and item.get('type') == 'text' for item in content):
-            value = ''.join(item.get('text', '') for item in content)
-            if value.strip():
-                return value
-        raise BridgeError('invalid_request', 'content must contain nonempty text.')
 
     def messages(self, instance_id, *, after=None, before=None, role=None, limit=100, cursor=0):
         return transcript_messages(self, instance_id, after=after, before=before, role=role,
@@ -332,8 +312,9 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             raise BridgeError('invalid_timeout', 'grace_period_ms must be nonnegative.')
         if grace_period_ms is not None:
             raise UnsupportedError('Stop grace is configured by RunOptions.stop_grace before execution.')
-        result = self.run(turn_id).stop(wait=wait, timeout=15)
-        if isinstance(result, dict) and reason:
+        self.run(turn_id).stop(wait=wait, timeout=15)
+        result = self.turn(turn_id)
+        if reason:
             result['stop_reason'] = reason
         return result
 
@@ -368,8 +349,9 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         self.store.get('runs',identifier(id))
         return Run(self,id)
 
-    def submit(self, session_id, prompt, *, options=None, request_key=None, message_id=None):
+    def submit(self, session_id, prompt, *, options=None, request_key=None, message_id=None, execution=None):
         options=options or RunOptions()
+        if execution is not None or options.context_package_digest or options.mcp_binding_digest: verify(options, execution)
         if not isinstance(prompt,str) or not prompt.strip():raise BridgeError('empty_prompt','A nonempty prompt is required.')
         previous = self.store.replay(session_id, prompt, options, request_key)
         if previous:
@@ -377,6 +359,11 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             run.replayed = True
             return run
         session=self.get_session(session_id)
+        if session.get('evaluation') and (execution is None or
+                not isinstance(execution.get('context_package'), dict) or
+                execution['context_package'].get('execution_mode') != 'evaluation_inputs_only'):
+            raise BridgeError('evaluation_context_required',
+                              'Evaluation instances require evaluation_inputs_only context.')
         if session.get('state') == 'archived':
             raise BridgeError('instance_archived', 'Archived instances cannot accept new messages.')
         from .routing.execution import admit_turn
@@ -391,7 +378,7 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             self.store.finish(id,'failed','launch_failed')
             raise BridgeError('launch_failed', 'Could not persist provider compatibility before execution.') from None
         from .run_launcher import launch
-        self._children[id] = launch(self.store, id, secrets)
+        self._children[id] = launch(self.store, id, secrets, execution=execution)
         run = Run(self, id)
         run.replayed = False
         return run
@@ -436,6 +423,8 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
     def close(self, *, cancel=False):
         """Default detaches; cancel=True waits for runs owned by this Bridge instance."""
         for id,proc in list(self._children.items()):
+            if proc.poll() is not None:
+                proc.wait();self._children.pop(id,None);continue
             if cancel and self.run(id).status not in TERMINAL:self.run(id).stop(wait=True)
             if proc.poll() is not None:proc.wait();self._children.pop(id,None)
 

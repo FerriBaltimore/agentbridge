@@ -42,6 +42,12 @@ class FakeProxyGrantBridge:
     def proxy_cancel(self, state, provider, base_url, management_key_env):
         return {'id': state, 'provider': provider, 'status': 'cancelled'}
 
+    def proxy_callback(self, state, provider, base_url, management_key_env, redirect_url):
+        assert (state, provider, management_key_env) == (
+            'oauth-state', self.provider, 'LAB_MANAGEMENT_KEY')
+        assert redirect_url.startswith('http://localhost:1455/auth/callback?')
+        return {'id': state, 'provider': provider, 'status': 'awaiting_user'}
+
     def close(self):
         self.closed = True
 
@@ -99,6 +105,34 @@ def test_one_login_creates_only_a_verified_proxy_account(tmp_path, monkeypatch):
             assert bridge.store.proxy_binding(account.id)
             assert 'fixture-account' not in repr(result)
             assert 'fixture-index' not in repr(result)
+
+
+def test_owned_remote_callback_is_transient_and_matches_pending_state(tmp_path, monkeypatch):
+    monkeypatch.setenv('LAB_MANAGEMENT_KEY', secrets.token_hex(16))
+    monkeypatch.setenv('LAB_PROXY_KEY', secrets.token_hex(16))
+    responses = proxy_responses()
+    with local_management(responses) as (port, _):
+        with Bridge(tmp_path / 'state') as bridge:
+            use_fake_grantbridge(monkeypatch, FakeProxyGrantBridge(responses))
+            started = bridge.account_login_start(
+                provider='codex', name='Remote',
+                proxy_base_url=f'http://127.0.0.1:{port}/v1',
+                key_env='LAB_PROXY_KEY', management_key_env='LAB_MANAGEMENT_KEY')
+            url = 'http://localhost:1455/auth/callback?code=private-code&state=oauth-state'
+            with pytest.raises(BridgeError) as wrong_owner:
+                bridge.account_login_callback(started['attempt_id'],
+                                              owner_ref='another-owner', redirect_url=url)
+            assert wrong_owner.value.code != 'invalid_request'
+            with pytest.raises(BridgeError) as wrong_state:
+                bridge.account_login_callback(started['attempt_id'],
+                    owner_ref=started['owner_ref'],
+                    redirect_url=url.replace('oauth-state', 'another-state'))
+            assert wrong_state.value.code == 'invalid_request'
+            delivered = bridge.account_login_callback(
+                started['attempt_id'], owner_ref=started['owner_ref'], redirect_url=url)
+            assert delivered['status'] == 'awaiting_user'
+            saved = bridge.store.get_auth_attempt(started['attempt_id'], started['owner_ref'])
+            assert 'private-code' not in repr(saved)
 
 
 def test_login_cannot_convert_a_direct_account_to_proxy(tmp_path, monkeypatch):

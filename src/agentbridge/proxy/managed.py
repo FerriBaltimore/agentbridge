@@ -160,7 +160,10 @@ class ManagedProxyClient:
                 raise BridgeError("unsafe_store", "The managed proxy socket is unsafe.")
         source_root = str(Path(__file__).resolve().parents[2])
         environment = {key: value for key, value in os.environ.items() if key in {
-            "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "AGENTBRIDGE_CLIPROXY_BIN"}}
+            "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "AGENTBRIDGE_CLIPROXY_BIN",
+            "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+            "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+            "SSL_CERT_FILE", "SSL_CERT_DIR"}}
         environment["PYTHONPATH"] = source_root
         try:
             subprocess.Popen(

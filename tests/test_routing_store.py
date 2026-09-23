@@ -220,7 +220,7 @@ def test_v3_migration_preserves_pinned_proxy_session_and_replay(tmp_path):
         db.execute("UPDATE metadata SET version=3")
     upgraded = Store(tmp_path / "state")
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 5
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 6
     assert upgraded.routing("legacy") == {"mode": "pinned",
                                           "last_completed_account_id": "a",
                                           "last_native_id": "native-a", "provider": None}

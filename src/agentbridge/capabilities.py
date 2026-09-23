@@ -6,10 +6,11 @@ OPERATIONS = (
     "accounts.usage", "accounts.usage_history",
     "accounts.login",
     "accounts.login.start", "accounts.login.status", "accounts.login.check",
-    "accounts.login.complete", "accounts.login.cancel",
+    "accounts.login.complete", "accounts.login.cancel", "accounts.login.callback",
     "models.list", "usage.get", "usage.history", "accounts.quota.reset",
     "instances.create", "instances.get",
-    "instances.list", "instances.update", "instances.archive", "instances.events", "messages.create",
+    "instances.list", "instances.update", "instances.archive", "instances.discard_evaluation",
+    "instances.events", "messages.create",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
     "error_cases.list", "error_cases.get", "error_cases.diagnose", "error_diagnoses.get",
@@ -27,7 +28,10 @@ def proxy_payload(*, include_parameters=True):
         item = {'support': 'adapter' if enabled else 'unsupported',
                 'maturity': 'fixture_tested' if enabled else 'unsupported',
                 'limitations': []}
-        if operation.startswith('accounts.login'):
+        if operation == 'accounts.login.callback':
+            item['limitations'] = ['one_use_remote_browser_redirect',
+                                   'codex_and_claude_only', 'live_oauth_acceptance_pending']
+        elif operation.startswith('accounts.login'):
             item['limitations'] = ['local_same_host_browser', 'live_oauth_acceptance_pending']
         elif operation == 'accounts.delete':
             item['limitations'] = ['local_retirement_only', 'upstream_credential_remains']
@@ -38,6 +42,9 @@ def proxy_payload(*, include_parameters=True):
         elif operation == 'instances.transfer':
             item['support'] = 'portable'
             item['limitations'] = ['bounded_context', 'explicit_omissions']
+        elif operation == 'instances.discard_evaluation':
+            item['limitations'] = ['explicit_evaluation_instances_only',
+                                   'terminal_processes_required', 'live_provider_acceptance_pending']
         operations[operation] = item
     value = {'contract_version': 'v2',
              'declaration_scope': 'adapter_implementation',
@@ -56,6 +63,10 @@ def proxy_payload(*, include_parameters=True):
             'context_window': {'support': 'adapter', 'maturity': 'fixture_tested',
                                'limitations': ['model_maximum_must_be_observed',
                                                'provider_may_reject_override']},
+            'context_package': {'support': 'adapter', 'maturity': 'fixture_tested',
+                                'limitations': ['bounded_immutable_selection', 'live_provider_acceptance_pending']},
+            'mcp': {'support': 'adapter', 'maturity': 'fixture_tested',
+                    'limitations': ['private_unix_socket', 'live_provider_acceptance_pending']},
             'permission_mode': {'support': 'adapter', 'maturity': 'fixture_tested',
                                 'values': [
                                     {'value': 'dontAsk', 'display_name': 'No prompts'},

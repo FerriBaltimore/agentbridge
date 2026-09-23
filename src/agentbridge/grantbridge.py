@@ -129,6 +129,14 @@ class GrantBridgeClient:
         return self._request('auth.proxy_cancel', {'state': state, 'provider': provider,
             'base_url': base_url, 'management_key': self._proxy_key(management_key_env)})
 
+    def proxy_callback(self, state, provider, base_url, management_key_env, redirect_url):
+        """Deliver one-use OAuth code over stdio; never persist it in AgentBridge."""
+        return self._request('auth.proxy_callback', {
+            'state': state, 'provider': provider, 'base_url': base_url,
+            'management_key': self._proxy_key(management_key_env),
+            'redirect_url': redirect_url,
+        })
+
     def close(self):
         process = self.process
         if process is None:

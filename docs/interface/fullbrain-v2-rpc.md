@@ -32,6 +32,20 @@ state root it returns `[]`. `models.list` returns an object with `source:
 {"jsonrpc":"2.0","id":7,"method":"accounts.login.complete","params":{"attempt_id":"SAVED_ATTEMPT_ID","owner_ref":"SAVED_OWNER_REF"}}
 ```
 
+For a Codex or Claude browser outside the worker host, the provider may end
+at a localhost URL the browser cannot open. Fullbrain can accept that URL
+once over HTTPS and relay it only in memory:
+
+```json
+{"jsonrpc":"2.0","id":16,"method":"accounts.login.callback","params":{"attempt_id":"SAVED_ATTEMPT_ID","owner_ref":"SAVED_OWNER_REF","redirect_url":"http://localhost:1455/auth/callback?code=ONE_USE_CODE&state=EXPECTED_STATE"}}
+```
+
+The callback uses the same attempt and verifies owner, provider and state.
+Its response means only that the URL was delivered; Fullbrain still polls
+`status`, then calls `check` and `complete`. The URL and code must stay out of
+SQL, receipts, logs, browser storage and error text. Grok uses a device code.
+This path has fixture tests, not live provider acceptance.
+
 The start result includes `attempt_id`, `owner_ref`, `account_ref`,
 `provider` and `status`, and may include `authorization_url`, `user_code`,
 timestamps, safe `identity`, `verification` or `error`. Persist the two opaque
@@ -49,8 +63,9 @@ Provider is the upstream account type: `codex`, `claude` or `grok`. Normal
 onboarding lets AgentBridge manage one private CLIProxyAPI sidecar. Advanced
 external routes supply all of `proxy_base_url`, `key_env` and
 `management_key_env` to the **same** login flow. The last two are environment
-variable *names*, never secret values. The currently accepted browser mode is
-local `same_host`; the remote Fullbrain browser flow needs further work.
+variable *names*, never secret values. The browser mode remains `same_host`;
+the explicit callback method relays a remote Codex or Claude redirect into
+that same pending login.
 
 ## Read the model and account controls
 
@@ -105,13 +120,33 @@ evidence. Persist the largest committed `seq` and request the next page with
 `message.completed` does not finish a turn; wait for `run.finished` or check
 `turns.get.state`. `instances.events` does not support `follow: true`.
 
+For an isolated, disposable evaluation, create a fresh instance with
+`"evaluation":true` and send exactly one message with a context package using
+`"execution_mode":"evaluation_inputs_only"`. Persist the evaluation result
+before calling `instances.discard_evaluation`:
+
+```json
+{"jsonrpc":"2.0","id":17,"method":"instances.discard_evaluation","params":{"instance_id":"SAVED_EVALUATION_INSTANCE_ID"}}
+```
+
+The result is `{ "instance_id": "...", "discarded": true, "pending": false }`
+when cleanup is complete. If `pending` is true, poll the same request after
+the turn and local processes finish. Repeating a completed discard returns
+the same receipt; the old creation idempotency key cannot start the evaluation
+again. Ordinary chat instances are never eligible for this operation. These
+semantics have deterministic fixture coverage; live provider acceptance of the
+inputs-only mode is separate.
+
 Per-turn `context_window` is a positive numeric token count. Enable that UI
 control only when the observed model metadata provides a maximum, and accept
 that the provider may still reject it. Set per-turn `effort` only to a value
 reported for the selected model and route. Per-turn `permission_mode` supports
 `dontAsk` and `default`; with `default`, process `permission.required` and
 respond through `permissions.respond` for the exact request. There is no
-`context_package` or `mcp` parameter in v2 `messages.create` yet.
+implicit approval for selected tools. `messages.create` accepts bounded
+`context_package` and private Unix-socket `mcp` parameters. Follow the
+[context and MCP contract](context-and-mcp.md); its deterministic fixture
+coverage does not establish live provider or host-sandbox acceptance.
 
 ## Errors and uncertain work
 

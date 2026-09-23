@@ -134,6 +134,9 @@ class Run:
         if self.status not in TERMINAL:
             raise BusyError()
         row = self.snapshot
+        previous_options = RunOptions(**json.loads(row['options']))
+        if previous_options.context_package_digest or previous_options.mcp_binding_digest:
+            raise BridgeError('context_required', 'Resume this turn through messages.create with fresh execution context.')
         pending = unresolved(list(self._observations()))
         automatically_routed = self.bridge.store.routing(row['session_id'])['mode'] == 'automatic'
         if prompt is None:

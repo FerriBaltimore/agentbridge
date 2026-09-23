@@ -17,6 +17,7 @@ where the implementation declares support.
     accounts.login.check(attempt_id, owner_ref?, account_ref?)
     accounts.login.complete(attempt_id, owner_ref?, account_ref?)
     accounts.login.cancel(attempt_id, owner_ref?, account_ref?)
+    accounts.login.callback(attempt_id, owner_ref, redirect_url)
     accounts.usage(account_ref, refresh?)
     accounts.usage_history(account_ref, since?, until?, granularity?,
                            limit?, cursor?, refresh?)
@@ -34,10 +35,16 @@ credential in its isolated auth directory. `login.check` verifies one active
 credential, stable identity and an observed model catalogue. `login.complete`
 repeats required checks and atomically creates the account. An ambiguous,
 failed or cancelled attempt cannot be promoted. The blocking `accounts.login`
-wrapper runs this same flow. The initial browser route is local and same-host.
-In v2, `mode` must be `browser` and `browser` must be `same_host`; the other
-login methods require the returned `owner_ref` or an account reference to
-resolve ownership. Remote browser and device modes are not implemented.
+wrapper runs this same flow. In v2, `mode` must be `browser` and `browser`
+must be `same_host`; the other login methods require the returned `owner_ref`
+or an account reference to resolve ownership. A remote browser can pass its
+one-use Codex or Claude localhost redirect to `accounts.login.callback` for
+the same pending attempt. AgentBridge validates its expected state and passes
+it transiently through GrantBridge to CLIProxyAPI. Then call `status`,
+`check` and `complete` as usual. Grok uses the user code returned by the
+proxy. The callback URL contains an OAuth code and must never be stored or
+logged by the host. This browser relay has deterministic fixture coverage;
+live provider acceptance remains pending.
 Neither API-key values nor OAuth tokens enter public account configuration or the AgentBridge
 database. The supervisor generates client and management key values and
 delivers them over private local channels during login and execution.
@@ -72,13 +79,14 @@ historical time filters and aggregation are unsupported by this adapter.
     instances.create(model, account_ref?, provider?, workspace_path?, effort?,
                      context_window?, permission_mode?, sandbox_mode?,
                      allowed_tools?, continuity_mode?, provider_options?,
-                     metadata?, idempotency_key?)
+                     metadata?, idempotency_key?, evaluation?)
     instances.get(instance_id, include_last_turn?, include_usage?)
     instances.list(account_ref?, state?, limit?, cursor?, include_last_turn?)
     instances.update(instance_id, model?, effort?, context_window?,
                      permission_mode?, sandbox_mode?, allowed_tools?,
                      expected_version?, metadata?)
     instances.archive(instance_id, expected_version?)
+    instances.discard_evaluation(instance_id, account_ref?)
 
 Without `account_ref`, AgentBridge chooses an eligible proxy account for the
 exact model after fresh local Management API verification. An optional
@@ -96,12 +104,24 @@ controls on `instances.create`; send supported controls with each
 `messages.create` call instead. `instances.update` currently changes only
 model or state; its listed advanced defaults are unsupported.
 
+`evaluation: true` marks a fresh, disposable instance. Such an instance accepts
+one turn through `messages.create` with a validated context package whose
+`execution_mode` is `evaluation_inputs_only`. An identical idempotent turn
+replay is readable until discard; a new turn and instance transfer are refused.
+After the turn and its owned processes end, `instances.discard_evaluation`
+removes the instance, turn, event and private native-home data. It returns
+`{instance_id, discarded: false, pending: true}` while a run or owned process
+may still execute. A completed discard returns `discarded: true, pending:
+false` on every retry. A minimal receipt remains so the creation key cannot
+recreate or rerun that evaluation. `instances.get` then returns `not_found`.
+
 ## Messages and turns
 
     messages.create(instance_id, content, attachments?, model?, effort?,
                     context_window?, permission_mode?, sandbox_mode?,
                     allowed_tools?, max_turns?, max_budget?, timeout_ms?,
-                    provider_options?, metadata?, idempotency_key?)
+                    context_package?, mcp?, provider_options?, metadata?,
+                    idempotency_key?)
     messages.list(instance_id, after?, before?, role?, limit?, cursor?)
     instances.events(instance_id, after_seq?, limit?, follow?, timeout_ms?)
     turns.list(instance_id?, state?, limit?, cursor?)
@@ -123,9 +143,10 @@ page with `after_seq` and persist their cursor after consuming the page.
 The v2 adapter accepts a positive numeric per-turn `context_window`, subject
 to observed model metadata and live provider behavior. It rejects
 `allowed_tools`, `max_budget`, `provider_options` and arbitrary metadata.
-`context_package` and `mcp` are not `messages.create` parameters.
-See [interactive-inputs.md](interactive-inputs.md) for attachments and
-one-use permission responses.
+`context_package` and `mcp` use the bounded private execution contract in
+[context-and-mcp.md](context-and-mcp.md). See
+[interactive-inputs.md](interactive-inputs.md) for attachments and one-use
+permission responses.
 
 ## Continuity
 

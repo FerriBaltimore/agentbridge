@@ -3,6 +3,7 @@ from .attachments import images
 from .errors import BridgeError
 from .provider_errors import normalize
 from .session_events import routing
+from .codex_skills import selected_config
 
 
 class CodexControl:
@@ -133,18 +134,34 @@ class CodexControl:
         options = self.payload['options']
         self.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.0.0'}})
         self.channel.send({'method': 'initialized', 'params': {}})
+        if self.payload.get('context_package') is not None:
+            listing = self.rpc('skills/list', {'cwds': [self.payload['cwd']], 'forceReload': True})
+            self.payload['codex_config']['skills.config'] = selected_config(
+                listing, self.payload['skill_inputs'], self.payload['cwd'])
         params = {'cwd': self.payload['cwd'], 'approvalPolicy': 'on-request'
                   if options['permission_mode'] == 'default' else 'never',
                   'approvalsReviewer': 'user', 'sandbox': options['sandbox']}
+        if self.payload.get('developer_instructions') is not None:
+            params['developerInstructions'] = self.payload['developer_instructions']
+        if self.payload.get('codex_config'):
+            params['config'] = self.payload['codex_config']
         if self.payload.get('model'):
             params['model'] = self.payload['model']
         native_id = self.payload.get('native_id')
+        execution_mode = (self.payload.get('context_package') or {}).get('execution_mode')
+        if execution_mode == 'evaluation_inputs_only' and native_id:
+            raise BridgeError('invalid_context', 'Evaluation context cannot resume a native thread.',
+                              phase='launch', outcome='not_started')
+        if execution_mode == 'evaluation_inputs_only':
+            params['ephemeral'] = True
         if native_id:
             params['threadId'] = native_id
         result = self.rpc('thread/resume' if native_id else 'thread/start', params)
         self.thread_id = result['thread']['id']
         self.emit({'type': 'thread.started', 'thread_id': self.thread_id})
         content = [{'type': 'text', 'text': self.payload['prompt']}]
+        content.extend(self.payload.get('skill_inputs', []))
+        content.extend(self.payload.get('evidence_inputs', []))
         content.extend({'type': 'image', 'url': 'data:' + item['media_type'] + ';base64,' + item['data']}
                        for item in images(options.get('attachments', [])))
         params = {'threadId': self.thread_id, 'input': content}

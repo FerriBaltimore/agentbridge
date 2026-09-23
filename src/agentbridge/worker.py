@@ -24,6 +24,8 @@ from .provider_contracts import ContractRegistry
 from .accounts import AccountService
 from .routing.admission import verify_proxy_model
 from .routing.service import RoutingService
+from .execution_context import (MCP_CAPABILITY_ENV, PRIVATE_EXECUTION_KEY,
+                                mcp_environment, verify)
 
 MAX_LINE=8*1024*1024
 
@@ -52,7 +54,15 @@ def main():
         require_proxy_account(account)
         # The management key arrives on the private pipe and is removed before
         # any provider environment or duplex payload is assembled.
-        secrets=json.loads(sys.stdin.read())
+        private=json.loads(sys.stdin.read())
+        if (isinstance(private, dict) and set(private) == {
+                PRIVATE_EXECUTION_KEY, 'secrets', 'execution'}
+                and private[PRIVATE_EXECUTION_KEY] is True):
+            secrets, execution = private['secrets'], verify(options, private['execution'])
+        else:
+            secrets, execution = private, None
+            if options.context_package_digest or options.mcp_binding_digest:
+                raise BridgeError('context_required', 'Fresh execution context is required for this turn.')
         management_name=account.management_key_env
         management_key=secrets.pop(management_name, None)
         if not management_key:
@@ -68,12 +78,14 @@ def main():
             else:
                 os.environ[management_name]=previous_management_key
         ContractRegistry(store).verify_run(account,run_id)
-        redactor=Redactor((*secrets.values(), management_key))
+        mcp_env = mcp_environment(execution['mcp']) if execution else {}
+        redactor=Redactor((*secrets.values(), management_key, mcp_env.get(MCP_CAPABILITY_ENV, '')))
         emit=lambda kind,data:store.emit(run_id,kind,redactor.clean(data))
         observe_error = ErrorObserver(store, account, run_id)
         parser=Parser(account.engine,emit,error_handler=observe_error)
         env=base_environment()
         env.update(secrets)
+        env.update(mcp_env)
         env['PYTHONPATH']=os.path.dirname(os.path.dirname(__file__))
         from .proxy import session_home
         env['CODEX_HOME']=str(session_home(store.root,session['id']))
@@ -86,7 +98,10 @@ def main():
             payload = json.dumps({'engine': account.engine, 'prompt': prompt, 'cwd': session['cwd'],
                 'model': options.model or session.get('model'), 'native_id': session.get('native_id'),
                 'options': asdict(options), 'root': str(store.root), 'turn_id': run_id,
-                'command': command(account, session, options, native_transport=True), 'secret_names': list(secrets)})
+                'command': command(account, session, options, native_transport=True),
+                'secret_names': [*secrets, *([MCP_CAPABILITY_ENV] if mcp_env else [])],
+                'context_package': execution['context_package'] if execution else None,
+                'mcp_enabled': bool(mcp_env)})
         else:payload=prompt
         if run['stop_requested'] or stopped[0]:
             store.finish(run_id,'cancelled','user_stop');return

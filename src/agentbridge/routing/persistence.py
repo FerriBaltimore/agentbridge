@@ -57,7 +57,7 @@ def _route_context(context, omissions, *, required):
 
 
 def _session_payload(account_id, cwd, model, native_id, parent_id, context,
-                     routing_mode, routing_provider=None):
+                     routing_mode, routing_provider=None, evaluation=False):
     payload = {"cwd": cwd, "model": model, "native_id": native_id,
                "parent_id": parent_id, "context": context}
     if routing_mode == "automatic":
@@ -68,6 +68,8 @@ def _session_payload(account_id, cwd, model, native_id, parent_id, context,
     else:
         # Keep the v3 pinned payload byte-for-byte stable across migration.
         payload = {"account_id": account_id, **payload}
+    if evaluation:
+        payload['evaluation'] = True
     return _dumps(payload)
 
 
@@ -109,7 +111,11 @@ def _verified_proxy_config(db, account_id, model, *, provider=None):
 class RoutingStoreMixin:
     def add_session(self, id, account_id, cwd, model, native_id=None, parent_id=None,
                     context=None, request_key=None, routing_mode="pinned",
-                    routing_provider=None):
+                    routing_provider=None, evaluation=False):
+        if type(evaluation) is not bool:
+            raise BridgeError('invalid_request', 'evaluation must be a boolean.')
+        if evaluation and (native_id is not None or parent_id is not None or context is not None):
+            raise BridgeError('invalid_request', 'Evaluations require a fresh instance.')
         if routing_mode not in {"pinned", "automatic"}:
             raise BridgeError("invalid_mode", "Choose pinned or automatic routing.")
         if routing_mode == "automatic":
@@ -121,13 +127,18 @@ class RoutingStoreMixin:
         elif routing_provider is not None:
             raise BridgeError("invalid_request", "Provider routing requires an automatic instance.")
         encoded = _session_payload(account_id, cwd, model, native_id, parent_id,
-                                   context, routing_mode, routing_provider)
+                                   context, routing_mode, routing_provider, evaluation)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if request_key:
                 old = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                                  (request_key,)).fetchone()
                 if old:
+                    discarded = db.execute("SELECT 1 FROM evaluation_instances WHERE session_id=? "
+                        "AND status IN ('discarding','discarded')", (old['session_id'],)).fetchone()
+                    if discarded:
+                        raise BridgeError('evaluation_discarded',
+                                          'A discarded evaluation cannot be recreated.')
                     if old["payload"] != encoded:
                         raise BridgeError("idempotency_conflict", "Request key already belongs to different input.")
                     return old["session_id"], False
@@ -140,35 +151,50 @@ class RoutingStoreMixin:
                        "VALUES (?,?,?,?,?)", (id, routing_mode,
                        account_id if routing_mode == "pinned" else None,
                        native_id if routing_mode == "pinned" else None, routing_provider))
+            if evaluation:
+                db.execute('INSERT INTO evaluation_instances(session_id,account_id,status,created) '
+                           'VALUES (?,?,?,?)', (id, account_id, 'active', time.time()))
             if request_key:
                 db.execute("INSERT INTO instance_requests(request_key,session_id,payload,created) VALUES (?,?,?,?)",
                            (request_key, id, encoded, time.time()))
         return id, True
 
-    def replay_auto_session(self, request_key, cwd, model, *, provider=None):
+    def replay_auto_session(self, request_key, cwd, model, *, provider=None, evaluation=False):
         """Resolve a lost automatic-create response before routing side effects."""
         if not request_key:
             return None
-        expected = _session_payload(None, cwd, model, None, None, None, "automatic", provider)
+        expected = _session_payload(None, cwd, model, None, None, None, "automatic", provider,
+                                    evaluation)
         with self.connect() as db:
             row = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                              (request_key,)).fetchone()
+            discarded = (db.execute("SELECT 1 FROM evaluation_instances WHERE session_id=? "
+                "AND status IN ('discarding','discarded')", (row['session_id'],)).fetchone()
+                if row else None)
         if row is None:
             return None
+        if discarded:
+            raise BridgeError('evaluation_discarded', 'A discarded evaluation cannot be recreated.')
         if row["payload"] != expected:
             raise BridgeError("idempotency_conflict", "Request key already belongs to different input.")
         return row["session_id"]
 
-    def replay_pinned_session(self, request_key, account_id, cwd, model):
+    def replay_pinned_session(self, request_key, account_id, cwd, model, *, evaluation=False):
         """Return an admitted pinned session without rechecking a possibly offline proxy."""
         if not request_key:
             return None
-        expected = _session_payload(account_id, cwd, model, None, None, None, "pinned")
+        expected = _session_payload(account_id, cwd, model, None, None, None, "pinned",
+                                    evaluation=evaluation)
         with self.connect() as db:
             row = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                              (request_key,)).fetchone()
+            discarded = (db.execute("SELECT 1 FROM evaluation_instances WHERE session_id=? "
+                "AND status IN ('discarding','discarded')", (row['session_id'],)).fetchone()
+                if row else None)
         if row is None:
             return None
+        if discarded:
+            raise BridgeError('evaluation_discarded', 'A discarded evaluation cannot be recreated.')
         if row["payload"] != expected:
             raise BridgeError("idempotency_conflict", "Request key already belongs to different input.")
         return row["session_id"]
@@ -227,6 +253,13 @@ class RoutingStoreMixin:
                                   (session_id,)).fetchone()
             if metadata and metadata["state"] == "archived":
                 raise BridgeError("instance_archived", "Archived instances cannot accept new messages.")
+            evaluation = db.execute('SELECT status FROM evaluation_instances WHERE session_id=?',
+                                    (session_id,)).fetchone()
+            if evaluation is not None:
+                if evaluation['status'] != 'active' or db.execute(
+                        'SELECT 1 FROM runs WHERE session_id=?', (session_id,)).fetchone():
+                    raise BridgeError('evaluation_consumed',
+                                      'An evaluation instance accepts only one turn.')
             routing = db.execute("SELECT * FROM session_routing WHERE session_id=?", (session_id,)).fetchone()
             if routing is None:
                 raise BridgeError("schema_version", "Session routing metadata is missing.")

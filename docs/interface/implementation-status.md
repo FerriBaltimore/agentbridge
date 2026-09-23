@@ -19,6 +19,7 @@ historical evidence and read-only data, not a second usable workflow.
 | Account and model RPC | Safe account projection; exact configured IDs and separate observed accounts | Local catalogue presence is not provider entitlement |
 | Usage | Source and timestamp retained; missing or stale quota remains unknown | Upstream quota varies by provider and needs live acceptance |
 | Stop and recovery | Explicit cancellation; lost workers classified without silent replay | Unknown effects stay unknown; no hidden account change |
+| Selected context and MCP | Bounded v1/v2 context packages, separate Codex developer/skill/evidence channels and operation-bound private Unix-socket MCP forwarding | Deterministic subprocess fixtures; live app-server, provider and host-sandbox acceptance pending |
 | Historical direct records | Read-only status, events and earlier acceptance evidence | No new native login, account creation or turn execution |
 
 The management key is required for login, local identity checks and every

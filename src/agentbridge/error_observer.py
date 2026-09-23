@@ -41,8 +41,12 @@ class ErrorObserver:
     def __init__(self, store, account, turn_id):
         self.store, self.account, self.turn_id = store, account, turn_id
         self.learning, self.version, self.seen = None, None, {}
+        run = store.get('runs', turn_id)
+        self.disposable = store.get('sessions', run['session_id']).get('evaluation', False)
 
     def __call__(self, issue):
+        if self.disposable:
+            return issue
         evidence = from_issue(issue)
         if evidence is None or issue.get('details', {}).get('detection') != 'unclassified':
             return issue

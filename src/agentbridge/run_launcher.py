@@ -10,6 +10,7 @@ from .errors import BridgeError
 from .process import alive, identity
 from .security import base_environment
 from .store import dumps
+from .execution_context import PRIVATE_EXECUTION_KEY
 
 
 CLEANUP_GRACE_SECONDS = 5
@@ -110,14 +111,15 @@ def _finish(store, run_id, state, code):
         return False
 
 
-def launch(store, run_id, secrets):
+def launch(store, run_id, secrets, *, execution=None):
     """Return the run owner only after delivering its private input.
 
     A failure before Popen is known not to have started the worker. Once a
     process exists, delivery failure cannot establish a native operation's
     outcome, even if the worker exits while this method is writing to it.
     """
-    payload = dumps(secrets).encode()
+    payload = dumps({PRIVATE_EXECUTION_KEY: True, 'secrets': secrets,
+                     'execution': execution}).encode() if execution else dumps(secrets).encode()
     env = base_environment()
     env['PYTHONPATH'] = str(Path(__file__).resolve().parent.parent)
     try:

@@ -14,6 +14,9 @@ class TransferMixin:
         if mode not in ('auto', 'native', 'portable'):
             raise BridgeError('invalid_mode', 'Choose auto, native or portable.')
         source = self.get_session(session_id)
+        if source.get('evaluation'):
+            raise BridgeError('evaluation_instance',
+                              'Evaluation instances cannot be transferred.')
         old = self.account(source['account_id'])
         target = self.resolve_account(account_id)
         from .transports import require_proxy_account

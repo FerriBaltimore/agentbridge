@@ -38,10 +38,12 @@ Record the account on each accepted turn and display route changes when useful.
 AgentBridge fixes one route for the entire turn, including tool calls. On an
 automatic account switch it starts a fresh Codex thread with bounded portable
 context and reports omissions; Fullbrain should surface those omissions.
-The current v2 `messages.create` does not accept Fullbrain's existing
-`context_package` or `mcp` fields. Fullbrain must resolve those requirements
-through a reviewed contract before claiming rules, skills, tools or evaluation
-isolation parity. Do not silently drop the fields during migration.
+The v2 `messages.create` accepts a bounded `context_package` and operation-
+bound Unix-socket `mcp` descriptor. Fullbrain must test the selected package,
+facade grant/revocation and actual worker sandbox together before claiming
+rules, skills, tools or evaluation isolation parity. The
+[context and MCP contract](context-and-mcp.md) records the implemented shape
+and its remaining live acceptance limit.
 
 On reconnect, reopen the same instance and cursor. A timeout or disconnect is
 not permission to submit the message again. Reuse the same idempotency key and
@@ -62,6 +64,10 @@ the upstream credential in its isolated auth directory. Poll
 `accounts.login.status`, then call `accounts.login.check` and
 `accounts.login.complete`. Completion repeats the identity and model checks;
 a browser callback alone never creates an account.
+For a remote Codex or Claude browser, Fullbrain can accept the one-use
+localhost redirect URL over HTTPS and immediately call
+`accounts.login.callback` with the same attempt and owner reference. Keep the
+URL in memory only; it contains an OAuth code. Grok presents a user code.
 Resume an attempt after restart with the saved references, or cancel it with
 `login.cancel`. For an externally managed proxy, advanced callers may also
 provide `proxy_base_url`, `key_env` and `management_key_env` together to the
@@ -69,10 +75,8 @@ same login flow. These key arguments are environment variable names, not
 values. The management reference is required for pinned and automatic routes
 and is never sent to Codex. Managed key values pass over private local
 channels during login and execution and never enter the
-AgentBridge database. The initial browser flow is
-same-host; real OAuth acceptance is pending. A remote Fullbrain browser cannot
-complete the current flow without a separately implemented and accepted remote
-browser path.
+AgentBridge database. The initial browser mode is same-host; the callback
+relay is fixture tested and still needs live OAuth acceptance.
 
 ## Errors and capability gates
 

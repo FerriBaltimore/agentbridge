@@ -19,14 +19,12 @@ not evidence that every listed optional parameter is usable.
 | Request per-engine model catalogue | `models.list` aggregates exact IDs and candidate/observed account refs | Remove `engine` from the API call; treat configured and observed models as routing evidence, not entitlement |
 | Native account login, device or callback relay | One GrantBridge-mediated local CLIProxyAPI browser flow for every new account | Use `accounts.login.start/status/check/complete/cancel`; no direct provider login |
 | Codex-specific quota parser | `accounts.usage`/`usage.get` return source, support, staleness, reason and optional `quota_windows` | Show missing usage as unknown; keep turn tokens separate from account quota |
-| Fullbrain sends `context_package` and `mcp` on `messages.create` | AgentBridge v2 rejects both unknown fields | Block feature parity until a reviewed v2 contract carries rules, skills, tools and MCP with the required isolation |
+| Fullbrain sends `context_package` and `mcp` on `messages.create` | AgentBridge v2 validates bounded packages and a private Unix-socket MCP descriptor | Upgrade the pinned SDK and test native app-server acceptance plus Fullbrain sandbox and facade revocation before claiming parity |
 
-`context_package` and `mcp` are a **migration blocker** for Fullbrain's current
-chat behavior. Dropping them or flattening them into user text would lose
-Fullbrain's tool, rule, skill and evaluation boundaries. Implement and test an
-explicit AgentBridge v2 extension for those capabilities before claiming chat
-parity. Until then, only a deliberately reduced Fullbrain feature profile can
-use the current `messages.create` surface, and the UI must disclose that limit.
+The [context and MCP contract](context-and-mcp.md) has deterministic fixture
+coverage. Fullbrain must pass its selected package and operation-bound facade
+unchanged, then verify actual Codex app-server acceptance and sandbox isolation
+inside the worker. Fixture success alone does not establish chat parity.
 
 ## Fullbrain code touchpoints
 
@@ -135,9 +133,9 @@ The host decides whether a new turn is appropriate after inspecting recovery.
 - Test Fullbrain's pinned worker with its real sandbox: startup, version gate,
   model/account/usage reads, login attempt ownership, account deletion, event
   cursor restart, permissions, Stop and uncertain recovery.
-- Resolve the `context_package`/MCP gap and remote browser journey for the
-  Fullbrain features and deployment modes that use them. Test that missing
-  features fail visibly rather than disappearing from a request.
+- Test the `context_package`/MCP bridge and remote browser journey inside the
+  Fullbrain worker. Missing capabilities must fail visibly rather than
+  disappearing from a request.
 - For each enabled provider and model, use a disposable authorized account to
   record live OAuth, identity binding, one turn, usage availability, tool
   behavior and restart. Test automatic account changes separately. Fixture

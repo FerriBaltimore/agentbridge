@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from . import auth_contract
 from .auth_proxy_binding import bind_proxy_account
+from .auth_callback import validate_callback
 from .errors import BridgeError
 from .grantbridge import GrantBridgeClient
 from .models import account_name_key, identifier
@@ -152,6 +153,29 @@ class AuthenticationService:
                                                  data={**row['data'], **remote})
         finally:
             client.close()
+        return self._public(row)
+
+    def callback(self, attempt_id, *, owner_ref=None, redirect_url):
+        """Relay a remote browser redirect through the same owned login attempt."""
+        row = self._owned(attempt_id, owner_ref, None)
+        if row['status'] not in {'starting', 'awaiting_user', 'exchanging'}:
+            raise BridgeError('authentication_attempt_not_ready',
+                              'The OAuth attempt is not waiting for a callback.')
+        if not row['grantbridge_id']:
+            raise BridgeError('authentication_attempt_not_ready',
+                              'The OAuth attempt has not started.')
+        validate_callback(row['engine'], row['grantbridge_id'], redirect_url)
+        route, connection = self._route(row)
+        client = self._client(connection)
+        try:
+            remote = client.proxy_callback(
+                row['grantbridge_id'], row['engine'], route['proxy_base_url'],
+                route['management_key_env'], redirect_url)
+            auth_contract.attempt(remote, engine=row['engine'],
+                                  attempt_id=row['grantbridge_id'])
+        finally:
+            client.close()
+        # The callback only delivered a code. Status observes whether the proxy exchanged it.
         return self._public(row)
 
     def check(self, attempt_id, *, owner_ref=None, account_ref=None,

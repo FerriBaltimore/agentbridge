@@ -13,13 +13,15 @@ from .auth_store import AuthStoreMixin
 from .routing.persistence import RoutingStoreMixin
 from .routing.binding import ProxyBindingStoreMixin
 from .routing.schema import migrate_v4, migrate_v5
+from .evaluation.schema import migrate_v6
+from .evaluation.persistence import EvaluationStoreMixin
 
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-class Store(ProxyBindingStoreMixin, RoutingStoreMixin, AuthStoreMixin):
+class Store(EvaluationStoreMixin, ProxyBindingStoreMixin, RoutingStoreMixin, AuthStoreMixin):
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -132,7 +134,8 @@ class Store(ProxyBindingStoreMixin, RoutingStoreMixin, AuthStoreMixin):
                 version = 3
             version = migrate_v4(db, version)
             version = migrate_v5(db, version)
-            if version != 5:
+            version = migrate_v6(db, version)
+            if version != 6:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)
@@ -172,6 +175,9 @@ class Store(ProxyBindingStoreMixin, RoutingStoreMixin, AuthStoreMixin):
         metadata = db.execute('SELECT state,version,updated FROM instance_metadata WHERE session_id=?',
                               (row['id'],)).fetchone()
         row.update(dict(metadata) if metadata else {'state': 'active', 'version': 1, 'updated': row['created']})
+        evaluation = db.execute('SELECT 1 FROM evaluation_instances WHERE session_id=?',
+                                (row['id'],)).fetchone()
+        row['evaluation'] = evaluation is not None
         return row
 
     def account_observation(self, account_id, source, status, data, *, observed_at=None):

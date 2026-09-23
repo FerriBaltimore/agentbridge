@@ -27,7 +27,7 @@ def verify_proxy_model(routes, account, model, *, refresh):
 
 
 def create_automatic_instance(bridge, *, workspace_path, model, provider=None,
-                              idempotency_key):
+                              idempotency_key, evaluation=False):
     """Select an initial route while keeping the conversation automatically routed."""
     if model is None:
         raise BridgeError('model_required', 'Choose a model for automatic routing.')
@@ -37,13 +37,15 @@ def create_automatic_instance(bridge, *, workspace_path, model, provider=None,
     cwd = str(Path(workspace_path or '.').expanduser().resolve())
     if not Path(cwd).is_dir():
         raise BridgeError('invalid_workspace', 'Workspace must be an existing directory.')
-    replayed = bridge.store.replay_auto_session(idempotency_key, cwd, model, provider=provider)
+    replayed = bridge.store.replay_auto_session(idempotency_key, cwd, model, provider=provider,
+                                                evaluation=evaluation)
     if replayed:
         return {**bridge._public_instance(bridge.get_session(replayed)), 'replayed': True}
     decision = bridge.routes.select(model, provider=provider)
     session_id, created = bridge.store.add_session(
         uuid4().hex, decision.account_id, cwd, model,
-        request_key=idempotency_key, routing_mode='automatic', routing_provider=provider)
+        request_key=idempotency_key, routing_mode='automatic', routing_provider=provider,
+        evaluation=evaluation)
     return {**bridge._public_instance(bridge.get_session(session_id)), 'replayed': not created}
 
 

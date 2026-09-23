@@ -3,13 +3,16 @@ import json
 import os
 import select
 import subprocess
+import sys
 import time
 
 from .errors import BridgeError
 
 
 class ProviderChannel:
-    def __init__(self, command, *, cwd, env):
+    def __init__(self, command, *, cwd, env, inputs_only=False):
+        if inputs_only:
+            command = [sys.executable, '-P', '-m', 'agentbridge.native_sandbox', *command]
         try:
             self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
