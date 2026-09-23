@@ -1,185 +1,105 @@
-# Usage, resets and execution failures
+# Usage and execution failures
 
-This implemented local contract is shared by the Python SDK, CLI and JSON-RPC
-stdio dispatcher. It does not require a web server or a Fullbrain installation.
+AgentBridge v2 runs Codex through a dedicated local CLIProxyAPI sidecar. The
+Python SDK, CLI and JSON-RPC stdio API expose the same observations. Account
+quota comes from the selected sidecar when its Management API supplies fresh,
+attributable data. A local catalogue or OAuth file does not prove live model
+entitlement or available quota.
 
 ## Queries
 
 ```sh
 agentbridge accounts usage "My Codex" --refresh
-agentbridge accounts usage "My Claude" --refresh --json
-agentbridge accounts history "My Claude" --json
-agentbridge models list --engine cursor --account-ref "My Cursor" --refresh
+agentbridge accounts history "My Codex" --json
+agentbridge models list --refresh
 agentbridge usage --turn-id TURN_ID --json
 agentbridge usage --instance-id INSTANCE_ID --json
 ```
 
-Equivalent RPC methods are `accounts.usage`, `accounts.usage_history`,
-`models.list`, `usage.get`, `turns.get` with `include_usage`/`include_error`,
-and bounded `turns.events` or `instances.events`.
+Equivalent RPC methods include `accounts.usage`, `accounts.usage_history`,
+`models.list`, `usage.get` and `turns.get` with `include_usage` or
+`include_error`. `turns.events` and `instances.events` expose bounded event
+pages. Reading account usage or the local model catalogue does not start a
+model turn.
 
-Live queries need an explicit bound account. Reading a catalog or quota does
-not start a model turn. Without a successful live refresh, the catalog is empty,
-`supported: false` and stale, with a reason. The legacy `source: static` label
-means discovery is unavailable; it no longer contains invented model IDs.
-Account usage reads cached observations or available Codex rollouts.
+## Proxy account quota
 
-## Quota windows
+`accounts.usage` returns `account_id`, `scope: account`, `source`, `supported`,
+`stale`, `quota_windows` and `reason`. A reported window contains only
+`model_id`, `used_percent` and `observed_at`. These are sanitized
+CLIProxyAPI Management API observations, not the richer native Codex or
+Claude quota structures from the earlier direct adapters.
 
-Account responses add `schema_version: 1`, `windows`, `age_seconds` and `stale`.
-Each window has an opaque stable `id`, `pool_id`, `name`, `label`, `scope`,
-`model_id`, `model_family`, `window_seconds`, `used_percent`,
-`remaining_percent`, `resets_at`, `reset_after_seconds`, `reset_due` and
-`limit_reached`. Scoped Claude limits also retain safe model/surface labels,
-surface ID, provider kind and group. A label is not a model ID.
+The current observer accepts attributable percentage quota for a Codex
+upstream account. Claude and Grok account quota is unavailable through this
+local observer. If a provider omits quota, the response has
+`quota_windows: []`, `supported: false`, `stale: true` and a reason such as
+`upstream_quota_unavailable`. A failed binding check also returns unknown
+quota with a reason. A reported value whose observation is too old is stale;
+AgentBridge does not turn it into zero or claim renewed capacity.
 
-- Codex reads every reported `rateLimitsByLimitId` bucket, including its
-  primary and secondary windows. The legacy single bucket is deduplicated.
-  Duration comes from the provider, never an assumed five-hour or weekly plan.
-- Claude prioritizes dynamic `limits[]` and their reported scope kind, model,
-  family, surface, group and duration. Model and family names are data, without
-  a built-in family-name table. Scope and duration provenance are exposed as
-  `scope_source` and `window_duration_source` when applicable.
-- Legacy window-name compatibility reads temporal grammar such as `five_hour`
-  or `seven_day_<suffix>`. A suffix never establishes a model or family.
-  Unmatched legacy observations remain visible with `supplemental: true` when
-  structural limits are also present. They may overlap those limits and must
-  not be treated as additional capacity. Sparse structural responses do not
-  discard unmatched legacy evidence.
-- Reported IDs are preserved. Otherwise IDs distinguish scope, group and
-  explicit duration without incorporating utilization or reset deadlines.
-  Display labels are never promoted to native model IDs. Unknown future scope
-  kinds remain reported metadata with unknown normalized scope when needed.
-- Claude stream events express utilization as a fraction, whereas the native
-  OAuth quota response expresses percentages. The adapter normalizes both
-  explicitly, including sparse events and `unifiedWindows`.
-- Countdown is recomputed when reading. A reset time in the past marks the
-  snapshot stale; it does not replace consumption with zero. Missing numbers,
-  reset times or capacities remain null. Percentages over 100 are retained,
-  with remaining percent floored at zero.
-- Provider snapshots become stale after 60 seconds; rollout observations after
-  30 minutes. Failed refreshes invalidate the previous cached snapshot.
-  Historical rows preserve the time of the observation.
-- Multiple windows can constrain the same work. Do not add their percentages
-  or treat them as independent budgets.
+Automatic selection compares fresh model-applicable used percentages.
+Accounts with known capacity take priority over unknown capacity; if none
+can be compared, persisted turn counts break ties. A quota error or uncertain
+turn does not trigger an automatic account change or retry. The selected
+route remains fixed for the whole turn.
 
-Codex `pools` additionally exposes plan, provider credit balance, individual
-spend limit and `spend_control_reached`, even when there are no time windows.
-Amounts without a declared currency preserve their decimal representation
-with `unit: null`. Claude `extra_usage` preserves reported spend/limit,
-utilization and currency without converting provider units.
+`accounts.history` reads stored observations. Each proxy row records its
+source, scope, observed time, staleness and the sanitized quota snapshot.
+History is evidence of what was seen then, not a fresh balance. Time-range
+filters and aggregation are unsupported. An account usage refresh checks the
+local sidecar; it does not query a provider dashboard or infer usage from an
+account label.
 
-The Cursor SDK does not expose remaining account quota or its reset schedule.
-Account usage returns `supported: false` with
-`sdk_account_quota_unavailable`. Session token/cost observations, API request
-rate limits and team billing APIs are not substitutes for account quota.
-
-## Explicit Codex earned resets
-
-Quota responses expose `reset_credits.available_count` and optional details.
-Null count means unknown. Null details means no detail list was reported; an
-empty array means the provider returned no detail rows. Detail rows remain
-available even when the provider omits its total. Never derive the available
-count from a possibly truncated detail list.
-
-Each detail preserves its ID, reported status/type, grant time and expiry.
-`expiry_status` distinguishes `expires`, `no_expiry` (explicit native null)
-and `unknown` (missing or invalid expiry).
-`expires_in_seconds` and `expired` are recomputed on read. The reset-credit
-observation also exposes `observed_at`, `age_seconds` and `stale`. An available
-credit passing its expiry marks that observation stale; it does not decrement
-the last reported count or pretend a redemption occurred. Refresh before
-deciding whether to consume a credit.
-
-```sh
-agentbridge accounts quota-reset "My Codex" \
-  --idempotency-key reset-request-001 --credit-id PROVIDER_CREDIT_ID --json
-```
-
-RPC: `accounts.quota.reset` with `account_ref`, `idempotency_key` and optional
-`credit_id`. This is an explicit account mutation. The embedding host must
-obtain its normal authorization before calling it; usage queries never redeem
-credits. AgentBridge does not implement business approval policies.
-
-The intent and provider principal are persisted before submission. Concurrent
-requests are excluded per account. A completed request replays its durable
-receipt after restart; a conflicting account/credit is rejected. A lost
-response returns `unknown_outcome`, not an automatic retry or a new reset key.
-Explicit reconciliation uses the original key. A second logical reset is
-blocked while the first is unresolved.
-
-Known outcomes are `reset`, `already_redeemed`, `nothing_to_reset` and
-`no_credit`. Read fresh quota after a known result. This operation has isolated
-provider-fixture acceptance; no earned credit was consumed during validation.
+The local proxy does not expose Codex earned-reset redemption.
+`accounts.quota.reset` returns unsupported in v2; there is no CLI
+`accounts quota-reset` command. Historical native reset-credit and Claude
+OAuth quota formats do not appear in current proxy account responses.
 
 ## Models and consumption
 
-Catalogs preserve reported effort values/options/defaults, context windows,
-maximum output tokens, modalities, service tiers and capability flags. Claude
-resolved model IDs and Cursor parameters/variants are retained. Missing
-metadata is unknown, including context size when only a name contains `[1m]`.
-Membership is not proof of account entitlement. Codex model discovery consumes
-bounded native pages with repeated-cursor detection.
+`models.list` aggregates exact IDs attached to proxy accounts and marks
+configured candidates separately from accounts freshly observed in the
+sidecar. Missing metadata is unknown. Membership is routing evidence, not
+proof that an upstream provider will accept the model.
 
-Cursor effort is encoded using a model parameter only after the account's
-catalog advertises both that parameter and the requested value. Missing or
-invalid values fail before creating a provider agent, without switching models.
-
-Token and cost observations retain scope. Codex session totals are cumulative;
-its latest turn observation is separate. Claude main-loop tokens are per turn,
-while `modelUsage` and total cost may include resumed-session history and are
-reported as cumulative session observations. They are not summed across turns.
-Model-specific context/output sizes reported during execution are observations,
-not universal catalog entitlements or a context-selection control.
-Instance usage returns at most 10,000 turn observations, with `partial` and
-`observation_limit` explicitly identifying truncation; it does not claim a
-complete aggregate. Instance metadata uses the actual stored turn count.
+Turn token and cost observations retain their reported scope and source. A
+Codex session total may be cumulative; it is not silently substituted for
+one turn's usage. Instance usage returns at most 10,000 turn observations;
+`partial` and `observation_limit` identify truncation. An absent turn usage
+observation is unknown, not zero. Portable continuation records context
+omissions separately from token usage.
 
 ## Failures and interruptions
 
 `run.error`, terminal `run.finished` and `turns.get(include_error=true)` expose
 safe structured failure data: code, category, phase, outcome, retryable and
-action. Original provider bodies, safety explanations and credentials are not
-persisted. Classification prefers native codes, with bounded text matching for
-known compatibility messages and an explicit detection source.
+action. Raw provider error bodies, credential values and private reasoning
+are not persisted. Known structured codes take precedence over bounded
+compatibility text; unrecognized evidence keeps an unknown classification.
 
 | Code | Meaning |
 | --- | --- |
-| safety_blocked | Provider safety system rejected the request |
-| quota_exhausted | Reported account usage allowance exhausted |
-| rate_limited | Temporary provider rate limiting |
-| billing_required / budget_exhausted | Billing or configured spend cap |
-| authentication_required / authorization_denied | Login or access problem |
-| context_window_exceeded / output_limit_exceeded | Context or output limit |
-| max_turns_exceeded / structured_output_failed | Execution control stopped work |
-| provider_connection_lost / provider_timeout | Transport ended or timed out |
-| unknown_outcome | Completion or effects could not be established |
+| `safety_blocked` | Provider safety system rejected the request |
+| `quota_exhausted` | Reported account allowance exhausted |
+| `rate_limited` | Temporary provider rate limiting |
+| `billing_required`, `budget_exhausted` | Billing or configured spend cap |
+| `authentication_required`, `authorization_denied` | Login or access problem |
+| `context_window_exceeded`, `output_limit_exceeded` | Context or output limit |
+| `max_turns_exceeded`, `structured_output_failed` | Execution control stopped work |
+| `provider_connection_lost`, `provider_timeout` | Transport ended or timed out |
+| `unknown_outcome` | Completion or effects could not be established |
 
-Provider-native retry notifications remain observable without starting another
-AgentBridge turn. Native model fallback/rerouting is observable as model changes.
-Retracted provider messages are omitted from the visible transcript and exported
-context; their original events remain in the evidence archive. Partial text is
-marked incomplete. Retractions do not prove that earlier tool effects vanished.
-Explicit Stop remains cancelled. A clean process exit without a completion
-event is not success. In-flight tools without results keep unknown outcomes.
-Terminal execution failures are not automatically retried, and a safety block
-never triggers an AgentBridge fallback to evade the block.
+Provider retry notifications can be observed without starting another
+AgentBridge turn. Partial text is marked incomplete. Retracted messages are
+omitted from visible transcript and exported context while their evidence
+events remain; retraction does not undo a tool effect. Explicit Stop remains
+cancelled. A clean process exit without a completion event is not success.
+In-flight tools without results keep unknown outcomes. Terminal failures are
+not automatically retried, and a safety block never triggers fallback to
+another account.
 
-Unknown future failures still return a safe generic code; the adapter does not
-claim exhaustive knowledge of future provider messages. They can enter the
-[reviewed error-learning workflow](error-learning.md), with separate bounded
-AI diagnosis and explicit activation. See the remaining scope in
-[implementation status](interface/implementation-status.md).
-
-## Protocol evidence
-
-- Installed Codex 0.153.0 generated app-server JSON schema and
-  [official app-server reference](https://learn.chatgpt.com/docs/app-server).
-- Claude Code 2.1.266 native schema, official Agent SDK 0.3.278 declarations,
-  [SDK reference](https://code.claude.com/docs/en/agent-sdk/python) and
-  [usage and costs](https://code.claude.com/docs/en/costs).
-- Cursor SDK 1.0.31 types and
-  [official Python SDK reference](https://prod.cursor.com/docs/sdk/python).
-
-Claude OAuth quota and unified stream windows are versioned native
-compatibility surfaces, not a promised stable public subscription API.
+Unknown future failures may enter the
+[reviewed error-learning workflow](error-learning.md), with explicit rule
+activation. See [implementation status](interface/implementation-status.md)
+for the proxy path's acceptance limits.

@@ -18,9 +18,9 @@ def propose(current, inspection, contract_id, review_reference, manifest=None):
     result = deepcopy(current)
     engine = inspection.get('engine')
     version = inspection.get('version')
-    if engine not in {'codex', 'claude', 'cursor'} or not isinstance(version, str) or not re.fullmatch(r'\d{1,5}\.\d{1,5}\.\d{1,5}', version):
+    if engine not in {'codex', 'claude'} or not isinstance(version, str) or not re.fullmatch(r'\d{1,5}\.\d{1,5}\.\d{1,5}', version):
         raise ValueError('An exact observed provider release is required.')
-    component = 'cursor-sdk' if engine == 'cursor' else engine + '-cli'
+    component = engine + '-cli'
     if inspection.get('component') != component or 'bundled_sdk_version_mismatch' in inspection.get('limitations', []):
         raise ValueError('Provider components do not match.')
     if (not isinstance(review_reference, str) or not 1 <= len(review_reference) <= 256
@@ -42,8 +42,7 @@ def propose(current, inspection, contract_id, review_reference, manifest=None):
     evidence_kind = inspection.get('evidence_kind')
     if not isinstance(evidence_hash, str) or not re.fullmatch('[a-f0-9]{64}', evidence_hash):
         raise ValueError('A complete offline inspection is required.')
-    expected = {'codex': 'codex_json_schema_default_v1', 'claude': 'cli_help_observation_v1',
-                'cursor': 'cursor_python_ast_bridge_v1'}[engine]
+    expected = {'codex': 'codex_json_schema_default_v1', 'claude': 'cli_help_observation_v1'}[engine]
     if evidence_kind != expected:
         raise ValueError('Unknown evidence format requires adapter review.')
     binding = {'engine': engine, 'component': component, 'version': version,

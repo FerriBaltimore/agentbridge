@@ -8,19 +8,28 @@ import time
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import RunOptions
 from agentbridge import worker
 from agentbridge.errors import BridgeError
 from agentbridge.process import identity
+from fixtures.test_proxy_worker_fixture import (
+    CLIENT_KEY_ENV, MANAGEMENT_KEY_ENV, MODEL, bridge_with_proxy, management_server,
+)
 
 
-def admitted(tmp_path, script='import json; print(json.dumps({"type":"turn.completed"}))'):
+@pytest.fixture
+def local_proxy():
+    with management_server() as port:
+        yield port
+
+
+def admitted(tmp_path, monkeypatch, local_proxy,
+             script='import json; print(json.dumps({"type":"turn.completed"}))'):
     native = tmp_path / 'provider.py'
     native.write_text(script)
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('fixture', 'codex', home=str(tmp_path / 'home'),
-                            command=(sys.executable, str(native))))
-    session = bridge.session('fixture', tmp_path)
+    bridge = bridge_with_proxy(tmp_path, monkeypatch, local_proxy,
+                               command=(sys.executable, str(native)))
+    session = bridge.session('fixture', tmp_path, model=MODEL)
     run_id, _ = bridge.store.admit('fixture-run', session['id'], 'fixture', RunOptions(timeout=2), None)
     return bridge, bridge.run(run_id)
 
@@ -28,13 +37,14 @@ def admitted(tmp_path, script='import json; print(json.dumps({"type":"turn.compl
 def in_process(monkeypatch, bridge, run):
     monkeypatch.setattr(worker, 'Store', lambda _: bridge.store)
     monkeypatch.setattr(sys, 'argv', ['worker', str(bridge.root), run.id])
-    monkeypatch.setattr(sys, 'stdin', io.StringIO('{}'))
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps({
+        CLIENT_KEY_ENV: 'fixture-client-key', MANAGEMENT_KEY_ENV: 'fixture-management-key'})))
     monkeypatch.setattr(worker.signal, 'signal', lambda *_: None)
     monkeypatch.setattr(worker, 'identity', lambda _: 'fixture-dead-owner')
 
 
-def test_claimed_setup_failure_is_visible_without_waiting_for_recovery(tmp_path, monkeypatch):
-    bridge, run = admitted(tmp_path)
+def test_claimed_setup_failure_is_visible_without_waiting_for_recovery(tmp_path, monkeypatch, local_proxy):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy)
     in_process(monkeypatch, bridge, run)
     original = bridge.store.get
     def get(table, key):
@@ -51,8 +61,8 @@ def test_claimed_setup_failure_is_visible_without_waiting_for_recovery(tmp_path,
     assert 'PRIVATE DATABASE BODY' not in json.dumps(data)
 
 
-def test_provider_spawn_failure_has_not_started_outcome(tmp_path, monkeypatch):
-    bridge, run = admitted(tmp_path)
+def test_provider_spawn_failure_has_not_started_outcome(tmp_path, monkeypatch, local_proxy):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy)
     in_process(monkeypatch, bridge, run)
     def popen(*_, **kwargs):
         raise FileNotFoundError('PRIVATE EXECUTABLE PATH')
@@ -67,8 +77,8 @@ def test_provider_spawn_failure_has_not_started_outcome(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('code', ['provider_contract_unverified', 'provider_contract_changed'])
-def test_contract_recheck_failure_preserves_safe_details_before_native_launch(tmp_path, monkeypatch, code):
-    bridge, run = admitted(tmp_path)
+def test_contract_recheck_failure_preserves_safe_details_before_native_launch(tmp_path, monkeypatch, local_proxy, code):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy)
     in_process(monkeypatch, bridge, run)
     def verify(*_):
         raise BridgeError(code, 'A reviewed contract is required.', phase='launch',
@@ -83,8 +93,8 @@ def test_contract_recheck_failure_preserves_safe_details_before_native_launch(tm
 
 
 @pytest.mark.parametrize('failed_kind', ['run_started', 'tool_result'])
-def test_repeated_emit_failure_does_not_skip_terminal_commit(tmp_path, monkeypatch, failed_kind):
-    bridge, run = admitted(tmp_path, '''import json
+def test_repeated_emit_failure_does_not_skip_terminal_commit(tmp_path, monkeypatch, local_proxy, failed_kind):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy, '''import json
 print(json.dumps({'type':'item.started','item':{'id':'tool','type':'command_execution','command':'fixture'}}))
 print(json.dumps({'type':'turn.completed'}))
 ''')
@@ -104,8 +114,8 @@ print(json.dumps({'type':'turn.completed'}))
     assert 'PRIVATE DISK BODY' not in json.dumps([event.data for event in run.events()])
 
 
-def test_terminal_commit_failure_is_retried_as_unknown_not_success(tmp_path, monkeypatch):
-    bridge, run = admitted(tmp_path)
+def test_terminal_commit_failure_is_retried_as_unknown_not_success(tmp_path, monkeypatch, local_proxy):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy)
     in_process(monkeypatch, bridge, run)
     original = bridge.store.finish
     calls = []
@@ -122,8 +132,8 @@ def test_terminal_commit_failure_is_retried_as_unknown_not_success(tmp_path, mon
     assert list(run.events())[-1].data['outcome'] == 'unknown'
 
 
-def test_permanent_storage_failure_exits_and_later_recovers(tmp_path, monkeypatch, capsys):
-    bridge, run = admitted(tmp_path)
+def test_permanent_storage_failure_exits_and_later_recovers(tmp_path, monkeypatch, local_proxy, capsys):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy)
     in_process(monkeypatch, bridge, run)
     def fail(*_, **kwargs):
         raise sqlite3.OperationalError('PRIVATE DATABASE BODY')
@@ -138,8 +148,8 @@ def test_permanent_storage_failure_exits_and_later_recovers(tmp_path, monkeypatc
     assert run.snapshot['error'] == 'worker_lost'
 
 
-def test_partial_prompt_delivery_cannot_report_success(tmp_path):
-    bridge, admitted_run = admitted(tmp_path)
+def test_partial_prompt_delivery_cannot_report_success(tmp_path, monkeypatch, local_proxy):
+    bridge, admitted_run = admitted(tmp_path, monkeypatch, local_proxy)
     # Close the unused fixture admission to make a public large-input run.
     bridge.store.finish(admitted_run.id, 'cancelled', 'user_stop')
     run = bridge.submit(admitted_run.snapshot['session_id'], 'fixture ' * 100000,
@@ -150,8 +160,8 @@ def test_partial_prompt_delivery_cannot_report_success(tmp_path):
 
 
 @pytest.mark.parametrize('asynchronous', [False, True])
-def test_event_follow_reconciles_old_admission_without_worker(tmp_path, asynchronous):
-    bridge, run = admitted(tmp_path)
+def test_event_follow_reconciles_old_admission_without_worker(tmp_path, monkeypatch, local_proxy, asynchronous):
+    bridge, run = admitted(tmp_path, monkeypatch, local_proxy)
     with bridge.store.connect() as db:
         db.execute('UPDATE runs SET created=? WHERE id=?', (time.time() - 20, run.id))
     if asynchronous:

@@ -4,7 +4,7 @@ import json
 
 def model_command(bridge, args):
     return bridge.models(
-        args.engine, account_ref=args.account_ref, refresh=args.refresh,
+        account_ref=args.account_ref, refresh=args.refresh,
         include_hidden=args.include_hidden, include_deprecated=args.include_deprecated,
         limit=args.limit, cursor=args.cursor)
 
@@ -13,13 +13,18 @@ def print_models(value, as_json=False):
     if as_json:
         print(json.dumps(value, indent=2, ensure_ascii=False))
         return
-    print(f"Engine: {value.get('engine')}")
     print(f"Source: {value.get('source')}")
     print(f"Stale: {'yes' if value.get('stale') else 'no'}")
     if value.get('reason'):
         print(f"Reason: {value['reason']}")
     for model in value.get('items', value.get('models', [])):
         print(f"{model.get('id')} | {model.get('display_name') or '-'}")
+        if model.get('providers'):
+            print(f"  Providers: {', '.join(model['providers'])}")
+        if model.get('observed_account_refs'):
+            print(f"  Observed accounts: {', '.join(model['observed_account_refs'])}")
+        elif model.get('candidate_account_refs'):
+            print(f"  Configured accounts (unverified): {', '.join(model['candidate_account_refs'])}")
         efforts = ', '.join(model.get('reasoning_efforts') or []) or 'unknown'
         default_effort = model.get('default_reasoning_effort')
         print(f"  Reasoning effort: {efforts}" + (f" (default: {default_effort})" if default_effort else ''))

@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import Bridge, RunOptions
 from agentbridge.codex_control import CodexControl
 from agentbridge.execution_outcome import finish
 from agentbridge.protocols import Parser
+from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
 
 def test_claude_native_retry_and_routing_are_not_host_policy():
@@ -48,8 +49,9 @@ def test_codex_native_reroute_preserves_observed_models():
 
 def stored(tmp_path):
     bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('fixture', 'claude', home=str(tmp_path / 'home')))
-    session = bridge.session('fixture', tmp_path)
+    register_verified_proxy_account(bridge.store, 'fixture', 19321)
+    bridge.store.add_session('fixture-session', 'fixture', str(tmp_path), 'fixture-model')
+    session = bridge.get_session('fixture-session')
     turn, _ = bridge.store.admit('fixture-turn', session['id'], 'fixture', RunOptions(), None)
     parsed = Parser('claude', lambda kind, data: bridge.store.emit(turn, kind, data))
     return bridge, session['id'], turn, parsed
@@ -94,7 +96,7 @@ def test_supersedes_and_aborted_partial_are_visible_without_requiring_notice(tmp
     assert row['retracted_provider_message_ids'] == ['message-old']
 
 
-def test_completed_cursor_deltas_are_complete_and_unknown_retraction_is_noop(tmp_path):
+def test_completed_deltas_are_complete_and_unknown_retraction_is_noop(tmp_path):
     bridge, _, turn, _ = stored(tmp_path)
     bridge.store.emit(turn, 'text_delta', {'text': 'kept'})
     bridge.store.emit(turn, 'model_changed', {'retracted_provider_message_ids': ['unknown-id']})

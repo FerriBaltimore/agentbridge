@@ -1,17 +1,10 @@
-"""Normalized provider catalogs; unavailable discovery never invents models."""
-from datetime import datetime, timezone
+"""Legacy metadata normalization without native provider discovery."""
 
-from .account_probe import CodexAppServerProbe
 from .errors import BridgeError
-from .models import ENGINES
 
 
 def _text(value):
     return value if isinstance(value, str) and 0 < len(value) <= 4096 and all(ord(c) >= 32 and ord(c) != 127 for c in value) else None
-
-
-def _stamp():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _first(item, *names):
@@ -135,56 +128,10 @@ def _model(item):
 
 
 class ModelCatalog:
-    """Resolve a safe normalized catalog without spending an inference turn."""
+    """Retired direct-provider catalog API."""
 
     def __init__(self, accounts):
         self.accounts = accounts
 
-    def list(self, engine, *, account_ref=None, refresh=False, include_hidden=False,
-             include_deprecated=False):
-        if engine not in ENGINES:
-            raise BridgeError("invalid_engine", "Unknown engine.")
-        if any(type(flag) is not bool for flag in (refresh, include_hidden, include_deprecated)):
-            raise BridgeError('invalid_input', 'Catalog query flags must be booleans.')
-        account = self.accounts.resolve(account_ref) if account_ref else None
-        if account and account.engine != engine:
-            raise BridgeError("invalid_engine", "The account engine does not match the requested engine.")
-        source = "static"
-        models = []
-        reason = 'live_catalog_refresh_required' if account else 'live_catalog_requires_account'
-        observed_at = None
-        compatibility = None
-        if account and refresh:
-            try:
-                from .provider_contracts import ContractRegistry
-                compatibility = ContractRegistry(self.accounts.store).check(account)
-                if not compatibility['native_operations_allowed']:
-                    raise BridgeError('provider_contract_unverified', 'The installed release needs contract review.')
-                from .provider_catalog import models as provider_models
-                items = CodexAppServerProbe(account).list_models() if engine == 'codex' else provider_models(account)
-                if not isinstance(items, (list, tuple)):
-                    raise BridgeError('provider_protocol_error', 'The provider returned an invalid model catalog.')
-                models = [value for item in items if (value := _model(item))]
-                if len(models) != len(items) or len({item['id'] for item in models}) != len(models):
-                    models = []
-                    raise BridgeError('provider_protocol_error', 'The provider returned malformed or duplicate model entries.')
-                source, reason, observed_at = "live", None, _stamp()
-            except BridgeError as error:
-                reason = error.code
-        models = [dict(item, source=source, observed_at=observed_at, stale=source != 'live') for item in models]
-        if not include_hidden:
-            models = [item for item in models if item.get("availability") not in {"hidden", "unlisted"}]
-        if not include_deprecated:
-            models = [item for item in models if not item.get("deprecated")]
-        return {
-            "engine": engine,
-            "models": models,
-            "source": source,
-            "stale": source != "live",
-            "observed_at": observed_at,
-            "supported": source == "live",
-            "reason": reason,
-            "refresh": bool(refresh),
-            "generated_at": _stamp(),
-            "provider_compatibility": compatibility,
-        }
+    def list(self, *_args, **_kwargs):
+        raise BridgeError('unsupported_operation', 'Models must be observed through the local proxy.')

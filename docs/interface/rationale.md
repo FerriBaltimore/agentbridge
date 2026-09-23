@@ -1,8 +1,10 @@
 # Interface rationale
 
 AgentBridge exposes one vocabulary for every provider. The embedding
-application chooses policy, account selection and retries; the adapter only
-translates the request and records what was observed.
+application chooses a model, permissions and product retry policy. For v2
+proxy instances AgentBridge chooses an eligible account before each turn,
+translates the request and records the selected route and its evidence.
+Historical direct instances remain readable but cannot execute new turns.
 
 ## Discovery
 
@@ -14,9 +16,12 @@ and a model turn must never be spent just to discover available models.
 accounts.list is a reference lookup. accounts.status reports identity and
 authentication observations. accounts.login.start, status, check, complete and
 cancel are asynchronous because browser and device flows can outlive one
-process. GrantBridge owns credentials and returns only safe identity and home
-information. Fullbrain chooses the account and AgentBridge never changes it
-silently.
+process. GrantBridge coordinates provider OAuth through a dedicated local
+CLIProxyAPI Management API; the proxy owns upstream credentials. A v2 caller
+may pin an account explicitly; otherwise AgentBridge
+selects from accounts declaring the chosen model. A route is fixed during one
+turn, and a later change is visible in turn records and events. The same
+management key reference is required for pinned and automatic routes.
 
 ## Usage
 
@@ -50,8 +55,8 @@ was not observed. recover marks a lost worker interrupted and never retries it.
 
 permissions.respond is reserved for adapters that can pause and resume a
 provider request. It records the host decision only after matching a pending
-request. Codex and Claude deliver one-request decisions through their native duplex
-protocols. Cursor reports unsupported because its SDK has no host response channel.
+request. Codex delivers one-request decisions through its supervised duplex
+protocol. Historical direct Claude behavior is not a v2 execution path.
 
 ## Parameters and unsupported behavior
 

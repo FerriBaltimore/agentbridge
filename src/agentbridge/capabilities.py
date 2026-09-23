@@ -1,12 +1,9 @@
 """Provider-neutral capability declarations for the public contract."""
-from copy import deepcopy
-
-from .models import CAPABILITIES
-
 
 OPERATIONS = (
     "contracts.list", "contracts.get", "contracts.check", "contracts.inspect",
-    "capabilities.get", "accounts.list", "accounts.status", "accounts.login",
+    "capabilities.get", "accounts.list", "accounts.status", "accounts.delete",
+    "accounts.login",
     "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel",
     "models.list", "usage.get", "accounts.quota.reset", "instances.create", "instances.get",
@@ -19,109 +16,52 @@ OPERATIONS = (
 )
 
 
-def _support(engine, operation):
-    if operation == 'accounts.quota.reset':
-        return 'native' if engine == 'codex' else 'unsupported'
-    if operation == "permissions.respond":
-        return "adapter" if engine in {"codex", "claude"} else "unsupported"
-    if operation == "accounts.status":
-        return "native" if engine == "codex" else "adapter"
-    if operation == "usage.get":
-        return "adapter"
-    if operation == "models.list":
-        return "native" if engine == "codex" else "adapter"
-    if operation == "instances.transfer":
-        return "native" if engine in {"codex", "claude"} else "portable"
-    if operation == "messages.create":
-        return "native" if engine == "codex" else "adapter"
-    return "adapter"
-
-
-def _maturity(engine, operation):
-    if operation.startswith('contracts.'):
-        return 'fixture_tested'
-    if operation.startswith(('error_cases.', 'error_diagnoses.', 'error_proposals.', 'error_rules.')):
-        return 'fixture_tested'
-    if operation == 'accounts.quota.reset':
-        return 'fixture_tested' if engine == 'codex' else 'unsupported'
-    if operation == 'permissions.respond':
-        return 'fixture_tested' if engine in {'codex', 'claude'} else 'unsupported'
-    tested = {
-        'capabilities.get', 'accounts.list', 'accounts.status', 'accounts.login',
-        'accounts.login.start', 'accounts.login.status', 'accounts.login.check',
-        'accounts.login.complete', 'accounts.login.cancel', 'models.list', 'usage.get',
-        'instances.create', 'instances.get', 'instances.list', 'instances.update',
-        'instances.archive', 'instances.events', 'messages.create', 'messages.list',
-        'turns.list', 'turns.get', 'turns.events', 'turns.stop', 'instances.transfer',
-        'instances.export', 'recover',
-    }
-    return 'fixture_tested' if operation in tested else 'implemented'
-
-
-def _limitations(engine, operation):
-    if operation == 'error_cases.diagnose':
-        return ['explicit_cursor_diagnostic_account_required', 'safe_structural_evidence_only',
-                'verified_tmpfs_required', 'no_token_or_monetary_budget', 'explicit_rule_review_required']
-    if operation == 'error_rules.activate':
-        return ['structural_validation_is_not_semantic_verification', 'exact_fingerprint_and_version_only',
-                'classification_never_authorizes_retry']
-    if operation == 'accounts.quota.reset':
-        return ['explicit_consumption_only', 'persistent_idempotency_key_required', 'provider_acceptance_not_run'] if engine == 'codex' else ['provider_reset_api_unavailable']
-    if operation == 'models.list':
-        return ['catalog_is_not_entitlement_verification', 'missing_catalog_is_unavailable',
-                'live_refresh_required']
-    if operation == 'accounts.status' and engine == 'cursor':
-        return ['cached_verification_only', 'no_live_account_reader']
-    if operation == 'accounts.status' and engine == 'claude':
-        return ['native_status_is_local_only']
-    if operation == 'usage.get' and engine == 'cursor':
-        return ['sdk_account_quota_unavailable', 'session_usage_is_not_remaining_quota']
-    if operation == 'usage.get' and engine == 'claude':
-        return ['oauth_usage_is_native_compatibility', 'quota_depends_on_bound_profile']
-    if operation == 'accounts.login.check' and engine == 'claude':
-        return ['inference_required_for_activation', 'inference_consumes_provider_usage']
-    if operation == 'instances.transfer':
-        return ['portable_context_is_lossy', 'native_transfer_not_crash_atomic']
-    if operation in {'instances.create', 'instances.update'}:
-        return ['model_not_verified_at_admission', 'advanced_instance_defaults_unsupported']
-    if operation == 'permissions.respond':
-        return ['provider_approval_channel_unavailable'] if engine == 'cursor' else [
-            'one_request_allow_or_deny_only', 'pending_requests_require_live_worker']
-    return []
-
-
-def payload(engine=None):
-    selected = [engine] if engine else list(CAPABILITIES)
-    result = {}
-    for name in selected:
-        base = CAPABILITIES.get(name)
-        if base is None:
-            raise KeyError(name)
-        data = deepcopy(base.__dict__)
-        data["contract_version"] = "v1"
-        data['declaration_scope'] = 'adapter_implementation'
-        data['runtime_provider_support_verified'] = False
-        data["operations"] = {
-            operation: {"support": _support(name, operation), "engine": name,
-                        "maturity": _maturity(name, operation),
-                        'limitations': _limitations(name, operation)}
-            for operation in OPERATIONS
+def proxy_payload(*, include_parameters=True):
+    """Declare only the supported Codex-to-local-proxy execution surface."""
+    unsupported = {'accounts.quota.reset', 'error_cases.diagnose'}
+    operations = {}
+    for operation in OPERATIONS:
+        enabled = operation not in unsupported
+        item = {'support': 'adapter' if enabled else 'unsupported',
+                'maturity': 'fixture_tested' if enabled else 'unsupported',
+                'limitations': []}
+        if operation.startswith('accounts.login'):
+            item['limitations'] = ['local_same_host_browser', 'live_oauth_acceptance_pending']
+        elif operation == 'accounts.delete':
+            item['limitations'] = ['local_retirement_only', 'upstream_credential_remains']
+        elif operation.startswith('contracts.'):
+            item['limitations'] = ['schema_audit_only', 'execution_engine_is_codex']
+        elif operation == 'models.list':
+            item['limitations'] = ['local_catalog_is_not_provider_entitlement']
+        elif operation == 'instances.transfer':
+            item['support'] = 'portable'
+            item['limitations'] = ['bounded_context', 'explicit_omissions']
+        operations[operation] = item
+    value = {'contract_version': 'v2',
+             'declaration_scope': 'adapter_implementation',
+             'execution_engine': 'codex',
+             'route': 'local_cliproxyapi',
+             'providers': ['codex', 'claude', 'grok'],
+             'runtime_provider_support_verified': False,
+             'operations': operations}
+    if include_parameters:
+        value['parameters'] = {
+            'model': {'support': 'adapter', 'maturity': 'fixture_tested'},
+            'effort': {'support': 'adapter', 'maturity': 'fixture_tested',
+                       'limitations': ['provider_model_may_ignore_effort']},
+            'attachments': {'support': 'adapter', 'maturity': 'fixture_tested',
+                            'limitations': ['model_support_varies']},
+            'context_window': {'support': 'adapter', 'maturity': 'fixture_tested',
+                               'limitations': ['model_maximum_must_be_observed',
+                                               'provider_may_reject_override']},
+            'permission_mode': {'support': 'adapter', 'maturity': 'fixture_tested',
+                                'values': [
+                                    {'value': 'dontAsk', 'display_name': 'No prompts'},
+                                    {'value': 'default', 'display_name': 'Ask before actions'},
+                                ],
+                                'limitations': ['interactive_codex_transport']},
+            'allowed_tools': {'support': 'unsupported', 'maturity': 'unsupported'},
+            'max_budget': {'support': 'unsupported', 'maturity': 'unsupported'},
+            'provider_options': {'support': 'unsupported', 'maturity': 'unsupported'},
         }
-        data["parameters"] = {
-            "model": {"support": "native" if name == "codex" else "adapter",
-                      "maturity": "fixture_tested"},
-            "effort": {"support": "native" if name == "codex" else "adapter",
-                       "maturity": "fixture_tested",
-                       "limitations": ['requires_reported_model_parameter'] if name == 'cursor' else []},
-            "context_window": {"support": "unsupported", "maturity": "unsupported"},
-            "attachments": {"support": "adapter", "maturity": "fixture_tested",
-                            "types": ["text", "image"], "max_count": 8, "max_bytes": 5242880,
-                            "limitations": ["inline_only", "model_must_support_images", "portable_transfer_omits_content"]},
-            "provider_options": {"support": "unsupported", "maturity": "unsupported"},
-        }
-        data["acceptance"] = {"fixture_tested": True, "provider_tested": False,
-                               "provider_versions": []}
-        data['requirements'] = ['configured_grantbridge', 'explicit_account'] + (
-            ['cursor_sdk_installed', 'explicit_model'] if name == 'cursor' else ['native_cli_installed'])
-        result[name] = data
-    return result[name] if engine else result
+    return value

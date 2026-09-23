@@ -1,6 +1,6 @@
-"""GrantBridge 0.1 private adapter contract, separate from local auth states.
+"""GrantBridge private adapter projections, separate from local auth states.
 
-Source: GrantBridge src/agentbridge-protocol.mjs and src/agentbridge-credentials.mjs.
+Source: GrantBridge src/agentbridge-protocol.mjs and src/agentbridge-proxy.mjs.
 Additive fields are ignored. Unknown states or malformed evidence never verify a login.
 """
 from .account_probe import safe_identity
@@ -14,9 +14,11 @@ ERROR_CODES = frozenset(('invalid_request', 'invalid_params', 'invalid_provider'
     'authentication_required', 'authentication_not_verified', 'credential_unavailable',
     'credential_expired', 'identity_changed', 'activation_unsupported', 'provider_error',
     'native_reauthorization_required', 'plan_required', 'probe_failed', 'probe_interrupted',
-    'codex_closed', 'claude_login_failed', 'cursor_login_failed', 'no_code_expected', 'invalid_code',
+    'codex_closed', 'claude_login_failed', 'no_code_expected', 'invalid_code',
     'authentication_interrupted', 'authentication_worker_failed', 'provider_protocol_error',
-    'grantbridge_failed', 'grantbridge_timeout'))
+    'grantbridge_failed', 'grantbridge_timeout', 'invalid_proxy_endpoint',
+    'proxy_unavailable', 'proxy_rejected', 'proxy_invalid_response',
+    'authentication_outcome_unknown'))
 
 
 def invalid():
@@ -38,9 +40,6 @@ def status(remote):
     verification = remote.get('verification')
     if verification is not None and not isinstance(verification, dict):
         invalid()
-    if (value == 'authorized' and remote.get('checking', False) is False
-            and (verification or {}).get('freshProcess') == 'passed'):
-        return 'verified'
     return value
 
 
@@ -57,7 +56,8 @@ def projection(remote):
         if text(remote.get(key)):
             result[key] = remote[key]
     # Authorization URL and user code are intentionally part of the protected login flow.
-    if remote.get('authorizationUrl') is None or text(remote.get('authorizationUrl'), 16384):
+    if 'authorizationUrl' in remote and (remote['authorizationUrl'] is None
+                                         or text(remote['authorizationUrl'], 16384)):
         result['authorizationUrl'] = remote.get('authorizationUrl')
     for key in ('createdAt', 'updatedAt', 'expiresAt'):
         value = remote.get(key)
@@ -70,11 +70,8 @@ def projection(remote):
         result['identity'] = safe_identity(remote['identity'])
     verification = remote.get('verification')
     if isinstance(verification, dict):
-        result['verification'] = {key: value for key in ('freshProcess', 'inference')
+        result['verification'] = {key: value for key in ('proxyBinding',)
             if (value := verification.get(key)) in ('passed', 'failed', 'loaded_only')}
-        for key in ('authenticatedRequest', 'model'):
-            if text(verification.get(key)):
-                result['verification'][key] = verification[key]
     for key in ('error', 'probeError'):
         value = remote.get(key)
         if isinstance(value, dict):
@@ -87,7 +84,11 @@ def attempt(remote, *, engine, attempt_id=None):
     if (not text(remote.get('id'), 256) or remote.get('provider') != engine
             or (attempt_id is not None and remote['id'] != attempt_id)):
         invalid()
-    return projection(remote)
+    value = projection(remote)
+    # Only AgentBridge's local Management API observation can verify a binding.
+    value.pop('verification', None)
+    value.pop('identity', None)
+    return value
 
 
 def response_result(response):

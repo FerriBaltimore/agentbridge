@@ -3,11 +3,12 @@ import json
 
 import pytest
 
-from agentbridge import Account, Bridge
+from agentbridge import Bridge
 from agentbridge import error_diagnosis
 from agentbridge.cli import main
 from agentbridge.error_evidence import capture
 from agentbridge.provider_errors import normalize
+from agentbridge.store import dumps
 
 
 def invoke(root, capsys, *args):
@@ -35,29 +36,28 @@ def test_case_queries_page_persistent_safe_evidence(tmp_path, capsys):
     assert invoke(bridge.root, capsys, 'case', case['id']) == case
 
 
-def test_explicit_diagnostic_selection_replays_and_never_activates(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
+def test_diagnosis_reports_proxy_unavailable_without_creating_operation(tmp_path, capsys):
     bridge, case, _ = seed(tmp_path)
-    bridge.register(Account('diagnostic-cursor', 'cursor', key_env='FIXTURE_DIAGNOSIS_KEY'))
-    monkeypatch.setenv('FIXTURE_DIAGNOSIS_KEY', 'fixture-only-credential')
-    calls = []
-    def execute(payload, credentials, timeout):
-        calls.append(payload)
-        assert payload['model'] == 'fixture-model'
-        assert credentials == {'FIXTURE_DIAGNOSIS_KEY': 'fixture-only-credential'}
-        assert timeout == 25
-        return {'status': 'proposed', 'target_code': 'provider_unavailable'}
-    monkeypatch.setattr(error_diagnosis, 'execute', execute)
-    arguments = ['diagnose', case['id'], '--account-ref', 'diagnostic-cursor', '--model', 'fixture-model',
-                 '--idempotency-key', 'cli-diagnostic', '--timeout', '25']
-    receipt = invoke(bridge.root, capsys, *arguments)
-    assert receipt['state'] == 'completed'
-    assert invoke(bridge.root, capsys, *arguments) == receipt and len(calls) == 1
-    assert invoke(bridge.root, capsys, 'diagnosis', 'cli-diagnostic') == receipt
-    proposal = invoke(bridge.root, capsys, 'proposal', receipt['result']['proposal_id'])
-    assert proposal['status'] == 'proposed'
+    with pytest.raises(SystemExit) as failure:
+        main(['--root', str(bridge.root), 'errors', 'diagnose', case['id']])
+    assert failure.value.code == 1
+    output = capsys.readouterr()
+    assert output.out == ''
+    assert json.loads(output.err)['error'] == 'unsupported_operation'
     with bridge.store.connect() as db:
-        assert db.execute('SELECT count(*) FROM error_rules').fetchone()[0] == 0
+        assert db.execute("SELECT name FROM sqlite_master WHERE name='error_diagnoses'").fetchone() is None
+
+
+def test_diagnosis_command_reads_historical_receipt(tmp_path, capsys):
+    bridge, _, _ = seed(tmp_path)
+    error_diagnosis._initialize(bridge.store)
+    with bridge.store.connect() as db:
+        db.execute('INSERT INTO error_diagnoses VALUES(?,?,?,?,?,?,?)',
+                   ('saved', 'operation-saved', '{}', 'failed',
+                    dumps({'code': 'diagnosis_failed', 'retryable': False}), 1.0, 1.0))
+    receipt = invoke(bridge.root, capsys, 'diagnosis', 'saved')
+    assert receipt['state'] == 'failed'
+    assert receipt['result'] == {'code': 'diagnosis_failed', 'retryable': False}
 
 
 def test_review_activation_and_rollback_are_separate_revision_checked_commands(tmp_path, capsys):
@@ -91,14 +91,12 @@ def test_command_failures_are_json_on_stderr_without_partial_success(tmp_path, c
     assert json.loads(captured.err)['error'] == 'error_record_not_found'
 
 
-def test_diagnosis_requires_account_model_and_key_before_provider_work(tmp_path, monkeypatch, capsys):
-    calls = []
-    monkeypatch.setattr(error_diagnosis, 'execute', lambda *_: calls.append('unexpected'))
+def test_diagnosis_requires_case_before_opening_store(tmp_path, capsys):
     with pytest.raises(SystemExit) as failure:
-        main(['--root', str(tmp_path / 'not-created'), 'errors', 'diagnose', 'case'])
-    assert failure.value.code == 2 and calls == []
+        main(['--root', str(tmp_path / 'not-created'), 'errors', 'diagnose'])
+    assert failure.value.code == 2
     assert not (tmp_path / 'not-created').exists()
-    assert '--account-ref' in capsys.readouterr().err
+    assert 'CASE' in capsys.readouterr().err
 
 
 def test_error_help_explains_commands_without_opening_a_store(tmp_path, capsys):

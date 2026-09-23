@@ -1,8 +1,6 @@
 """Pinned native state contracts reject future or malformed success assumptions."""
 import json
 import os
-from pathlib import Path
-import runpy
 import sys
 from types import SimpleNamespace
 
@@ -10,7 +8,6 @@ import pytest
 
 from agentbridge.codex_control import CodexControl
 from agentbridge.claude_control import execute as claude_execute, initialize
-from agentbridge.cursor_worker import execute as cursor_execute
 from agentbridge.errors import BridgeError
 from agentbridge.execution_outcome import finish
 from agentbridge.protocols import Parser
@@ -74,20 +71,6 @@ def test_claude_sparse_task_patch_preserves_observed_status():
     assert parsed.tasks['child'] == 'completed'
     assert events[-1][1]['background'] is True
     assert parsed.end() is False
-
-
-@pytest.mark.parametrize('status', ['completed', 'success', 'ok', 'succeeded', 'future', None, {}])
-def test_cursor_accepts_only_the_published_terminal_state_contract(status):
-    parsed, events = parser('cursor')
-    parsed.feed({'type': 'bridge_result', 'status': status})
-    assert finish(parsed)[:2] == ('interrupted', 'provider_protocol_error')
-    assert any(kind == 'gap' for kind, _ in events)
-
-
-def test_cursor_finished_is_the_native_success_state():
-    parsed, _ = parser('cursor')
-    parsed.feed({'type': 'bridge_result', 'status': 'finished'})
-    assert finish(parsed) == ('completed', None, None)
 
 
 def test_codex_unpublished_terminal_state_is_unknown_not_definite_failure():
@@ -247,16 +230,3 @@ def test_claude_malformed_permission_never_reaches_approval(native_request):
         claude_execute(channel, {'prompt': 'fixture', 'options': {'timeout': 1}},
                        lambda event: None, lambda *args: approvals.append(args))
     assert error.value.code == 'provider_protocol_error' and approvals == []
-
-
-@pytest.mark.parametrize('run_usage', [None, {'input_tokens': 7, 'output_tokens': 3}])
-def test_cursor_uses_reported_run_usage_and_never_fills_absence_with_zero(tmp_path, monkeypatch, run_usage):
-    fixture = runpy.run_path(str(Path(__file__).parent / 'fixtures' / 'test_cursor_sdk_provider.py'))
-    sdk, events = fixture['sdk'], []
-    monkeypatch.setenv('FIXTURE_CURSOR_KEY', 'fixture-key-never-real')
-    monkeypatch.setattr(sdk.Agent, 'wait', lambda self: SimpleNamespace(status='finished', usage=run_usage))
-    cursor_execute({'cwd': str(tmp_path), 'model': 'fixture', 'key_env': 'FIXTURE_CURSOR_KEY',
-                    'prompt': 'fixture'}, events.append, sdk=sdk)
-    usage = [item for item in events if item['type'] == 'bridge_usage']
-    assert usage == ([] if run_usage is None else [{'type': 'bridge_usage', 'scope': 'turn', 'usage': run_usage}])
-    assert events[-1] == {'type': 'bridge_result', 'status': 'finished'}

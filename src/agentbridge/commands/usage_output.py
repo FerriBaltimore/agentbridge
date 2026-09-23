@@ -1,5 +1,6 @@
 """Readable account windows and observable session consumption."""
 import json
+import math
 
 
 def shown(value):
@@ -25,6 +26,14 @@ def print_usage(value, account_name=None):
     for key in ('reason', 'quota_reason', 'account_usage_reason'):
         if value.get(key):
             print(f"{key.replace('_', ' ').capitalize()}: {value[key]}")
+    for row in value.get('quota_windows', []):
+        used = row.get('used_percent')
+        if isinstance(used, bool) or not isinstance(used, (int, float)) or not math.isfinite(used):
+            used = None
+        remaining = max(0, 100 - used) if used is not None and 0 <= used <= 100 else None
+        print(f"Model: {row.get('model_id') or 'unknown'}")
+        print(f"  Used: {shown(used)}% | Remaining: {shown(remaining)}%")
+        print(f"  Quota observed at: {row.get('observed_at') or 'unknown'}")
     for row in value.get('windows', []):
         print(f"Window: {row.get('id') or row['name']} ({row.get('scope', 'unknown')})")
         if row.get('label'):

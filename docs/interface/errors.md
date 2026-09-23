@@ -10,7 +10,7 @@ stable AgentBridge code:
       category: auth
       retryable: false
       action: login
-      engine: codex
+      provider: codex
       account_ref: development
       phase: launch
       outcome: not_started
@@ -30,7 +30,10 @@ stable AgentBridge code:
 
 Authentication orchestration also uses `authentication_attempt_not_found`,
 `authentication_owner_required`, `authentication_attempt_not_ready`,
-`authentication_not_verified`, `activation_unsupported` and `login_timeout`.
+`authentication_not_verified`, `authentication_in_progress`,
+`activation_unsupported` and `login_timeout`. Account retirement may return
+`busy` when a turn is active; `account_unavailable` identifies an incompatible
+historical account record.
 Inputs and observations also use `invalid_attachment`, `invalid_permissions`,
 `permission_expired`, `provider_catalog_unsupported` and `rate_limited`.
 Execution adapters additionally distinguish `safety_blocked`, `billing_required`,
@@ -54,7 +57,8 @@ effect.
 The implemented envelope uses outcome=unknown for an uncertain result. It is
 never retryable. not_started identifies rejection before work; other outcomes
 are supplied by the operation. The code catalogue above also includes target
-codes; compatibility code unsupported remains in use.
+and historical compatibility codes. `invalid_engine` and native-session codes
+describe old records; they do not enable a direct execution path.
 Unknown provider stderr, tokens, prompts, private reasoning and unbounded
 response bodies are never included in the public error.
 

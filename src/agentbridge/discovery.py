@@ -1,8 +1,8 @@
 """Capability and model discovery for the public SDK."""
 
-from .capabilities import payload as capability_payload
+from .capabilities import proxy_payload
 from .errors import BridgeError, UnsupportedError
-from .models import CAPABILITIES, page_values
+from .models import page_values
 
 
 class DiscoveryMixin:
@@ -25,26 +25,22 @@ class DiscoveryMixin:
     def capabilities(self, engine=None, account_ref=None, refresh=False, include_parameters=True):
         if refresh:
             raise UnsupportedError('Capability refresh is not supported by this adapter.')
+        if engine is not None:
+            raise BridgeError('unsupported_parameter', 'The execution engine is fixed.')
         if account_ref:
             account = self.resolve_account(account_ref)
-            if engine and account.engine != engine:
-                raise BridgeError('invalid_engine', 'The account engine does not match the requested engine.')
-            engine = account.engine
-        if engine is not None and engine not in CAPABILITIES:
-            raise BridgeError('invalid_engine', 'Unknown engine.')
-        value = capability_payload(engine)
-        if include_parameters:
-            return value
-        if engine is None:
-            return {name: {key: item for key, item in data.items() if key != 'parameters'}
-                    for name, data in value.items()}
-        return {key: item for key, item in value.items() if key != 'parameters'}
+            if not account.proxy_base_url:
+                raise BridgeError('invalid_proxy_account', 'This historical account cannot execute.')
+        return proxy_payload(include_parameters=include_parameters)
 
-    def models(self, engine, *, account_ref=None, refresh=False, include_hidden=False,
+    def models(self, engine=None, *, account_ref=None, refresh=False, include_hidden=False,
                include_deprecated=False, limit=None, cursor=0):
+        if engine is not None:
+            raise BridgeError('unsupported_parameter', 'Models are selected across proxy accounts.')
+        if any(type(flag) is not bool for flag in (refresh, include_hidden, include_deprecated)):
+            raise BridgeError('invalid_input', 'Catalog query flags must be booleans.')
         limit, cursor = page_values(limit, cursor, allow_none=True)
-        result = self.catalog.list(engine, account_ref=account_ref, refresh=refresh,
-                                   include_hidden=include_hidden, include_deprecated=include_deprecated)
+        result = self.routes.models(account_ref=account_ref, refresh=refresh)
         items = result['models']
         page = items[cursor:] if limit is None else items[cursor:cursor + limit]
         result['items'] = page

@@ -8,6 +8,7 @@ from .commands.account_output import print_account_human
 from .commands.error_actions import error_command
 from .commands.contract_actions import contract_command
 from .commands.help import PrettyHelpFormatter  # Compatibility for existing callers.
+from .commands.instance_actions import create_instance, print_instance
 from .commands.model_actions import model_command, print_models
 from .commands.parser import build_parser
 from .commands.usage_output import print_usage, print_consumption
@@ -31,6 +32,9 @@ def main(argv=None):
         return
     if args.action == 'models' and args.models_command is None:
         parser.parse_args(['models', '--help'])
+        return
+    if args.action == 'instances' and args.instances_command is None:
+        parser.parse_args(['instances', '--help'])
         return
     if args.action == 'errors' and args.errors_command is None:
         parser.parse_args(['errors', '--help'])
@@ -63,7 +67,13 @@ def main(argv=None):
         elif args.action=='capabilities':print(json.dumps(bridge.capabilities(),indent=2))
         elif args.action=='models':
             try:
-                print_models(model_command(bridge,args), getattr(args, 'json', False))
+                print_models(model_command(bridge,args), args.json)
+            except (BridgeError,ValueError,TypeError,KeyError) as error:
+                print(json.dumps(error_payload(error),ensure_ascii=False),file=sys.stderr)
+                raise SystemExit(1) from None
+        elif args.action=='instances':
+            try:
+                print_instance(create_instance(bridge,args), args.json)
             except (BridgeError,ValueError,TypeError,KeyError) as error:
                 print(json.dumps(error_payload(error),ensure_ascii=False),file=sys.stderr)
                 raise SystemExit(1) from None

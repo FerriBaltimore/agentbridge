@@ -1,92 +1,107 @@
+"""Public account reads use the one verified local proxy route."""
+
 import json
-import textwrap
+import secrets
+from datetime import datetime, timezone
+
+import pytest
 
 from agentbridge import Account, Bridge
+from agentbridge.errors import BridgeError
+from test_proxy_management import EMPTY_CONFIG, local_management
+from fixtures.test_proxy_account_fixture import seed_authenticated_proxy_account
 
 
-def fake_app_server(path):
-    path.write_text(textwrap.dedent('''\
-        #!/usr/bin/env python3
-        import json, os, sys
-        for line in sys.stdin:
-            request = json.loads(line)
-            method = request.get("method")
-            if "id" not in request:
-                continue
-            if method == "initialize":
-                result = {"serverInfo": {"name": "fake-codex"}}
-            elif method == "account/read":
-                result = {"account": {"type": "chatgpt", "email": "ferran@example.test", "planType": "pro"}, "requiresOpenaiAuth": False}
-            elif method == "account/rateLimits/read":
-                result = {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1900000000}}}
-            elif method == "account/usage/read":
-                result = {"summary": {"lifetimeTokens": 1234}, "dailyUsageBuckets": []}
-            elif method == "model/list":
-                result = {"data": [{"id": "gpt-test", "displayName": "GPT Test",
-                                    "isDefault": True, "supportedReasoningEfforts": ["low", "high"],
-                                    "inputModalities": ["text", "image"]}]}
-            else:
-                result = {}
-            print(json.dumps({"id": request["id"], "result": result}), flush=True)
-    '''))
-    path.chmod(0o700)
+def proxy_responses(*, used_percent="12"):
+    observed_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "/v0/management/auth-files": (200, {
+            "files": [{"name": "one.json", "source": "file", "runtime_only": False,
+                       "provider": "codex", "status": "active", "disabled": False,
+                       "unavailable": False, "auth_index": "private-index",
+                       "account_type": "oauth",
+                       "id_token": {"chatgpt_account_id": "private-account"},
+                       "email": "private@example.test", "cooldowns": [],
+                       "quota": {"observed_at": observed_at,
+                                 "signals": {"X-Codex-Primary-Used-Percent": used_percent}}}],
+        }, {}),
+        "/v0/management/config": (200, EMPTY_CONFIG, {}),
+        "/v0/management/auth-files/models?name=one.json": (
+            200, {"models": [{"id": "gpt-test", "display_name": "Private provider metadata"}]}, {}),
+    }
+
+
+def configured_proxy(bridge, port, *, local=True):
+    """Seed completed login evidence; public creation is covered by OAuth tests."""
+    account = Account("codex-test", "codex", name="Codex test", provider="codex",
+                      supported_models=("gpt-test",),
+                      proxy_base_url=f"http://127.0.0.1:{port}/v1",
+                      key_env="FIXTURE_PROXY_KEY",
+                      management_key_env="FIXTURE_MANAGEMENT_KEY")
+    return seed_authenticated_proxy_account(bridge.store, account,
+        observe_local=local, record_observation=False)
 
 
 def test_account_status_and_usage_are_observed_without_a_model_run(tmp_path, monkeypatch):
-    provider = tmp_path / 'fake-codex'
-    fake_app_server(provider)
-    home = tmp_path / 'home'
-    home.mkdir()
-    monkeypatch.setenv('FAKE_PROVIDER_SECRET', 'secret-value')
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('codex-test', 'codex', home=str(home), command=(str(provider),),
-                            env_names=('FAKE_PROVIDER_SECRET',), name='Codex test'))
+    management_key = secrets.token_hex(16)
+    monkeypatch.setenv("FIXTURE_MANAGEMENT_KEY", management_key)
+    responses = proxy_responses()
+    with local_management(responses) as (port, seen):
+        bridge = Bridge(tmp_path / "state")
+        configured_proxy(bridge, port)
 
-    status = bridge.account_status('codex-test', refresh=True)
-    assert status['authentication']['status'] == 'authenticated'
-    assert status['identity']['email'] == 'ferran@example.test'
-    assert status['configured']['name'] == 'Codex test'
+        status = bridge.account_status("codex-test", refresh=True)
+        assert status["authentication"]["status"] == "active"
+        assert status["authentication"]["source"] == "cliproxy_management"
+        assert status["binding_verified"] is True
+        assert status["configured"]["name"] == "Codex test"
 
-    usage = bridge.account_usage('codex-test', refresh=True)
-    assert usage['source'] == 'codex_app_server'
-    assert usage['quota']['rateLimits']['primary']['usedPercent'] == 12
-    assert usage['account_usage']['summary']['lifetimeTokens'] == 1234
-
-    stored = bridge.store.latest_account_observation('codex-test')
-    assert 'FAKE_PROVIDER_SECRET' not in json.dumps(stored)
-
-
-def test_codex_model_catalog_is_normalized_without_a_model_run(tmp_path, monkeypatch):
-    provider = tmp_path / 'fake-codex'
-    fake_app_server(provider)
-    home = tmp_path / 'home'
-    home.mkdir()
-    monkeypatch.setenv('FAKE_PROVIDER_SECRET', 'secret-value')
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('codex-test', 'codex', home=str(home), command=(str(provider),),
-                            env_names=('FAKE_PROVIDER_SECRET',)))
-
-    catalog = bridge.models('codex', account_ref='codex-test', refresh=True)
-
-    assert catalog['source'] == 'live'
-    assert catalog['models'][0]['id'] == 'gpt-test'
-    assert catalog['models'][0]['reasoning_efforts'] == ['low', 'high']
-    assert catalog['models'][0]['input_modalities'] == ['text', 'image']
+        usage = bridge.account_usage("codex-test")
+        assert usage["source"] == "cliproxy_management"
+        assert usage["supported"] is True and usage["stale"] is False
+        assert len(usage["quota_windows"]) == 1
+        assert usage["quota_windows"][0]["model_id"] == "gpt-test"
+        assert usage["quota_windows"][0]["used_percent"] == 12.0
+        assert usage["quota_windows"][0]["observed_at"] == (
+            responses["/v0/management/auth-files"][1]["files"][0]["quota"]["observed_at"]
+            .replace("+00:00", "Z"))
+        assert bridge.runs() == []
+        assert all(header == f"Bearer {management_key}" for _, header in seen)
+        stored = bridge.store.latest_account_observation("codex-test")
+        assert "private-index" not in json.dumps(stored)
+        assert "private-account" not in json.dumps(stored)
+        assert "private@example.test" not in json.dumps(stored)
+        assert management_key not in json.dumps(stored)
 
 
-def test_account_service_does_not_call_unsupported_providers(tmp_path):
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('cursor-test', 'cursor', command=('cursor',), name='Cursor test'))
-    status = bridge.account_status('cursor-test', refresh=True)
-    assert status['authentication']['status'] == 'unsupported'
-    assert bridge.account_usage('cursor-test')['supported'] is False
+def test_model_catalog_reports_proxy_evidence_without_a_model_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("FIXTURE_MANAGEMENT_KEY", secrets.token_hex(16))
+    with local_management(proxy_responses()) as (port, _):
+        bridge = Bridge(tmp_path / "state")
+        configured_proxy(bridge, port)
+        catalog = bridge.models(account_ref="Codex test", refresh=True)
+
+    assert catalog["source"] == "agentbridge_routing"
+    assert catalog["models"][0]["id"] == "gpt-test"
+    assert catalog["models"][0]["providers"] == ["codex"]
+    assert catalog["models"][0]["availability"] == "proxy_observed"
+    assert catalog["models"][0]["observed_account_refs"] == ["Codex test"]
+    assert bridge.runs() == []
 
 
-def test_account_status_reports_no_observation_without_claiming_authentication(tmp_path):
-    home = tmp_path / 'home'
-    home.mkdir()
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('codex-test', 'codex', home=str(home)))
-    status = bridge.account_status('codex-test')
-    assert status['authentication']['status'] == 'not_observed'
-    assert status['reason'] == 'no_observation'
+def test_public_registration_cannot_create_a_second_account_flow(tmp_path):
+    bridge = Bridge(tmp_path / "state")
+    account = Account("old", "codex", home=str(tmp_path / "native"))
+    with pytest.raises(BridgeError) as error:
+        bridge.register(account)
+    assert error.value.code == "authentication_required"
+    assert bridge.accounts() == []
+
+
+def test_unobserved_proxy_does_not_claim_authentication_or_zero_quota(tmp_path):
+    bridge = Bridge(tmp_path / "state")
+    configured_proxy(bridge, 8317, local=False)
+    status = bridge.account_status("codex-test")
+    assert status["authentication"]["status"] == "not_observed"
+    assert status["reason"] == "no_observation"
+    assert bridge.store.latest_account_observation("codex-test") is None

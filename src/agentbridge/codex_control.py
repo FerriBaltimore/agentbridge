@@ -131,7 +131,7 @@ class CodexControl:
 
     def execute(self):
         options = self.payload['options']
-        self.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '0.1.0'}})
+        self.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.0.0'}})
         self.channel.send({'method': 'initialized', 'params': {}})
         params = {'cwd': self.payload['cwd'], 'approvalPolicy': 'on-request'
                   if options['permission_mode'] == 'default' else 'never',

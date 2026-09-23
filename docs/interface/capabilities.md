@@ -1,53 +1,53 @@
 # Capability model
 
-Adapters declare each operation as native, adapter, fallback, unsupported or
-unknown, with limitations and requirements. `declaration_scope` is
-`adapter_implementation`; `runtime_provider_support_verified` is false. These
-are implementation declarations, not fresh native account observations. The
-declaration is part of capabilities.get, not scattered across callers.
+`capabilities.get` declares support, maturity, limitations and requirements
+for the one v2 execution path: Codex through a dedicated local CLIProxyAPI
+sidecar. The upstream account provider may be `codex`, `claude` or `grok`.
+A fixture-tested route or model catalogue is not live provider acceptance.
+`declaration_scope=adapter_implementation` describes local behavior;
+`runtime_provider_support_verified` requires separate provider evidence.
 
-These labels describe adapter internals and evidence, not public API names.
-Callers always use AgentBridge operations such as models.list and
-accounts.status. A native Codex method, a Claude CLI translation and a Cursor
-SDK call must produce the same normalized response shape and stable error
-codes.
+| Capability | V2 behavior | Acceptance limit |
+| --- | --- | --- |
+| Execute a turn | Codex Responses over a verified proxy route | Live acceptance by provider and model pending |
+| Account login | GrantBridge coordinates OAuth through CLIProxyAPI Management API | Same-host browser; live OAuth acceptance pending |
+| Credential custody and refresh | CLIProxyAPI owns upstream credentials | Provider refresh behavior needs live acceptance |
+| Account status and model list | Fresh local sidecar identity and model observations | Presence does not prove entitlement |
+| Account usage and quota | Attributable observations where sidecar reports them | Missing values stay unknown |
+| Continuation | Same Codex thread on one route; bounded portable context after account change | Cross-account continuation has fixture evidence |
+| Stop | Explicit supervised cancellation | Unknown outcome is not retried |
+| Tool permissions | Codex host response channel | Provider and model behavior needs acceptance |
+| Images and subagents | Codex request and event mapping where supported | Provider and model support varies |
 
-| Capability | Codex | Claude | Cursor |
-|---|---|---|---|
-| Execute a turn | native | native | adapter |
-| Account status | native app-server | adapter with provider probe limits | adapter with provider probe limits |
-| Account usage and quota | native plus local observation | native OAuth windows plus turn observations | session usage; account quota unavailable |
-| Model catalog | native model/list | native initialize | SDK catalog |
-| Per-model effort | native | adapter | reported model parameter only |
-| Context window selection | unsupported | unsupported | unsupported |
-| Native continuation | native | native | SDK resume |
-| Stop | process group | process group | SDK or process |
-| Native transfer | version-gated | version-gated | unsupported |
-| Portable transfer | adapter | adapter | adapter |
-| Tool permissions | native options and host responses | native options and host responses | SDK tool policy only |
-| Subagents | model-dependent | model-dependent | SDK-dependent |
-| Image input | inline image input | inline image input | inline image input |
+The historical direct Codex and Claude Code adapter matrix is recorded
+as earlier implementation evidence in
+[provider-acceptance.md](provider-acceptance.md). Those adapters no longer
+admit new execution or account creation. The public API does not select an
+engine; `model` and optional `account_ref` determine the proxy route.
 
-See implementation-status.md for the remaining work behind these declarations. Each operation and parameter
-also carries a `maturity` field: `implemented`, `fixture_tested`,
-`provider_tested` or `unsupported`. Capability defaults remain conservative even after scoped operator acceptance;
-provider-tested declarations require a recorded acceptance run against that provider
-and version. `capabilities.get` includes `acceptance.provider_tested: false`
-unless the deployment has matching acceptance evidence.
-
-## Parameter validation
-
-Common parameters are limited to values with comparable meaning across engines:
-model, effort, workspace_path, timeout_ms, permission_mode, sandbox_mode,
-allowed_tools, max_turns and max_budget. Context-window selection remains unsupported. Bounded inline attachments and
-Codex/Claude host approvals are specified in [interactive-inputs.md](interactive-inputs.md).
-
-The reserved provider_options surface is currently unsupported. Unknown fields and
-unsupported values fail admission with unsupported or unsupported_parameter; they are never
-silently ignored.
+Each operation and parameter carries a maturity value: `implemented`,
+`fixture_tested`, `provider_tested` or `unsupported`. Provider-tested requires
+recorded acceptance against the specific provider, model and version.
+`capabilities.get` must not infer acceptance from a declared model or an OAuth
+file. Unknown values and unsupported parameters fail admission instead of
+being silently ignored.
 
 ## Account selection
 
-`account_ref` is required for instance creation. Fullbrain selects an account
-from the safe `accounts.list` projection, records that selection, and passes it
-explicitly. AgentBridge never changes accounts silently during an operation.
+Automatic routing requires fresh local Management API evidence: exactly one
+active upstream auth file, a stable identity, a clean credential inventory and
+the exact requested model. Both proxy client and management key references
+must be present. A pinned route meets the same requirements. Fresh applicable
+quota guides least-used selection; unknown quota is not zero. The route is
+persisted before execution and remains fixed through the turn. A switch may
+occur only before a later admitted turn and uses bounded portable context.
+Stop and recovery never trigger a hidden account switch or rerun.
+
+## Parameter validation
+
+Common parameters include model, effort, workspace_path, timeout_ms,
+permission_mode, sandbox_mode, allowed_tools, max_turns and max_budget where
+supported. Context-window selection remains unsupported. Bounded inline
+attachments and Codex host approvals are specified in
+[interactive-inputs.md](interactive-inputs.md). The reserved provider_options
+surface is unsupported until its parameters have a reviewed contract.

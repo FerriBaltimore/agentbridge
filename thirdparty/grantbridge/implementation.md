@@ -1,58 +1,38 @@
-# Implementation sequence
+# GrantBridge integration sequence
 
-The first implementation stage is complete in the GrantBridge checkout and
-AgentBridge. The files and APIs below remain the boundary for the later
-activation, relogin and remote-host work.
+## Delivered in the v2 working tree
 
-## Stage 1: make the adapter explicit, complete
+1. AgentBridge uses one public account flow: `accounts.login.start/status/check/
+   complete/cancel`, with `accounts login` as its blocking CLI form.
+2. The GrantBridge stdio adapter exposes `auth.proxy_start`,
+   `auth.proxy_status` and `auth.proxy_cancel`. The Python client calls these
+   over a trusted private pipe and sanitizes returned state.
+3. A new account starts on an empty, dedicated CLIProxyAPI sidecar. GrantBridge
+   coordinates its Management API OAuth. CLIProxyAPI stores the upstream
+   credential. AgentBridge records route references and safe evidence only.
+4. Completion requires fresh single-credential inventory, identity and model
+   checks, then binds the account atomically. Pinned and automatic execution
+   use the same Management API verification.
+5. Deterministic tests include a Python→Node→fake Management API subprocess.
+   These tests use no real account and do not prove provider OAuth acceptance.
 
-1. Add a small public GrantBridge adapter entry point for JSON-RPC over stdio.
-   It should expose version information, provider catalog, `auth.start`,
-   `auth.get`, `auth.cancel`, `auth.check` and a bounded shutdown.
-2. Keep one sidecar instance per configured data directory. Derive the owner
-   from the authenticated host session and never trust an arbitrary owner
-   supplied by a client.
-3. Define a versioned safe projection. Do not expose `store.vault`, internal
-   filenames, raw callback queries or provider exception bodies.
-4. Make cancellation idempotent at the adapter boundary and add request-key
-   idempotency for starts.
+## Next acceptance work
 
-## Stage 2: activate accounts safely
+- Complete controlled live OAuth from a fresh sidecar for Codex, Claude and
+  Grok separately. Record provider, versions, account identity, callback mode,
+  observed models and exact unsupported paths. A returned authorization URL
+  alone is not a successful login.
+- Verify CLIProxyAPI credential refresh, attribution and model execution with
+  each provider. Observe actual quota separately; missing quota remains
+  unknown.
+- Exercise Codex tool requests, Stop, restart and account changes through the
+  actual sidecar. A route stays fixed through one turn, including tool calls.
+- Design and accept a remote browser/callback route before claiming mobile
+  login. The initial local flow assumes browser and sidecar share a host.
+- Maintain one credential per dedicated sidecar. Add a proxy-level credential
+  pin or an external exclusive configuration lock if a deployment can change
+  sidecar contents during an active turn.
 
-1. Add a stable account binding that keeps the existing AgentBridge account ID
-   separate from GrantBridge's temporary attempt ID.
-2. For Claude and Codex, activate an isolated native home only after identity
-   and fresh-process checks pass. Preserve the old home while a relogin is
-   pending or fails.
-3. For Cursor and token APIs, add a private credential resolver. Reuse
-   AgentBridge's existing worker secret pipe rather than putting values in
-   argv, SQLite or a command prompt.
-4. Coordinate native CLI writes, account checks, relogin and active sessions so a
-   credential update cannot replace a home while a worker is using it.
-5. Add disconnect and reauthorization operations with explicit states and
-   auditable evidence.
-
-## Stage 3: make remote use a product surface
-
-1. Add an authenticated host route for the hosted browser frame and input
-   transport. The route must bind the browser attempt to its owner and expire
-   with the attempt.
-2. Keep native loopback callbacks on the server. Use hosted Chrome, device
-   polling or a registered HTTPS callback when the operator is on a phone.
-3. Show the same safe state on CLI and mobile: starting, awaiting user,
-   exchanging, authorized, checking, failed, cancelled and expired.
-4. Add reconnect and restart behavior. A sidecar restart must reconcile pending
-   attempts; it must never silently start a second login.
-
-## Stage 4: verification gates
-
-- AgentBridge deterministic suites remain green.
-- GrantBridge deterministic suites, package build and installed smoke remain
-  green.
-- A cross-repository fake-provider suite proves activation, relogin, cleanup
-  and secret non-disclosure.
-- Separate live acceptance proves Claude, Codex, Cursor, Google and a
-  configurable OAuth provider from a fresh account, including authenticated
-  operation and restart.
-- The report names the exact provider, runtime, account, operation and
-  untested paths. A URL-only smoke is never reported as a successful login.
+Historical native GrantBridge provider homes and key resolution are
+retained for old records only. They are not alternative v2 account creation
+or execution paths.

@@ -8,13 +8,14 @@ from agentbridge import error_observer as observer
 from agentbridge.catalog_process import read_output
 from agentbridge.provider_contracts import ContractRegistry
 from agentbridge.provider_errors import normalize
+from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
 
 def admitted(tmp_path, turn_id='run'):
     bridge = Bridge(tmp_path / 'state')
-    account = Account('fixture', 'codex', home=tmp_path / 'home')
-    bridge.register(account)
-    session = bridge.session(account.id, tmp_path)
+    account = register_verified_proxy_account(bridge.store, 'fixture', 19432)
+    bridge.store.add_session('fixture-session', account.id, str(tmp_path), 'fixture-model')
+    session = bridge.get_session('fixture-session')
     bridge.store.admit(turn_id, session['id'], 'fixture', RunOptions(), None)
     return bridge, account
 
@@ -53,12 +54,9 @@ def test_native_version_bad_output_timeout_and_exit_are_unknown(tmp_path, monkey
     assert observer.provider_version(Account('fixture', 'codex', home=tmp_path)) is None
 
 
-def test_custom_launcher_is_not_probed_and_cursor_uses_local_distribution(tmp_path, monkeypatch):
+def test_custom_launcher_is_not_probed(tmp_path, monkeypatch):
     monkeypatch.setattr(observer, 'read_output', lambda *a, **kw: pytest.fail('No native process expected'))
     assert observer.provider_version(Account('custom', 'codex', home=tmp_path, command=('fixture',))) is None
-    monkeypatch.setattr(observer.importlib.metadata, 'version', lambda name:
-                        '1.0.31' if name == 'cursor-sdk' else pytest.fail('Wrong distribution'))
-    assert observer.provider_version(Account('fixture', 'cursor')) == '1.0.31'
 
 
 @pytest.mark.parametrize('version', ['0.153.0', None, 'future-private-value', False])

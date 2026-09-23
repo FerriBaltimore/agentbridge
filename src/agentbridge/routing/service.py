@@ -1,0 +1,202 @@
+"""Model-first route discovery from safe local proxy observations."""
+
+import os
+import time
+
+from ..errors import BridgeError
+from ..proxy import ManagementClient, ProxyRoute
+from ..quota_windows import timestamp
+from .selector import QuotaObservation, RouteCandidate, select_route
+
+
+OBSERVATION_TTL = 30
+
+
+class RoutingService:
+    def __init__(self, store, accounts, managed_proxy=None):
+        self.store = store
+        self.accounts = accounts
+        self.managed_proxy = managed_proxy
+
+    def _ensure_managed(self, account):
+        if self.managed_proxy and self.managed_proxy.is_managed(account.to_dict(), account.id):
+            self.managed_proxy.ensure(account.id, account.proxy_base_url)
+
+    def _record_failure(self, account, code):
+        self.store.account_observation(account.id, 'cliproxy_management', 'unknown',
+                                       {'verified': False, 'reason': code})
+        self.store.usage_observation(account.id, 'cliproxy_management', 'account',
+                                     {'supported': False, 'quota_windows': [],
+                                      'reason': code}, stale=True)
+
+    def observe(self, account, *, include_catalog=True):
+        """Persist only an allowlisted observation; a failed read is unknown."""
+        if not account.management_key_env:
+            return None
+        route = ProxyRoute(account.id, account.proxy_base_url, account.key_env)
+        try:
+            self._ensure_managed(account)
+            if not self.store.proxy_login_origin(account):
+                raise BridgeError('authentication_required', 'This proxy account has no completed GrantBridge login.')
+            management = ManagementClient(route, account.management_key_env)
+            data = management.observe()
+            if (data.get('provider') != account.provider or data.get('status') != 'active'
+                    or data.get('disabled') is not False or data.get('unavailable') is not False):
+                raise BridgeError('proxy_binding_unverified', 'The local proxy account is not usable.')
+            self.store.bind_proxy_account(account.id, data['binding_fingerprint'],
+                                          data['identity_fingerprint'])
+            data = {key: value for key, value in data.items()
+                    if key not in {'binding_fingerprint', 'identity_fingerprint', 'email'}}
+            data['binding_verified'] = True
+            if include_catalog:
+                catalog = management.catalog()
+                observed_ids = {item['id'] for item in data['models']}
+                data['model_metadata'] = {key: value for key, value in catalog.items()
+                                          if key in observed_ids}
+                data['model_metadata_source'] = ('cliproxy_client_models'
+                                                 if data['model_metadata'] else None)
+        except BridgeError as error:
+            self._record_failure(account, error.code)
+            return None
+        self.store.account_observation(account.id, 'cliproxy_management',
+                                       data.get('status') or 'unknown', data)
+        snapshot = self._usage_snapshot(account.id, data)
+        self.store.usage_observation(account.id, 'cliproxy_management', 'account',
+                                     {key: snapshot[key] for key in ('supported', 'quota_windows', 'reason')},
+                                     stale=snapshot['stale'])
+        return data
+
+    def observation(self, account, *, refresh=False, now=None, include_catalog=True):
+        if not account.proxy_base_url:
+            return None
+        try:
+            self._ensure_managed(account)
+        except BridgeError as error:
+            self._record_failure(account, error.code)
+            return self.store.latest_account_observation(account.id)
+        if not self.store.proxy_login_origin(account):
+            if refresh:
+                self.observe(account)
+            return None
+        now = time.time() if now is None else now
+        saved = self.store.latest_account_observation(account.id)
+        fresh = (saved is not None and saved['source'] == 'cliproxy_management'
+                 and 0 <= now - saved['observed_at'] < OBSERVATION_TTL)
+        if refresh or not fresh:
+            self.observe(account, include_catalog=include_catalog)
+            saved = self.store.latest_account_observation(account.id)
+        return saved if saved and saved['source'] == 'cliproxy_management' else None
+
+    @staticmethod
+    def _verified(account, saved):
+        if not saved:
+            return False
+        data = saved['data']
+        return (data.get('account_id') == account.id
+                and data.get('provider') == account.provider
+                and data.get('status') == 'active'
+                and data.get('disabled') is False
+                and data.get('unavailable') is False
+                and data.get('binding_verified') is True
+                and isinstance(data.get('models'), list))
+
+    def candidates(self, model, *, provider=None, refresh=False):
+        accounts = [account for account in self.accounts.list()
+                    if account.proxy_base_url and model in account.supported_models
+                    and (provider is None or account.provider == provider)]
+        loads = self.store.route_load([account.id for account in accounts])
+        result = []
+        for account in accounts:
+            saved = self.observation(account, refresh=refresh)
+            verified = self._verified(account, saved) and bool(os.environ.get(account.key_env))
+            models = {item.get('id'): item for item in saved['data']['models']
+                      if isinstance(item, dict)} if verified else {}
+            declared_and_seen = tuple(item for item in account.supported_models if item in models)
+            item = models.get(model) if verified else None
+            quotas = ()
+            if item and item.get('used_percent') is not None:
+                observed_at = timestamp(item.get('quota_observed_at'))
+                if observed_at is not None:
+                    quotas = (QuotaObservation(item['used_percent'], observed_at, model_id=model),)
+            load = loads[account.id]
+            result.append(RouteCandidate(
+                account_id=account.id, models=declared_and_seen if verified else account.supported_models,
+                quota=quotas, health='healthy' if verified else 'unhealthy',
+                cooldown_until=timestamp(item.get('cooldown_until')) if item else None,
+                in_flight=load['in_flight'], assigned_turns=load['assigned_turns']))
+        return result
+
+    def select(self, model, *, provider=None, refresh=True):
+        return select_route(model, self.candidates(model, provider=provider, refresh=refresh))
+
+    def models(self, *, account_ref=None, refresh=False):
+        """Return a configured catalog, marking proxy observations separately."""
+        accounts = [account for account in self.accounts.list() if account.proxy_base_url]
+        if account_ref is not None:
+            selected = self.accounts.resolve(account_ref)
+            accounts = [account for account in accounts if account.id == selected.id]
+        grouped = {}
+        for account in accounts:
+            saved = self.observation(account, refresh=refresh, include_catalog=True)
+            seen = ({item.get('id') for item in saved['data']['models'] if isinstance(item, dict)}
+                    if self._verified(account, saved) else set())
+            metadata = saved['data'].get('model_metadata', {}) if seen else {}
+            for model in account.supported_models:
+                row = grouped.setdefault(model, {'id': model, 'display_name': model,
+                    'availability': 'configured_unverified', 'source': 'account_configuration',
+                    'candidate_account_refs': [], 'observed_account_refs': [],
+                    'providers': [], 'reasoning_efforts': [], 'context_windows': [],
+                    'input_modalities': [], 'account_capabilities': []})
+                reference = account.name or account.id
+                row['candidate_account_refs'].append(reference)
+                controls = metadata.get(model, {}) if model in seen else {}
+                row['account_capabilities'].append({
+                    'account_ref': reference, 'provider': account.provider,
+                    'observed': model in seen,
+                    'reasoning_efforts': controls.get('reasoning_efforts', []),
+                    'default_reasoning_effort': controls.get('default_reasoning_effort'),
+                    'context_windows': controls.get('context_windows', []),
+                    'input_modalities': controls.get('input_modalities', []),
+                    'metadata_source': saved['data'].get('model_metadata_source')
+                    if controls else None,
+                })
+                if model in seen:
+                    row['observed_account_refs'].append(reference)
+                    row['availability'] = 'proxy_observed'
+                if account.provider not in row['providers']:
+                    row['providers'].append(account.provider)
+        for row in grouped.values():
+            observed = [item for item in row['account_capabilities'] if item['observed']]
+            if observed:
+                row['reasoning_efforts'] = [value for value in observed[0]['reasoning_efforts']
+                                            if all(value in item['reasoning_efforts'] for item in observed)]
+                windows = [item['context_windows'][0] for item in observed
+                           if item['context_windows']]
+                if len(windows) == len(observed):
+                    row['context_windows'] = [min(windows)]
+                row['input_modalities'] = [value for value in observed[0]['input_modalities']
+                                           if all(value in item['input_modalities'] for item in observed)]
+        items = [grouped[key] for key in sorted(grouped)]
+        return {'source': 'agentbridge_routing', 'stale': any(
+            item['availability'] != 'proxy_observed' for item in items), 'models': items}
+
+    def usage(self, account, *, refresh=False):
+        saved = self.observation(account, refresh=refresh)
+        return self._usage_snapshot(account.id, saved['data'] if self._verified(account, saved)
+                                    else None, failure=saved['data'].get('reason') if saved else None)
+
+    @staticmethod
+    def _usage_snapshot(account_id, data, *, failure=None):
+        rows = data.get('models', []) if isinstance(data, dict) else []
+        windows = [{'model_id': item['id'], 'used_percent': item['used_percent'],
+                    'observed_at': item.get('quota_observed_at')}
+                   for item in rows if isinstance(item, dict) and item.get('used_percent') is not None]
+        now = time.time()
+        fresh = bool(windows) and all(
+            (observed := timestamp(item['observed_at'])) is not None
+            and 0 <= now - observed < 60 for item in windows)
+        reason = None if fresh else (failure or (
+            'upstream_quota_stale' if windows else 'upstream_quota_unavailable'))
+        return {'account_id': account_id, 'source': 'cliproxy_management' if data or failure else None,
+                'scope': 'account', 'supported': bool(windows),
+                'stale': not fresh, 'quota_windows': windows, 'reason': reason}

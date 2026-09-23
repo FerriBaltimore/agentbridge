@@ -1,9 +1,7 @@
 """Execute account CLI commands through the SDK."""
 from dataclasses import asdict, is_dataclass
-from uuid import uuid4
 
 from ..errors import BridgeError
-from ..models import Account
 
 
 def account_dict(account):
@@ -12,24 +10,10 @@ def account_dict(account):
 
 def account_command(bridge, args):
     command = args.accounts_command
-    if command == "add":
-        account = Account(
-            id=uuid4().hex,
-            engine=args.engine,
-            home=args.home,
-            name=args.name,
-            email=args.email,
-            env_names=tuple(args.env_names or ()),
-            key_env=args.key_env,
-            command=tuple(args.command or ()),
-        )
-        return account_dict(bridge.register(account))
     if command == "list":
         return [account_dict(account) for account in bridge.accounts()]
-    if command == 'quota-reset':
-        account = bridge.resolve_account(args.name)
-        args.account_name = account.name
-        return bridge.account_quota_reset(account.id, idempotency_key=args.idempotency_key, credit_id=args.credit_id)
+    if command == "delete":
+        return bridge.account_delete(args.name)
     if command in {"status", "usage", "history", "check"}:
         account = bridge.resolve_account(args.name)
         args.account_name, args.id = account.name, account.id
@@ -55,7 +39,7 @@ def account_command(bridge, args):
             seen.add(status)
             if status in ("starting", "awaiting_user"):
                 if status == "starting":
-                    print(f"Starting authentication for {args.name} ({args.engine})...")
+                    print(f"Starting authentication for {args.name} ({args.provider})...")
                 if attempt.get("authorization_url") or attempt.get("authorizationUrl"):
                     print("Open this URL to continue:")
                     print(f"  {attempt.get('authorization_url') or attempt.get('authorizationUrl')}")
@@ -63,11 +47,14 @@ def account_command(bridge, args):
                     print(f"Verification code: {attempt.get('user_code') or attempt.get('userCode')}")
                 print("Waiting for provider confirmation...")
             elif status == "exchanging":
-                print("Provider confirmed the login. Verifying the native account...")
+                print("Provider confirmed the login. Verifying the proxy account...")
 
         result = bridge.account_login(
-            engine=args.engine,
+            provider=args.provider,
             name=args.name,
+            proxy_base_url=args.proxy_base_url,
+            key_env=args.key_env,
+            management_key_env=args.management_key_env,
             email=args.email,
             grantbridge_root=args.grantbridge_root,
             data_dir=args.grantbridge_data_dir,
@@ -76,13 +63,14 @@ def account_command(bridge, args):
             timeout=args.timeout,
             poll_interval=args.poll_interval,
             on_attempt=progress,
-            inference=args.inference,
         )
         args.account_name = result["account"]["name"]
         return result
     if command == "login-start":
         return bridge.account_login_start(
-            engine=args.engine, name=args.name, email=args.email,
+            provider=args.provider, name=args.name,
+            proxy_base_url=args.proxy_base_url, key_env=args.key_env,
+            management_key_env=args.management_key_env, email=args.email,
             grantbridge_root=args.grantbridge_root, data_dir=args.grantbridge_data_dir,
             mode=args.mode, browser=args.browser, request_key=args.request_key,
             owner_ref=args.owner_ref)
@@ -97,7 +85,7 @@ def account_command(bridge, args):
         if command == "login-status":
             return bridge.account_login_status(**options)
         if command == "login-check":
-            return bridge.account_login_check(**options, inference=args.inference)
+            return bridge.account_login_check(**options)
         if command == "login-complete":
             return bridge.account_login_complete(**options)
         return bridge.account_login_cancel(**options)

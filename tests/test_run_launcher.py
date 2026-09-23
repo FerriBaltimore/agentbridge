@@ -1,7 +1,6 @@
-"""Faults at the private worker-input boundary never restart native work."""
+"""Faults at the private worker-input boundary never restart a proxy turn."""
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
@@ -9,16 +8,18 @@ import time
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions, run_launcher
+from agentbridge import Bridge, RunOptions, run_launcher
 from agentbridge.errors import BridgeError
 from agentbridge.process import identity
+from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
 
 def admitted(tmp_path):
     bridge = Bridge(tmp_path / 'store')
-    bridge.register(Account('fixture', 'cursor', command=(sys.executable, '-c', 'pass')))
-    session = bridge.session('fixture', tmp_path, model='fixture')
-    run_id, _ = bridge.store.admit('fixture-run', session['id'], 'test', RunOptions(), 'same-request')
+    register_verified_proxy_account(bridge.store, 'fixture', 8317)
+    session_id, _ = bridge.store.add_session('fixture-session', 'fixture', str(tmp_path),
+                                             'fixture-model')
+    run_id, _ = bridge.store.admit('fixture-run', session_id, 'test', RunOptions(), 'same-request')
     return bridge, run_id
 
 

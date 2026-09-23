@@ -1,14 +1,14 @@
-"""Minimal stdio client for the optional GrantBridge authentication adapter.
+"""Stdio client for the GrantBridge proxy OAuth adapter.
 
-Attempt operations transport account IDs and authentication projections. The
-private credentials method hands a secret to execution only; GrantBridge owns
-its vault and native profile directories.
+GrantBridge coordinates OAuth through CLIProxyAPI's local Management API.
+CLIProxyAPI owns the resulting provider credential and token refresh.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import subprocess
 import threading
@@ -27,8 +27,11 @@ class GrantBridgeClient:
             if configured:
                 root = Path(configured).expanduser().resolve()
             else:
-                candidates = [Path(__file__).resolve().parents[3] / "grantbridge"]
-                root = next((candidate for candidate in candidates if candidate.is_dir()), None)
+                candidates = (Path.cwd() / "grantbridge",
+                              Path.cwd().parent / "grantbridge",
+                              Path(__file__).resolve().parents[3] / "grantbridge")
+                root = next((candidate for candidate in candidates
+                             if (candidate / "scripts" / "agentbridge-adapter.mjs").is_file()), None)
             if root is None:
                 raise BridgeError("grantbridge_unavailable", "GrantBridge is not configured. Pass --grantbridge-root or set AGENTBRIDGE_GRANTBRIDGE_ROOT.")
             adapter = root / "scripts" / "agentbridge-adapter.mjs"
@@ -104,32 +107,27 @@ class GrantBridgeClient:
             finally:
                 selector.close()
 
-    def start(self, *, owner, engine, mode="browser", browser="same_host", request_key=None, auto_check=False):
-        return self._request("auth.start", {"owner": owner, "engine": engine, "mode": mode,
-                                             "browser": browser, "request_key": request_key,
-                                             "auto_check": auto_check})
+    @staticmethod
+    def _proxy_key(name):
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', name):
+            raise BridgeError('invalid_environment', 'Use an environment variable name for the management key.')
+        value = os.environ.get(name)
+        if not value or len(value) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise BridgeError('credential_unavailable', 'The local proxy management key is unavailable.')
+        return value
 
-    def get(self, attempt_id, owner):
-        return self._request("auth.get", {"attempt_id": attempt_id, "owner": owner})
+    def proxy_start(self, provider, base_url, management_key_env):
+        """Ask GrantBridge to start OAuth in a dedicated local proxy."""
+        return self._request('auth.proxy_start', {'provider': provider, 'base_url': base_url,
+            'management_key': self._proxy_key(management_key_env)})
 
-    def find(self, request_key, owner):
-        return self._request('auth.find', {'request_key': request_key, 'owner': owner})
+    def proxy_status(self, state, provider, base_url, management_key_env):
+        return self._request('auth.proxy_status', {'state': state, 'provider': provider,
+            'base_url': base_url, 'management_key': self._proxy_key(management_key_env)})
 
-    def cancel(self, attempt_id, owner):
-        return self._request("auth.cancel", {"attempt_id": attempt_id, "owner": owner})
-
-    def check(self, attempt_id, owner, *, inference=False):
-        return self._request("auth.check", {"attempt_id": attempt_id, "owner": owner, 'inference': inference})
-
-    def activate(self, attempt_id, owner):
-        return self._request("auth.activate", {"attempt_id": attempt_id, "owner": owner})
-
-    def credentials(self, attempt_id, owner):
-        """Private execution channel. Never return this result through public RPC."""
-        return self._request('auth.credentials', {'attempt_id': attempt_id, 'owner': owner})
-
-    def submit_code(self, attempt_id, owner, code):
-        return self._request("auth.submit_code", {"attempt_id": attempt_id, "owner": owner, "code": code})
+    def proxy_cancel(self, state, provider, base_url, management_key_env):
+        return self._request('auth.proxy_cancel', {'state': state, 'provider': provider,
+            'base_url': base_url, 'management_key': self._proxy_key(management_key_env)})
 
     def close(self):
         process = self.process

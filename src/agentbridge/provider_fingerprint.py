@@ -1,7 +1,5 @@
 """Bounded offline provider evidence. Fingerprints never grant compatibility."""
-import ast
 import hashlib
-import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -212,86 +210,6 @@ def _native(engine):
                 'structural_hash': digest, 'surface_names': names, 'limitations': limitations}
 
 
-def _type_ast(content):
-    try:
-        module = ast.parse(content)
-    except (SyntaxError, ValueError, RecursionError):
-        raise _invalid() from None
-    if sum(1 for _ in ast.walk(module)) > MAX_NODES:
-        raise _invalid()
-    result = {}
-    for item in module.body:
-        if isinstance(item, ast.ClassDef) and not item.name.startswith('_'):
-            fields, methods = {}, {}
-            for child in item.body:
-                if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
-                    fields[child.target.id] = {'annotation': ast.dump(child.annotation, include_attributes=False),
-                                              'default': ast.dump(child.value, include_attributes=False) if child.value else None}
-                elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and not child.name.startswith('_'):
-                    methods[child.name] = {'args': ast.dump(child.args, include_attributes=False),
-                                          'returns': ast.dump(child.returns, include_attributes=False) if child.returns else None,
-                                          'decorators': [ast.dump(d, include_attributes=False) for d in child.decorator_list],
-                                          'async': isinstance(child, ast.AsyncFunctionDef)}
-            result[item.name] = {'bases': [ast.dump(base, include_attributes=False) for base in item.bases],
-                                 'decorators': [ast.dump(d, include_attributes=False) for d in item.decorator_list],
-                                 'fields': fields, 'methods': methods}
-        elif isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
-            name = item.targets[0].id
-            if not name.startswith('_'):
-                result[name] = ast.dump(item.value, include_attributes=False)
-    required = {'AgentOptions', 'LocalAgentOptions', 'SendOptions', 'SDKModel', 'RunResult', 'RunResultStatus'}
-    if not required <= result.keys():
-        raise _invalid()
-    return result
-
-
-def _bridge_constants(content):
-    try:
-        source = content.decode('utf-8')
-    except UnicodeError:
-        raise _invalid() from None
-    result = {}
-    for name in ('PROTOCOL_VERSION', 'CAPABILITIES'):
-        matches = re.findall(r'export const CURSOR_SDK_BRIDGE_' + name + r'\s*=\s*(.*?);', source, re.S)
-        if len(matches) != 1:
-            raise _invalid()
-        # The distributed JavaScript array has a trailing comma, unlike JSON.
-        result[name] = _json(re.sub(r',\s*\]', ']', matches[0]))
-    caps = result['CAPABILITIES']
-    if (not _name(result['PROTOCOL_VERSION']) or not isinstance(caps, list)
-            or len(caps) > MAX_FILES or any(not _name(x) for x in caps)):
-        raise _invalid()
-    result['CAPABILITIES'] = sorted(set(caps))
-    return result
-
-
-def _cursor():
-    try:
-        distribution = importlib.metadata.distribution('cursor-sdk')
-    except importlib.metadata.PackageNotFoundError:
-        raise BridgeError('provider_unavailable', 'The Cursor SDK is unavailable in this interpreter.') from None
-    root = Path(distribution.locate_file('cursor_sdk'))
-    types = _type_ast(_read(root / 'types.py'))
-    constants = _bridge_constants(_read(root / '_vendor/bridge/dist/constants.js'))
-    package = _json(_read(root / '_vendor/bridge/node_modules/@cursor/sdk/package.json'))
-    if not isinstance(package, dict) or package.get('name') != '@cursor/sdk':
-        raise _invalid()
-    version, native_version = distribution.version, package.get('version')
-    limitations = ['offline_evidence_only', 'no_account_or_backend_acceptance', 'exact_binding_review_required',
-                   'ast_does_not_prove_implementation_semantics', 'bridge_layout_is_versioned_compatibility']
-    if not isinstance(version, str) or re.fullmatch(VERSION, version) is None:
-        version = None
-        limitations.append('unrecognized_version_output')
-    if not isinstance(native_version, str) or re.fullmatch(VERSION, native_version) is None or native_version != version:
-        raise BridgeError('provider_contract_changed', 'The bundled Cursor SDK version does not match its Python package.',
-                          details={'engine': 'cursor', 'version': version, 'component': 'cursor-sdk'})
-    evidence = {'types': types, 'bridge': constants}
-    return {'component': 'cursor-sdk', 'version': version, 'evidence_kind': 'cursor_python_ast_bridge_v1',
-            'structural_hash': canonical_hash(evidence),
-            'surface_names': sorted(['python:' + name for name in types] + constants['CAPABILITIES']),
-            'limitations': limitations}
-
-
 def inspect_surface(engine):
     """Inspect installed defaults only; no accounts, custom commands or inference.
 
@@ -299,6 +217,6 @@ def inspect_surface(engine):
     Claude's structural_hash intentionally contains an observation-only help
     digest; its evidence_kind prohibits treating it as structural equivalence.
     """
-    if engine not in ('codex', 'claude', 'cursor'):
+    if engine not in ('codex', 'claude'):
         raise BridgeError('invalid_engine', 'Unknown provider for offline inspection.')
-    return _cursor() if engine == 'cursor' else _native(engine)
+    return _native(engine)

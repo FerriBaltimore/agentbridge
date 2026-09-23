@@ -83,7 +83,7 @@ def test_arbitrary_provider_versions_are_not_stored(learning, version):
 def test_unknown_secret_native_code_and_body_never_reach_learning_store(learning):
     value = capture({'code': 'unknown-secret-provider-code', 'message': 'secret-password',
                      'authorization': 'secret-token', 'data': {'password': 'secret-value'}})
-    case = learning.capture('cursor', value)
+    case = learning.capture('claude', value)
     learning.propose(case['id'], {'status': 'insufficient_evidence', 'target_code': None})
     with learning.store.connect() as db:
         text = '\n'.join(db.iterdump())
@@ -99,14 +99,14 @@ def test_unknown_secret_native_code_and_body_never_reach_learning_store(learning
     {'status': 'insufficient_evidence', 'target_code': 'quota_exhausted'},
 ])
 def test_proposals_accept_no_generated_code_policy_or_raw_rationale(learning, result):
-    case = learning.capture('cursor', unknown())
+    case = learning.capture('claude', unknown())
     with pytest.raises(BridgeError) as error:
         learning.propose(case['id'], result)
     assert error.value.code == 'invalid_error_proposal'
 
 
 def test_ai_provenance_is_an_operation_reference_only(learning):
-    case = learning.capture('cursor', unknown())
+    case = learning.capture('claude', unknown())
     result = {'status': 'insufficient_evidence', 'target_code': None}
     item = learning.propose(case['id'], result, provenance={
         'source': 'ai_session', 'operation_id': 'a' * 32})
@@ -179,9 +179,9 @@ def test_matching_is_exact_in_engine_version_and_fingerprint(learning):
         ('codex', '0.154.0', evidence), ('codex', '0.153.0', unknown('Different response')),
     ):
         assert learning.apply(engine, value, issue, version) == issue
-    evidence, _, _ = active_rule(learning, engine='cursor', version=None)
-    assert learning.apply('cursor', evidence, issue)['code'] == 'provider_unavailable'
-    assert learning.apply('cursor', evidence, issue, '1.0.31') == issue
+    evidence, _, _ = active_rule(learning, engine='claude', version=None)
+    assert learning.apply('claude', evidence, issue)['code'] == 'provider_unavailable'
+    assert learning.apply('claude', evidence, issue, '2.1.266') == issue
 
 
 def test_durable_deactivation_rolls_back_without_deleting_audit(learning):

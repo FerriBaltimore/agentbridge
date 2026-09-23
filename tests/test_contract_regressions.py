@@ -5,15 +5,18 @@ import time
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import Bridge, RunOptions
 from agentbridge.errors import BridgeError
 from agentbridge.grantbridge import GrantBridgeClient
 from agentbridge.rpc import rpc
+from fixtures.test_proxy_account_fixture import (
+    proxy_account, register_verified_proxy_account, seed_authenticated_proxy_account)
 
 
 def stored_turn(bridge, tmp_path, label):
-    bridge.register(Account(label, 'codex', home=tmp_path / label, name=label))
-    instance = bridge.instance_create(account_ref=label, workspace_path=str(tmp_path))
+    register_verified_proxy_account(bridge.store, label, 18000 + sum(map(ord, label)))
+    bridge.store.add_session('session-' + label, label, str(tmp_path), 'fixture-model')
+    instance = bridge.get_session('session-' + label)
     run_id, _ = bridge.store.admit(label, instance['id'], 'hello', RunOptions(), None, message_id='message-' + label)
     return instance['id'], run_id
 
@@ -63,14 +66,16 @@ def test_unknown_outcomes_are_never_declared_retryable():
     assert json.loads(out.getvalue())['error']['data']['retryable'] is False
 
 
-def test_grantbridge_timeout_bounds_partial_unterminated_lines(tmp_path):
+def test_grantbridge_timeout_bounds_partial_unterminated_lines(tmp_path, monkeypatch):
     adapter = tmp_path / 'partial.py'
     adapter.write_text('import sys,time\nfor line in sys.stdin:\n sys.stdout.write("{");sys.stdout.flush();time.sleep(10)\n')
     client = GrantBridgeClient(adapter=adapter, node=sys.executable, timeout=1)
+    monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'fixture-only-management-key')
     started = time.monotonic()
     try:
         with pytest.raises(BridgeError) as error:
-            client.get('fixture', 'owner')
+            client.proxy_status('fixture-state', 'codex', 'http://127.0.0.1:8317/v1',
+                                'FIXTURE_MANAGEMENT_KEY')
         assert error.value.code == 'grantbridge_timeout'
         assert time.monotonic() - started < 2
     finally:
@@ -80,16 +85,13 @@ def test_grantbridge_timeout_bounds_partial_unterminated_lines(tmp_path):
         client.close()
 
 
-def test_cursor_does_not_fall_back_to_operator_credentials(tmp_path, monkeypatch):
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
-    monkeypatch.setenv('CURSOR_API_KEY', 'operator-key-not-for-this-account')
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('cursor', 'cursor'))
-    instance = bridge.instance_create(account_ref='cursor', workspace_path=str(tmp_path), model='fixture')
+def test_proxy_account_does_not_fall_back_to_operator_credentials(tmp_path, monkeypatch):
+    from agentbridge.credentials import environment
+    monkeypatch.setenv('UNRELATED_API_KEY', 'operator-key-not-for-this-account')
+    account = proxy_account('fixture', 18123)
     with pytest.raises(BridgeError) as error:
-        bridge.message_create(instance['id'], 'hello')
+        environment(account)
     assert error.value.code == 'credential_unavailable'
-    assert not bridge.runs()
 
 
 def test_unsupported_stop_override_does_not_pretend_to_change_worker_grace(tmp_path):
@@ -104,7 +106,7 @@ def test_unsupported_stop_override_does_not_pretend_to_change_worker_grace(tmp_p
 def test_public_transfer_rejects_unknown_parameters_before_creating_destination(tmp_path):
     bridge = Bridge(tmp_path / 'state')
     instance, _ = stored_turn(bridge, tmp_path, 'source')
-    bridge.register(Account('target', 'codex', home=tmp_path / 'target'))
+    seed_authenticated_proxy_account(bridge.store, proxy_account('target', 18234))
     out = io.StringIO()
     request = {'jsonrpc': '2.0', 'id': 1, 'method': 'instances.transfer',
                'params': {'instance_id': instance, 'target_account_ref': 'target', 'unexpected': True}}

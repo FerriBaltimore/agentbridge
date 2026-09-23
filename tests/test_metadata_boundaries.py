@@ -7,6 +7,7 @@ from agentbridge import Account, Bridge, BridgeError, RunOptions
 from agentbridge.auth_contract import attempt, response_result
 from agentbridge.authentication import AuthenticationService
 from agentbridge.error_observer import provider_version
+from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
 
 @pytest.mark.parametrize('remote', [None, {}, {'status': 'verified'}, {'status': 'bound'},
@@ -25,18 +26,22 @@ def test_additive_auth_fields_cannot_enter_public_or_persisted_projection(tmp_pa
         'error': {'code': 'private-error-code', 'message': 'private-credential'},
         'new_field': {'secret': 'private-credential'}}
     value = attempt(remote, engine='codex')
-    assert AuthenticationService._status(value) == 'verified'
-    assert value['identity'] == {'email': 'fixture@example.test'}
+    assert AuthenticationService._status(value) == 'authorized'
+    assert 'identity' not in value
+    assert 'verification' not in value
     assert 'private' not in json.dumps(value)
     bridge = Bridge(tmp_path)
     row = {'id': 'local', 'owner': 'owner', 'name': 'fixture', 'engine': 'codex',
-           'account_id': 'account', 'status': 'verified', 'data': value,
+           'account_id': 'account', 'status': 'authorized', 'data': value,
            'mode': 'browser', 'browser': 'same_host', 'grantbridge_id': 'remote'}
     bridge.store.create_auth_attempt(row)
-    with pytest.raises(BridgeError):
-        bridge.authentication._save_remote(row, {**remote, 'status': 'future-success'})
+    with pytest.raises(BridgeError) as error:
+        attempt({**remote, 'status': 'future-success'}, engine='codex', attempt_id='remote')
+    assert error.value.code == 'provider_protocol_error'
     current = bridge.store.get_auth_attempt('local')
-    assert current['status'] == 'failed' and 'verification' not in current['data']
+    assert current['status'] == 'authorized'
+    assert 'private' not in json.dumps(current['data'])
+    assert 'private' not in json.dumps(bridge.authentication._public(current))
     with pytest.raises(BridgeError) as error:
         bridge.account_login_complete('local', owner_ref='owner')
     assert error.value.code == 'authentication_not_verified'
@@ -100,8 +105,9 @@ def test_provider_model_ids_are_opaque():
 
 def test_recover_keeps_unresolved_work_beyond_first_event_page(tmp_path):
     bridge = Bridge(tmp_path / 'store')
-    bridge.register(Account('fixture', 'codex', home=tmp_path / 'home'))
-    session = bridge.session('fixture', tmp_path)
+    register_verified_proxy_account(bridge.store, 'fixture', 12345)
+    bridge.store.add_session('session', 'fixture', str(tmp_path), 'fixture-model')
+    session = bridge.get_session('session')
     bridge.store.admit('run', session['id'], 'fixture', RunOptions(), 'key')
     with bridge.store.connect() as db:
         db.execute("UPDATE runs SET state='running' WHERE id='run'")

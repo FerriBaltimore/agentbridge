@@ -10,12 +10,15 @@ from agentbridge import Account, Bridge, RunOptions
 from agentbridge.errors import BridgeError
 from agentbridge.provider_contracts import ContractRegistry, digest, index
 from agentbridge.rpc import dispatch
+from fixtures.test_proxy_account_fixture import (
+    register_verified_proxy_account, seed_authenticated_proxy_account)
+from test_proxy_binding import management
 
 
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
     bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('a', 'codex', home=str(tmp_path / 'native'), name='Fixture'))
+    register_verified_proxy_account(bridge.store, 'a', 8317, provider='codex')
     monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.153.0')
     return ContractRegistry(bridge.store), bridge
 
@@ -34,7 +37,7 @@ def inspect_value(monkeypatch, registry, **changes):
 
 def test_index_shared_contracts_have_stable_content_hashes():
     data = index()
-    assert len(data['contracts']) == len(data['bindings']) == 3
+    assert len(data['contracts']) == len(data['bindings']) == 2
     for profile in data['contracts']:
         assert profile['id'] == 'sha256:' + digest(profile['manifest'])
         assert digest(profile['manifest']) == digest(dict(reversed(list(profile['manifest'].items()))))
@@ -45,10 +48,11 @@ def test_unknown_release_blocked_before_credentials_admission_or_spawn(registry,
     monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
     def unexpected(account):
         pytest.fail('Credentials must not be resolved for unreviewed releases')
-    monkeypatch.setattr('agentbridge.client.environment', unexpected)
-    session = bridge.session('a', tmp_path)
+    monkeypatch.setattr('agentbridge.routing.execution.environment', unexpected)
+    monkeypatch.setattr('agentbridge.routing.admission.verify_proxy_model', lambda *args, **kwargs: None)
+    session_id, _ = bridge.store.add_session('fixture-session', 'a', str(tmp_path), 'fixture-model')
     with pytest.raises(BridgeError) as failure:
-        bridge.submit(session['id'], 'hello')
+        bridge.submit(session_id, 'hello')
     assert failure.value.code == 'provider_contract_unverified'
     assert failure.value.outcome == 'not_started'
     assert bridge.runs() == []
@@ -101,7 +105,10 @@ def test_legacy_run_does_not_invent_admission_version(registry):
 
 def test_custom_launcher_is_explicitly_unverified(registry):
     registry, bridge = registry
-    account = Account('custom', 'codex', home='/nonexistent', command=('local-wrapper',))
+    account = Account('custom', 'codex', command=('local-wrapper',), provider='codex',
+                      supported_models=('fixture-model',),
+                      proxy_base_url='http://127.0.0.1:8318/v1', key_env='FIXTURE_PROXY_KEY',
+                      management_key_env='FIXTURE_MANAGEMENT_KEY')
     result = registry.check(account, enforce=True)
     assert result['status'] == 'custom_adapter' and result['verification'] == 'unverified'
 
@@ -111,7 +118,7 @@ def test_rpc_catalog_is_not_live_acceptance(registry):
     value = dispatch(bridge, 'contracts.list', {'engine': 'codex'})
     profile = value['contracts'][0]
     assert dispatch(bridge, 'contracts.get', {'contract_id': profile['id']}) == profile
-    assert dispatch(bridge, 'contracts.check', {'account_ref': 'Fixture'})['status'] == 'reviewed'
+    assert dispatch(bridge, 'contracts.check', {'account_ref': 'a'})['status'] == 'reviewed'
 
 
 @pytest.mark.parametrize('mutation', ['missing', 'cross_engine', 'duplicate', 'bad_hash'])
@@ -138,12 +145,12 @@ def test_corrupt_index_is_rejected(monkeypatch, mutation):
 
 def test_completed_idempotent_replay_survives_upgrade(registry, monkeypatch, tmp_path):
     registry, bridge = registry
-    session = bridge.session('a', tmp_path)
-    run_id, created = bridge.store.admit('existing', session['id'], 'hello', RunOptions(), 'same-key')
+    session_id, _ = bridge.store.add_session('fixture-session', 'a', str(tmp_path), 'fixture-model')
+    run_id, created = bridge.store.admit('existing', session_id, 'hello', RunOptions(), 'same-key')
     receipt = registry.record_run(run_id, registry.check(bridge.account('a')))
     bridge.store.finish(run_id, 'completed')
     monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
-    replay = bridge.submit(session['id'], 'hello', request_key='same-key')
+    replay = bridge.submit(session_id, 'hello', request_key='same-key')
     assert replay.replayed and replay.id == run_id
     assert bridge.turn(run_id)['provider_compatibility'] == receipt
 
@@ -158,36 +165,26 @@ def test_inspection_detected_component_mismatch_blocks_later_calls(registry, mon
     assert not registry.check(bridge.account('a'))['native_operations_allowed']
 
 
-def test_unindexed_release_never_refreshes_native_metadata(registry, monkeypatch):
+def test_unindexed_release_keeps_proxy_metadata_separate_from_native_probes(registry, monkeypatch):
     registry, bridge = registry
     monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
-    def unexpected(*args, **kwargs):
-        pytest.fail('Unindexed releases must not query provider accounts or model catalogs')
-    monkeypatch.setattr('agentbridge.accounts.CodexAppServerProbe', unexpected)
-    monkeypatch.setattr('agentbridge.catalog.CodexAppServerProbe', unexpected)
-    models = bridge.models('codex', account_ref='a', refresh=True)
-    assert models['reason'] == 'provider_contract_unverified'
-    assert models['provider_compatibility']['version'] == '0.154.0'
-    account = bridge.account_status('a', refresh=True)
-    assert account['provider_compatibility']['status'] == 'unindexed_version'
-    usage = bridge.account_usage('a', refresh=True)
+    models = bridge.models(account_ref='a')
+    assert models['models'][0]['availability'] == 'proxy_observed'
+    account = bridge.account_status('a')
+    assert account['authentication']['source'] == 'cliproxy_management'
+    assert account['binding_verified'] is True
+    usage = bridge.account_usage('a')
     assert usage['stale'] and not usage['supported']
-    assert usage['provider_compatibility']['status'] == 'unindexed_version'
+    assert registry.check(bridge.account('a'))['status'] == 'unindexed_version'
 
 
-def test_fresh_account_evidence_keeps_release_receipt_on_restart(registry, monkeypatch):
+def test_persisted_proxy_observation_survives_restart_without_a_native_probe(registry, monkeypatch):
     registry, bridge = registry
-    class Probe:
-        source = 'fixture'
-        def __init__(self, account):
-            pass
-        def read(self, **kwargs):
-            return {'status': 'usable', 'identity': {}}
-    monkeypatch.setattr('agentbridge.accounts.CodexAppServerProbe', Probe)
-    refreshed = bridge.account_status('a', refresh=True)
+    refreshed = bridge.account_status('a')
     cached = Bridge(bridge.root).account_status('a')
     assert refreshed == cached
-    assert cached['provider_compatibility']['version'] == '0.153.0'
+    assert cached['authentication']['source'] == 'cliproxy_management'
+    assert registry.check(bridge.account('a'))['version'] == '0.153.0'
 
 
 def test_project_cannot_shadow_internal_worker_import(tmp_path, monkeypatch):
@@ -196,13 +193,19 @@ def test_project_cannot_shadow_internal_worker_import(tmp_path, monkeypatch):
     shadow.mkdir(parents=True)
     (shadow / '__init__.py').write_text("raise RuntimeError('project shadow imported')\n")
     fixture = Path(__file__).resolve().parents[1] / 'examples/fake_provider.py'
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('fixture', 'codex', home=str(tmp_path / 'home'), command=(sys.executable, str(fixture))))
-    session = bridge.session('fixture', workspace)
-    monkeypatch.chdir(workspace)
-    try:
-        run = bridge.submit(session['id'], 'fixture')
-        assert run.wait(10)['state'] == 'completed'
-        assert bridge.turn(run.id)['provider_compatibility']['status'] == 'custom_adapter'
-    finally:
-        bridge.close(cancel=True)
+    monkeypatch.setenv('FIXTURE_PROXY_KEY', 'fixture-only-client-key')
+    monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'fixture-only-management-key')
+    with management('fixture-private-account', 'fixture-private-index') as (port, _):
+        bridge = Bridge(tmp_path / 'state')
+        seed_authenticated_proxy_account(bridge.store, Account('fixture', 'codex', command=(sys.executable, str(fixture)),
+            provider='codex', supported_models=('gpt-5',),
+            proxy_base_url=f'http://127.0.0.1:{port}/v1', key_env='FIXTURE_PROXY_KEY',
+            management_key_env='FIXTURE_MANAGEMENT_KEY'), observe_local=True)
+        session = bridge.session('fixture', workspace, model='gpt-5')
+        monkeypatch.chdir(workspace)
+        try:
+            run = bridge.submit(session['id'], 'fixture')
+            assert run.wait(10)['state'] == 'completed'
+            assert bridge.turn(run.id)['provider_compatibility']['status'] == 'custom_adapter'
+        finally:
+            bridge.close(cancel=True)

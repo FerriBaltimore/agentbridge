@@ -32,8 +32,8 @@ def test_new_contract_gets_new_content_id_without_editing_old_profile():
     manifest = deepcopy(data['contracts'][0]['manifest'])
     manifest['adapter_dialect'] = 2
     proposed = module.propose(data, observed, None, 'fixtures/review-456', manifest)
-    assert proposed['contracts'][:3] == data['contracts']
-    assert len(proposed['contracts']) == 4
+    assert proposed['contracts'][:len(data['contracts'])] == data['contracts']
+    assert len(proposed['contracts']) == len(data['contracts']) + 1
     assert proposed['bindings'][-1]['contract_id'] == proposed['contracts'][-1]['id']
 
 

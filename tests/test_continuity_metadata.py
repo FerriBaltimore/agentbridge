@@ -5,13 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import Bridge, RunOptions
 from agentbridge.attachments import normalize as attachments
 from agentbridge.continuity import unresolved
 from agentbridge.errors import BridgeError
 from agentbridge.message_projection import retractions, text
 from agentbridge.permissions import Permissions
 from agentbridge.process import identity
+from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
 
 def event(seq, kind, **data):
@@ -65,10 +66,10 @@ def test_unknown_retraction_shape_is_not_iterated_as_message_ids(metadata):
 @pytest.fixture
 def stored(tmp_path):
     bridge = Bridge(tmp_path / 'store')
-    bridge.register(Account('fixture', 'codex', home=str(tmp_path)))
-    session = bridge.session('fixture', tmp_path)
-    turn, _ = bridge.store.admit('fixture-turn', session['id'], 'request', RunOptions(), None)
-    return bridge, session['id'], turn
+    register_verified_proxy_account(bridge.store, 'fixture', 8317)
+    session_id, _ = bridge.store.add_session('fixture-session', 'fixture', str(tmp_path), 'fixture-model')
+    turn, _ = bridge.store.admit('fixture-turn', session_id, 'request', RunOptions(), None)
+    return bridge, session_id, turn
 
 
 @pytest.mark.parametrize('value', [math.nan, math.inf, -math.inf])

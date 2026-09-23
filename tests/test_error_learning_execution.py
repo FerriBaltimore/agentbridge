@@ -3,19 +3,20 @@ import sys
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import Bridge, RunOptions
 from agentbridge.codex_control import CodexControl
 from agentbridge.error_evidence import capture, validate_evidence
 from agentbridge.error_learning import Learning
 from agentbridge.protocols import Parser
 from agentbridge.provider_errors import normalize
 from agentbridge.rpc import dispatch
+from fixtures.test_proxy_worker_fixture import MODEL, bridge_with_proxy, management_server
 
 
-def test_native_wrappers_preserve_safe_unknown_evidence():
+def test_codex_wrapper_preserves_safe_unknown_evidence():
     unknown = {'code': 'novel-private-code', 'message': 'private-body with capacity rejected'}
-    first = normalize('cursor', unknown)
-    second = normalize('cursor', first)
+    first = normalize('codex', unknown)
+    second = normalize('codex', first)
     assert first['details']['unknown_evidence'] == second['details']['unknown_evidence']
     assert 'private' not in json.dumps(second)
     observed = []
@@ -26,18 +27,17 @@ def test_native_wrappers_preserve_safe_unknown_evidence():
     assert observed[0]['details']['unknown_evidence'] == capture(unknown)
 
 
-def test_claude_terminal_preserves_reviewed_rule_metadata(tmp_path):
+def test_codex_terminal_preserves_reviewed_rule_metadata(tmp_path):
     bridge = Bridge(tmp_path / 'store')
     value = {'code': 'novel-failure', 'message': []}
-    evidence = normalize('claude', value)['details']['unknown_evidence']
-    case = bridge.error_learning.capture('claude', evidence)
+    evidence = normalize('codex', value)['details']['unknown_evidence']
+    case = bridge.error_learning.capture('codex', evidence)
     proposed = bridge.error_propose(case['id'], {'status': 'proposed', 'target_code': 'authentication_required'})
     validated = bridge.error_validate(proposed['id'])
     rule = bridge.error_activate(proposed['id'], validated['revision'])
-    parsed = Parser('claude', lambda *_: None, error_handler=lambda issue:
-        bridge.error_learning.apply('claude', evidence, issue))
-    parsed.feed({'type': 'assistant', 'error': 'novel-failure', 'message': {'content': []}})
-    parsed.feed({'type': 'result', 'subtype': 'error_during_execution', 'is_error': True})
+    parsed = Parser('codex', lambda *_: None, error_handler=lambda issue:
+        bridge.error_learning.apply('codex', evidence, issue))
+    parsed.feed({'type': 'turn.failed', 'error': value})
     assert parsed.last_error['details']['rule_id'] == rule['id']
     assert parsed.last_error['details']['detection'] == 'learned_rule'
     assert parsed.last_error['action'] == 'inspect'
@@ -61,25 +61,15 @@ def test_reviewed_timeout_cause_cannot_change_observed_terminal_failure(tmp_path
     assert issue['details']['unclassified_code'] == 'provider_failed'
 
 
-@pytest.mark.parametrize('engine', ['codex', 'claude', 'cursor'])
-def test_worker_learns_reviewed_cause_without_repeating_execution(tmp_path, engine):
+def test_worker_learns_reviewed_cause_without_repeating_execution(tmp_path, monkeypatch):
     value = {'code': 'novel-provider-code', 'message': 'private-error billing credit expired'}
-    event = {'type': 'bridge_error', 'error': normalize(engine, value)}
+    event = {'type': 'bridge_error', 'error': normalize('codex', value)}
     native = tmp_path / 'provider.py'
     native.write_text('import json\nprint(json.dumps(' + repr(event) + '),flush=True)\n')
-    bridge = Bridge(tmp_path / 'store')
-    kwargs = {'key_env': 'FIXTURE_KEY'} if engine == 'cursor' else {'home': str(tmp_path / 'home')}
-    bridge.register(Account('fixture', engine, command=(sys.executable, str(native)), **kwargs))
-    if engine == 'cursor':
-        # The test transport is deterministic and never imports a real SDK.
-        import os
-        from unittest.mock import patch
-        context = patch.dict(os.environ, {'FIXTURE_KEY': 'fixture-credential'})
-    else:
-        from contextlib import nullcontext
-        context = nullcontext()
-    with context:
-        session = bridge.session('fixture', tmp_path, model='fixture')
+    with management_server() as port:
+        bridge = bridge_with_proxy(tmp_path, monkeypatch, port,
+                                   command=(sys.executable, str(native)))
+        session = bridge.session('fixture', tmp_path, model=MODEL)
         first = bridge.submit(session['id'], 'fixture', options=RunOptions(timeout=5))
         assert first.wait(10)['state'] == 'interrupted'
         cases = dispatch(bridge, 'error_cases.list', {})['items']
@@ -101,7 +91,7 @@ def test_worker_learns_reviewed_cause_without_repeating_execution(tmp_path, engi
         bridge.recover()
         assert len(bridge.runs()) == 2
         bridge.error_deactivate(rule['id'], rule['revision'])
-        assert Learning(bridge.store).apply(engine, case['evidence'], first.snapshot).get('code') is None
+        assert Learning(bridge.store).apply('codex', case['evidence'], first.snapshot).get('code') is None
     stored = bridge.store.path.read_bytes()
     assert b'private-error' not in stored and b'novel-provider-code' not in stored
 

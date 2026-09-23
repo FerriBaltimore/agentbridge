@@ -1,5 +1,8 @@
 # Event contract
 
+For new v2 turns, `engine` is always `codex`; upstream provider and selected
+account are separate route evidence. Older direct events remain readable.
+
 Every stored event has:
 
     seq, instance_id, message_id?, turn_id, engine, kind, at, data, final

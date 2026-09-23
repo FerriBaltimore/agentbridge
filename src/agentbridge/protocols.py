@@ -8,7 +8,6 @@ FAILURE = {'failed', 'error', 'errored', 'killed', 'cancelled', 'stopped', 'decl
 TASK_TERMINAL = {
     'codex': {'completed', 'errored', 'interrupted', 'shutdown', 'notFound'},
     'claude': {'completed', 'failed', 'stopped', 'killed'},
-    'cursor': {'completed', 'finished', 'error', 'cancelled', 'expired'},
 }
 CLAUDE_ERROR_RESULTS = {'error_during_execution', 'error_max_turns', 'error_max_budget_usd',
                        'error_max_structured_output_retries'}
@@ -265,45 +264,6 @@ class Parser:
         elif t in {'tool_progress','tool_use_summary'}:
             self.event('status',{'status':t,'call_id':ev.get('tool_use_id'),'parent_id':parent})
         else:self.event('gap',{'reason':'unsupported_event','native_type':t})
-
-    def _cursor(self, ev):
-        t=ev.get('type')
-        if t=='bridge_session':self.event('session',{'native_id':ev.get('native_id')})
-        elif t=='bridge_result':
-            status=ev.get('status','unknown')
-            if status not in {'finished', 'error', 'cancelled', 'expired'}:
-                self.terminal = 'failed'
-                self.event('gap', {'reason': 'unsupported_result_state'})
-                self.error({'code': 'provider_protocol_error'}, outcome='unknown')
-                return
-            self.terminal = ('completed' if status == 'finished' else 'interrupted'
-                             if status in {'cancelled', 'expired'} else 'failed')
-            self.failed |= self.terminal=='failed'
-            self.event('turn',{'status':self.terminal})
-            if self.terminal != 'completed':
-                self.error(ev.get('error') or {'code': 'interrupted' if self.terminal == 'interrupted'
-                                             else 'provider_failed'}, outcome='unknown')
-        elif t=='bridge_error':
-            self.failed=True
-            self.event('error',{'code':ev.get('code','provider_failed')})
-        elif t=='assistant':
-            for block in (ev.get('message') or {}).get('content',[]):
-                if block.get('type')=='text':self.event('text_delta',{'text':block.get('text',''),'parent_id':ev.get('agent_id')})
-        elif t=='tool_call':
-            status=ev.get('status','unknown')
-            self.tool(ev.get('call_id'),ev.get('name','tool'),ev.get('args'),done=status in SUCCESS|FAILURE,result=ev.get('result'),status=status,parent=ev.get('agent_id'))
-            if ev.get('truncated'):self.event('gap',{'reason':'provider_truncated_tool','call_id':ev.get('call_id')})
-        elif t=='task':
-            self.task(ev.get('task_id'),ev.get('status','unknown'),parent_id=ev.get('agent_id'),description=ev.get('text'))
-        elif t in {'usage','bridge_usage'}:
-            self.event('usage',{'source':'cursor_sdk','scope':ev.get('scope','observation'),'tokens':ev.get('usage'),
-                                'cost':ev.get('cost'),'cost_kind':'provider_reported',
-                                'aggregation': ev.get('aggregation')})
-        elif t=='request':self.event('permission_required',{'request_id':ev.get('request_id')})
-        elif t in {'status','system'}:self.event('status',{'status':ev.get('status') or ev.get('subtype')})
-        elif t in {'thinking','user'}:return
-        else:self.event('gap',{'reason':'unsupported_event','native_type':t})
-
 
 def error_code(value):
     return normalize(None, value)['code']

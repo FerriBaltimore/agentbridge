@@ -6,11 +6,16 @@ the wheel. Each immutable manifest has a SHA-256 content ID. Multiple release
 bindings can reference that ID; a new CLI release does not require another
 implementation when the reviewed contract still applies.
 
-The initial bindings are Codex CLI 0.153.0, Claude Code CLI 2.1.266 and Cursor
-Python SDK 1.0.31. They describe the implemented, fixture-tested subset, not
-every provider feature, entitlement or future remote behavior.
+The initial bindings are Codex CLI 0.153.0 and Claude Code CLI 2.1.266.
+The Claude entry describes a historical direct adapter. The active v2
+diagnostic concerns the installed Codex worker that sends every turn through
+CLIProxyAPI. A release binding does not certify an upstream model or OAuth flow.
 
-## Runtime behavior
+## Runtime behavior and historical evidence
+
+The direct-adapter checks below describe the earlier implementation. New v2
+turns always use Codex through a verified proxy route. Native release checks
+remain internal diagnostics of that Codex worker, not a user engine selector.
 
 - A new native message checks the installed release before credential resolution
   and admission. The worker checks again before launching the provider.
@@ -38,10 +43,11 @@ version. Parsers continue to reject unknown terminal states and expose gaps.
 ```sh
 agentbridge contracts list
 agentbridge contracts check "Development Codex"
-agentbridge contracts inspect --engine codex
-agentbridge contracts inspect --engine claude
-agentbridge contracts inspect --engine cursor
 ```
+
+`contracts inspect` is an administrative drift diagnostic for a pinned
+adapter release. Its legacy `--engine` argument names the installed adapter
+to inspect; it does not select a conversation engine or bypass the proxy.
 
 JSON-RPC exposes `contracts.list`, `contracts.get`, `contracts.check` and
 `contracts.inspect`. The SDK exposes `provider_contracts`, `provider_contract`,
@@ -52,13 +58,10 @@ evidence, without accounts, credentials, inference or automatic provider upgrade
 | --- | --- | --- |
 | Codex CLI | Canonical generated JSON-schema bundle, default extraction flags | Method presence does not establish experimental eligibility; descriptions also affect the conservative hash |
 | Claude CLI | Exact version and normalized `--help` observation | Help is not the control/stream protocol schema; equal help cannot certify equivalent behavior |
-| Cursor Python SDK | Public type AST, defaults, signatures and decorators, bridge protocol and advertised capabilities | Static structure cannot prove implementation or backend semantics |
 
-Cursor is inspected from the same Python environment used to execute it, not
-from the editor version or a different Python installation. Inconsistent Python
-and bundled SDK versions are drift. CLI version changes during extraction are
-also drift. Output, files, JSON depth and inspection time have explicit bounds;
-schema generation's temporary disk use is not an operating-system disk quota.
+CLI version changes during extraction are drift. Output, files, JSON depth
+and inspection time have explicit bounds. Schema generation's temporary disk
+use is not an operating-system disk quota.
 
 Inspection statuses are `unchanged`, `drift_detected`, `candidate` or
 `insufficient_evidence`. An unknown release with matching structural evidence
@@ -87,10 +90,10 @@ traceability, not a signature or proof that the referenced checks were run.
 
 ## Boundaries that remain explicit
 
-GrantBridge login and activation use a separate private contract and are not
-certified by these provider release bindings. Native session files and Claude
-subscription quota remain compatibility surfaces, not universal public APIs.
-This registry adds no missing Cursor permission or account-quota capability.
+GrantBridge proxy login and CLIProxyAPI credential management use separate
+private contracts and are not certified by these release bindings. Native
+session files and Claude subscription quota remain compatibility surfaces,
+not universal public APIs.
 
 Disk failure can prevent durable evidence. A worker lost while its native child
 is still alive remains unresolved rather than being rerun. Process-group cleanup

@@ -7,7 +7,7 @@ from typing import Any
 
 from .errors import BridgeError
 
-ENGINES = ("codex", "claude", "cursor")
+ENGINES = ("codex", "claude")
 TERMINAL = frozenset(("completed", "failed", "cancelled", "interrupted", "incomplete"))
 
 
@@ -60,35 +60,52 @@ class Account:
     key_env: str | None = None
     command: tuple[str, ...] = ()
     credential_ref: dict | None = None
+    provider: str | None = None
+    supported_models: tuple[str, ...] = ()
+    proxy_base_url: str | None = None
+    management_key_env: str | None = None
 
     def __post_init__(self):
         identifier(self.id)
         if self.engine not in ENGINES:
-            raise BridgeError("invalid_engine", "Choose codex, claude or cursor.")
+            raise BridgeError("invalid_engine", "Choose codex or claude.")
         if self.credential_ref is not None:
-            value = self.credential_ref
-            if (self.engine != 'cursor' or self.key_env or not isinstance(value, dict)
-                    or set(value) != {'attempt_id', 'owner_ref', 'connection'}
-                    or not isinstance(value['connection'], dict)
-                    or set(value['connection']) != {'adapter', 'data_dir', 'node'}):
-                raise BridgeError('invalid_credential_reference', 'Use a managed Cursor credential reference.')
-            identifier(value['attempt_id'])
-            identifier(value['owner_ref'])
+            raise BridgeError('invalid_credential_reference', 'Legacy credential references are unsupported.')
         if self.name is not None:
-            if not isinstance(self.name, str) or not self.name.strip() or len(self.name.strip()) > 128:
+            if not isinstance(self.name, str) or not self.name.strip() or len(self.name) > 128:
                 raise BridgeError("invalid_name", "Account names must contain 1-128 non-space characters.")
-            object.__setattr__(self, "name", self.name.strip())
-        if self.engine != "cursor" and not self.home:
-            raise BridgeError("account_home_required", "Codex and Claude accounts require an explicit native home.")
+        if not self.home and not self.proxy_base_url:
+            raise BridgeError("account_home_required", "An account requires a native home or a proxy route.")
         if self.home:
             object.__setattr__(self, "home", str(Path(self.home).expanduser().resolve()))
         object.__setattr__(self, "env_names", tuple(self.env_names))
         object.__setattr__(self, "command", tuple(self.command))
-        for key in (*self.env_names, *((self.key_env,) if self.key_env else ())):
+        if not isinstance(self.supported_models, (list, tuple)):
+            raise BridgeError('invalid_models', 'Supported models must be a list of model IDs.')
+        object.__setattr__(self, "supported_models", tuple(self.supported_models))
+        for key in (*self.env_names, *((self.key_env,) if self.key_env else ()),
+                    *((self.management_key_env,) if self.management_key_env else ())):
             if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", key):
                 raise BridgeError("invalid_environment", "Use environment variable names, not credential values.")
         if any(not isinstance(x, str) or not x or '\0' in x for x in self.command):
             raise BridgeError("invalid_command", "Command must be a list of nonempty arguments, never shell text.")
+        if self.proxy_base_url is not None:
+            if self.engine != 'codex' or not self.key_env or not self.provider or not self.supported_models:
+                raise BridgeError('invalid_proxy_account', 'A proxy account requires Codex, provider, key environment and models.')
+            if self.management_key_env and self.management_key_env in (self.key_env, *self.env_names):
+                raise BridgeError('invalid_proxy_account', 'Keep the proxy management key out of the Codex environment.')
+            from .proxy import ProxyRoute
+            ProxyRoute(self.id, self.proxy_base_url, self.key_env)
+        elif self.supported_models or self.provider or self.management_key_env:
+            raise BridgeError('invalid_proxy_account', 'Provider and supported models require a proxy route.')
+        if self.provider is not None:
+            identifier(self.provider)
+        if len(self.supported_models) > 500:
+            raise BridgeError('invalid_models', 'Configure at most 500 distinct models per account.')
+        for model in self.supported_models:
+            model_id(model)
+        if len(set(self.supported_models)) != len(self.supported_models):
+            raise BridgeError('invalid_models', 'Configure distinct models per account.')
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -102,7 +119,7 @@ class RunOptions:
     permission_mode: str = "dontAsk"
     allowed_tools: tuple[str, ...] = ()
     model: str | None = None
-    context_window: str | int | None = None
+    context_window: int | None = None
     effort: str | None = None
     max_turns: int | None = None
     max_budget_usd: float | None = None
@@ -123,11 +140,9 @@ class RunOptions:
             raise BridgeError("invalid_budget", "max_budget_usd must be positive.")
         if self.model is not None:
             model_id(self.model)
-        if (self.context_window is not None and (isinstance(self.context_window, bool)
-                or not isinstance(self.context_window, (str, int))
-                or (isinstance(self.context_window, int) and self.context_window <= 0)
-                or (isinstance(self.context_window, str) and not self.context_window.strip()))):
-            raise BridgeError("invalid_context_window", "context_window must be a named value or token count.")
+        if (self.context_window is not None and
+                (type(self.context_window) is not int or not 0 < self.context_window <= 10_000_000)):
+            raise BridgeError("invalid_context_window", "context_window must be a positive token count.")
         if self.effort is not None and (not isinstance(self.effort, str) or not self.effort.strip()):
             raise BridgeError('unsupported_parameter', 'effort must be a provider-declared value.')
         object.__setattr__(self, "allowed_tools", tuple(self.allowed_tools))
@@ -143,24 +158,3 @@ class Event:
     kind: str
     at: float
     data: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class Capabilities:
-    engine: str
-    execution: bool = True
-    resume: bool = True
-    cancellation: bool = True
-    native_transfer: bool = False
-    portable_context: bool = True
-    subagents: str = "partial"
-    token_usage: str = "partial"
-    account_quota: str = "unsupported"
-    monetary_cost: str = "unsupported"
-
-
-CAPABILITIES = {
-    "codex": Capabilities("codex", native_transfer=True, account_quota="provider_and_local_observation"),
-    "claude": Capabilities("claude", native_transfer=True, account_quota="oauth_reader", monetary_cost="provider_reported"),
-    "cursor": Capabilities("cursor", monetary_cost="optional_sdk_query"),
-}

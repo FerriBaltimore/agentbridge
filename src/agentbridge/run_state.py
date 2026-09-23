@@ -135,12 +135,13 @@ class Run:
             raise BusyError()
         row = self.snapshot
         pending = unresolved(list(self._observations()))
+        automatically_routed = self.bridge.store.routing(row['session_id'])['mode'] == 'automatic'
         if prompt is None:
             prompt = ('Continue the interrupted work. Verify effects before repeating them. '
                       'Original request:\n' + row['prompt'])
-        if pending:
+        if pending and not automatically_routed:
             prompt += '\nUnknown previous outcomes:\n' + dumps(pending)
-        if not self.session['native_id']:
+        if not automatically_routed and not self.session['native_id']:
             bundle = self.bridge.export_context(row['session_id'])
             prompt = bundle.text + '\n\n' + prompt
         return self.bridge.submit(

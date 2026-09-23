@@ -1,71 +1,53 @@
-# Acceptance plan
+# GrantBridge proxy integration acceptance
 
-The integration is complete only when deterministic suites and real provider
-checks agree. A URL being displayed is evidence that a login challenge started,
-not evidence that credentials can be used.
+An authorization URL proves only that the challenge started. A local
+Management API response proves only local sidecar state. Neither establishes
+live provider login or model entitlement.
 
-## Existing evidence
+## Current evidence
 
-GrantBridge currently has:
+- AgentBridge deterministic tests cover durable login attempts, cancellation,
+  identity binding, proxy route admission and safe persistence.
+- A subprocess test exercises Python→GrantBridge Node adapter→fake CLIProxyAPI
+  Management API. It uses no real account or token.
+- The CLIProxyAPI lab covers Codex Responses routing and a tool loop with fake
+  upstreams. It does not prove upstream OAuth or quota.
+- Historical GrantBridge native provider tests and AgentBridge direct-provider
+  acceptance predate v2. They do not certify the proxy account flow.
 
-- deterministic OAuth, OIDC and MCP tests;
-- encrypted storage and refresh rotation tests;
-- owner, callback, cancellation and permission checks;
-- `npm run test:real`, which starts the installed Claude, Codex and Cursor
-  adapters and verifies their real authorization URLs without completing
-  consent.
+## Required live gate
 
-AgentBridge currently has:
+For each of `codex`, `claude` and `grok`:
 
-- deterministic worker, protocol, account, stop and recovery tests;
-- a real Codex account and rate-limit reader;
-- account references that do not store credential values.
+1. Start with an empty, dedicated sidecar and disposable data directories.
+2. Run `accounts login` and complete OAuth in the supported same-host browser.
+3. Observe one credential, identity and model catalogue; complete the login
+   and reopen AgentBridge state, then query the CLIProxyAPI OAuth state again.
+4. Submit an authenticated Codex turn through that sidecar, including a tool
+   call and an explicit Stop test where supported.
+5. Verify credential refresh, identity stability, model entitlement and any
+   quota reading against actual provider behavior. Record unsupported or
+   missing telemetry as unknown.
+6. Exercise automatic account selection, a switch between turns, bounded
+   portable context and refusal to change account within a turn.
+7. Check that tokens, key values, raw provider errors and private reasoning
+   are absent from argv, SQLite, logs, prompts and public events.
 
-These are separate suites. They do not yet prove the cross-repository
-login-to-run flow.
+Record exact repository revisions, provider and runtime versions, account
+identity, operations performed, observed evidence and omitted paths. A
+provider-tested capability applies only to the matching deployment. Remote
+browser and mobile acceptance is a separate gate; the current same-host flow
+must not be presented as remote support.
 
-## Required integration tests
-
-1. Start a GrantBridge sidecar from AgentBridge and perform a controlled
-   fake-provider login.
-2. Register or activate the returned account reference in AgentBridge.
-3. Run fake Codex, Claude and Cursor workers using that reference.
-4. Verify that no credential appears in argv, SQLite, prompts, logs or events.
-5. Reopen both stores and repeat a fresh account check.
-6. Cancel an in-flight authentication and verify that no account is replaced.
-7. Reauthenticate an existing account as the same identity and verify an atomic
-   credential-generation replacement.
-8. Try a different provider identity and verify that AgentBridge refuses the
-   update while the old account remains usable.
-9. Interrupt the sidecar and worker independently and verify explicit recovery
-   states.
-10. Run the hosted-browser flow from a phone or emulator and verify that the
-    phone sees the provider page while the server retains the browser profile
-    and credential.
-11. Complete a real Claude, Codex and Cursor login in isolated test accounts,
-    then perform a fresh-process check, an authenticated operation and a
-    reconnect after restarting the host.
-12. Complete Google and one configurable OAuth/OIDC flow, including refresh,
-    refresh-token rotation, revocation and reauthorization.
-
-## Commands
-
-Run builds and tests through the workspace's managed temporary job wrapper.
-The exact checkout paths are local configuration, not part of the contract:
+## Deterministic and package checks
 
 ```bash
-# AgentBridge
+python tools/check_repository.py
 python -m pytest
 python -m pip wheel . --no-deps -w dist
-
-# GrantBridge, from its checkout
-npm ci
-npm test
-npm run lint
-npm run test:real
 ```
 
-The live checks must use disposable data directories and accounts. They must
-record provider versions, runtime versions, account identity, the operation
-performed and what was not tested. Never discover or reuse a developer's
-default account from a test.
+Build and install the wheel in a disposable environment, run the installed
+example and CLI, then reinstall delivered SDK changes into this repository's
+`.venv`. GrantBridge's own tests and package checks run in its checkout. Tests
+must never discover or use real accounts.

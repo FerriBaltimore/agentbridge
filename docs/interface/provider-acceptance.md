@@ -5,23 +5,23 @@ local test suite proves the contract, persistence, redaction and worker
 behavior with deterministic adapters. It does not authorize a claim that a
 particular developer account or provider release works.
 
-## Current matrix
+## Historical direct-provider matrix
 
 | Provider | Contract fixtures | Real login | Fresh check | Real turn | Status |
 |---|---|---|---|---|---|
 | Codex | passing | passed | passed | passed | controlled live acceptance passed |
 | Claude Code | passing | passed | passed with inference | passed | controlled live acceptance passed |
-| Cursor | passing | passed | passed | passed | controlled live acceptance passed |
 
 The matrix records controlled acceptance on 2026-09-20 with fresh authorized
 accounts and the installed SDK. Each provider passed native continuation,
 idempotent replay from a new client, bounded event reads and persisted Stop.
+These direct paths are read-only historical records in v2 and cannot execute
+new turns. No cell in this matrix certifies the Codex-through-CLIProxyAPI path.
 The private operator records retain account identities and execution evidence;
 they are intentionally excluded from this repository.
 
 Claude's final consent required direct control of the hosted browser, so a fully
-unassisted mobile journey is not certified. Cursor cloud cancellation was not
-independently observed outside the adapter. Fullbrain's actual integration was
+unassisted mobile journey is not certified. Fullbrain's actual integration was
 not exercised, and the temporary acceptance host was shut down after the checks.
 
 `capabilities.get` still defaults to `acceptance.provider_tested: false`: these
@@ -29,7 +29,12 @@ operator results do not certify another installation, version or feature set.
 No provider is marked usable solely because a browser URL exists. See
 implementation-status.md for unimplemented features and deployment requirements.
 
-## Release gate
+## V2 release gate
+
+V2 has deterministic fixture evidence for the local proxy route and the
+GrantBridge-to-Management-API login flow. Controlled live OAuth, model
+entitlement, provider-specific tools, quota and account changes are pending.
+The initial login browser runs on the same host as the sidecar.
 
 Before enabling a provider in a production Fullbrain deployment, run the
 deterministic suite and a disposable provider acceptance job for that provider.
@@ -60,11 +65,11 @@ to disposable accounts and credentials.
 
 ## Input and observation acceptance (2026-09-20)
 
-Tested versions: Codex CLI 0.153.0, Claude Code 2.1.266 and Cursor Python SDK
-1.0.31. These checks used the explicitly authorized accounts and isolated
-workspaces, through AgentBridge's public methods:
+Tested versions: Codex CLI 0.153.0 and Claude Code 2.1.266. These checks used
+explicitly authorized accounts and isolated workspaces through AgentBridge's
+public methods:
 
-- All three providers correctly identified a generated red image passed as an
+- Both providers correctly identified a generated red image passed as an
   inline attachment. No filesystem image path or public upload was supplied.
 - Codex and Claude resumed those sessions through the new duplex transport and
   recalled the previous image, preserving the native session identity.
@@ -77,14 +82,12 @@ workspaces, through AgentBridge's public methods:
   cancellation prompted an additional worker cleanup guard; deterministic tests
   now cover a native child that deliberately ignores SIGTERM.
 - Claude's initialize catalogue returned five models without inference. Its
-  bound OAuth profile returned three account utilization windows. Cursor's SDK
-  catalogue returned forty models without inference. Counts are dated
+  bound OAuth profile returned three account utilization windows. Counts are dated
   observations, not fixed catalogue assertions or entitlement guarantees.
 
 The initial Claude Stop prompt did not produce a tool request and is not counted
 as a pending-permission test. A second explicit request did, and was cancelled.
-Cursor interactive approval and account quota are still explicitly unavailable
-with the supported SDK. Claude quota uses native OAuth compatibility. PDFs,
+Claude quota uses native OAuth compatibility. PDFs,
 other binary attachment types and complete per-model metadata are not certified.
 The capability defaults remain fixture_tested until an embedding deployment
 records matching evidence. See interactive-inputs.md for the exact contract.

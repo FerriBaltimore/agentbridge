@@ -1,101 +1,47 @@
-# Development workflow
+# Development workflow for account login
 
-## What works today
-
-AgentBridge can still consume an already authenticated account. It can register
-an isolated native home and execute with it:
-
-```bash
-agentbridge accounts add \
-  --engine codex \
-  --home /path/to/codex-home \
-  --name "Development Codex"
-
-agentbridge accounts status "Development Codex" --refresh
-agentbridge accounts usage "Development Codex" --refresh
-```
-
-The same reference model exists for Claude. Cursor currently uses an environment
-variable reference for its API key. The values themselves must stay outside
-AgentBridge state.
-
-This remains useful when another host performs login. The native provider login
-can also be performed directly by the local GrantBridge adapter.
-
-## Local GrantBridge login
-
-The next host command should be:
+AgentBridge v2 has one account onboarding command. Prepare an empty, dedicated
+CLIProxyAPI sidecar on loopback, with one auth directory and client and
+management keys supplied through environment variables. This prepares
+infrastructure only; it does not create an AgentBridge account.
 
 ```bash
-agentbridge accounts login --engine codex --name "Development Codex" \
-  --grantbridge-root /home/ferran/grantbridge
-agentbridge accounts login --engine claude --name "Development Claude" \
-  --grantbridge-root /home/ferran/grantbridge
+agentbridge accounts login --provider codex --name "Development Codex" \
+  --proxy-base-url http://127.0.0.1:8317/v1 \
+  --proxy-key-env DEVELOPMENT_PROXY_KEY \
+  --proxy-management-key-env DEVELOPMENT_MANAGEMENT_KEY
 ```
 
-The command should:
+Use `login-start` and `login-status/check/complete/cancel` when the caller
+needs restart-safe asynchronous control. The blocking command uses the same
+state machine. GrantBridge starts provider OAuth through CLIProxyAPI's
+Management API and reports a safe URL or challenge state. The browser and
+sidecar currently need to share a host. CLIProxyAPI stores the resulting
+credential; AgentBridge creates the account only after a fresh one-credential
+identity and model check. An interrupted or failed attempt is never silently
+restarted. A changed identity is not promoted.
 
-1. Generate an internal account identifier without exposing it in the command.
-2. Ask the GrantBridge sidecar to start the provider attempt.
-3. Print the authorization URL. Opening it is an explicit user action; an
-   opt-in local browser helper may open it on the same host.
-4. Poll the attempt and show only safe status, identity and next action.
-5. On success, activate a native-home reference in AgentBridge for Codex or
-   Claude. Cursor remains GrantBridge-vault-backed until a private resolver is
-   available.
-6. Run a fresh-provider check before reporting the account as authenticated.
+The management key value travels only through trusted local stdio and local
+Management API requests. Public API parameters and account records contain
+its environment variable name, not its value. Both automatic and pinned
+routes require it. The proxy client key is supplied to Codex at execution;
+the management key is not.
 
-The command must not ask the user to paste an OAuth code when the provider can
-complete through a browser callback. If a provider genuinely returns a device
-code, the UI can show that code as a provider challenge.
+## Remote browser work
 
-## Local and remote URLs
-
-GrantBridge accepts a local HTTP origin on loopback or an HTTPS origin for
-remote access. The host supplies `origin` (or `GRANTBRIDGE_ORIGIN`) and mounts
-the callback routes. Setting an origin does not create a tunnel, HTTPS service
-or browser viewer; the embedding application supplies those.
-
-| Operator location | Completion path |
-| --- | --- |
-| On the execution machine | A supported loopback callback can return to the native process on that machine. |
-| Phone or another computer, standard OAuth | The provider returns to the host's reachable HTTPS callback registered for that OAuth client. |
-| Phone or another computer, native loopback login | Use the server-hosted browser so that its loopback callback reaches the server's native process. |
-| Provider-supported device or polling flow | The server waits for provider confirmation while the operator consents in another browser. |
-
-All paths leave the resulting execution credentials in the configured
-server-side `dataDir`, regardless of where the operator opens the UI. Local
-and remote use should be transparent to the operator once the host adapter is
-implemented. They are not interchangeable redirect URLs: the provider's
-callback registration and the flow's originating session must match.
-
-## Mobile during development
-
-AgentBridge can remain the host even when the user operates from a phone. The
-sidecar returns an authorization URL. The host either:
-
-- exposes that URL through an authenticated development web surface, or
-- uses GrantBridge's hosted browser and exposes its browser frame and input
-transport.
-
-The packaged GrantBridge SDK has hosted-browser mechanics, but its public
-callback router does not include the standalone lab's viewer and input routes.
-AgentBridge's host adapter still needs that authenticated presentation layer;
-`browser: mobile` alone does not provide remote access.
-
-The phone authenticates the server-side provider session. It does not become
-the execution account and it does not receive a provider token. A loopback
-callback opened directly on the phone returns to the phone, so native flows
-that require a server-local callback must use the hosted server browser,
-provider polling or a valid server HTTPS callback.
+A phone opening a loopback authorization callback would return to the phone,
+not the sidecar host. A remote deployment needs an authenticated hosted browser
+or a provider-supported server callback and a separate acceptance run. The
+current same-host browser mode does not imply that those routes work. The
+remote viewer must never send upstream credentials to the phone.
 
 ## Shutdown and recovery
 
-An authentication attempt has its own ID and deadline. Cancelling the
-AgentBridge command must cancel the GrantBridge attempt. Restarting the host must
-reconcile the attempt before presenting it as pending. A failed or interrupted
-login must not silently start a new login or change the selected account.
+A login attempt has its own durable ID, owner and deadline. Explicit cancel
+propagates to GrantBridge and records cancellation. Reopening the host
+reconciles existing attempt state instead of starting another OAuth request.
+Shutting down the local adapter does not log out a completed CLIProxyAPI
+credential or authorize a hidden turn retry.
 
-The sidecar is one long-lived process for the attached login command. Its
-shutdown closes child processes and records an interrupted state; it does not
-log out provider accounts.
+Historical native homes and `accounts add` commands belong to the earlier
+architecture; they are not supported v2 account creation or execution paths.

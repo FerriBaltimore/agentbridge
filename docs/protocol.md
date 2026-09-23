@@ -1,54 +1,70 @@
 # AgentBridge protocol
 
-The current compatibility protocol is described here. The expanded target
-contract, including models, instances, messages, turns, capabilities and the
-unified error envelope, is in interface/README.md.
+AgentBridge exposes the Python SDK, CLI and JSON-RPC 2.0 over stdin/stdout.
+Each RPC request has `jsonrpc`, `id`, `method` and object `params`.
+Notifications omit `id` and receive no response. Errors carry a stable
+`data.code`. The target contract is in [interface/README.md](interface/README.md).
 
-The public transport is JSON-RPC 2.0 over stdin/stdout. Each request has `jsonrpc`, `id`, `method` and an object `params`. Notifications have no `id` and receive no response. Errors contain a stable `data.code`.
+## One account and execution flow
 
-## Records
+`accounts.login.start` asks GrantBridge to start browser OAuth through a
+dedicated local CLIProxyAPI sidecar. GrantBridge coordinates the login;
+CLIProxyAPI stores and refreshes the upstream credential. AgentBridge stores
+only safe attempt evidence and references to the proxy URL and key environment
+variables. `accounts.login.status` polls the attempt, `accounts.login.check`
+verifies one active upstream identity and its model IDs at the proxy, and
+`accounts.login.complete` atomically creates or reauthenticates the account.
+`accounts.login.cancel` cancels a pending OAuth session explicitly. If OAuth
+already completed, cancellation reports `already_finished`; it never claims
+the saved credential was deleted. If the proxy no longer knows an OAuth state,
+AgentBridge records an interrupted attempt. Inspect the sidecar for a
+credential left by the uncertain attempt, explicitly abandon the local
+attempt, and use a fresh dedicated sidecar endpoint for a retry. Abandoning
+locally does not claim that the remote OAuth session was cancelled.
 
-`Account` identifies an engine and a home or credential reference. An account ID is immutable. Registering the same ID with a different identity is refused, and the same native home cannot be registered twice for one engine.
+Every executable account uses Codex as its engine and the local proxy as its
+endpoint. `provider` records the upstream account type (`codex`, `claude` or
+`grok`). Direct account registration and direct provider execution are closed.
+Historical account records can be inspected but cannot start a new turn.
 
-`Session` binds one conversation to an account, workspace, model, native session ID and optional parent. `Run` is an accepted attempt with a distinct `message_id`. Request keys make instance and run admission idempotent across restarts. A session or account can have only one active run in the SQLite store.
+`models.list` aggregates configured model IDs and separately marks IDs with
+fresh, verified proxy observations.
+`instances.create` selects an eligible account for an exact model ID, or pins
+the given `account_ref` after verifying it. Automatic routing can select a new
+account between turns. It does not change accounts or replay an unknown turn
+while the turn is running.
 
-Events have a monotonically increasing store sequence, a run and session ID, a kind, a timestamp and JSON data. Common kinds are `session`, `assistant`, `text_delta`, `tool_call`, `tool_result`, `subagent`, `usage`, `quota`, `permission_required`, `permission_denied`, `gap`, `recovery` and `run_finished`.
+## Records and evidence
 
-A `tool_result` with `outcome: unknown` means that the provider was asked to perform work but AgentBridge did not observe its result. It is never converted to success. A `gap` means the provider emitted data that the adapter does not interpret. A `subagent` event describes only a child identity/status observed in the provider stream. It does not prove that the child completed hidden work.
+An `Account` identifies one upstream identity and one dedicated proxy route.
+A `Session` binds a conversation to a workspace, selected model, account and
+optional parent. A `Run` is an admitted turn with a distinct `message_id`.
+Request keys make admission idempotent across restarts. The SQLite store allows
+only one active run per session or account.
 
-## Core methods
+Events have a monotonic store sequence, run and session ID, kind, timestamp
+and JSON data. A `tool_result` with `outcome: unknown` means that AgentBridge
+did not observe the result of requested work; it is never counted as success.
+A `gap` records unparsed provider output. A `subagent` event records only
+observed child state and cannot prove hidden work completed. Context export
+retains unresolved outcomes and lists omitted evidence explicitly.
 
-Normalized windows, scoped limits, reset credits, model metadata and execution
-failures are specified in [usage and failures](usage-and-failures.md).
-`accounts.quota.reset` explicitly consumes a Codex earned reset using a durable
-`idempotency_key`; normal account usage queries never perform this mutation.
+## Main operations
 
 | Method | Purpose |
 | --- | --- |
-| `capabilities` | Return engine capability declarations. |
-| `accounts.list` | Inspect safe account references, never secrets. `accounts.register` is retained only for a managed local SDK setup and is rejected by the public RPC boundary. |
-| `accounts.login.start/status/check/complete/cancel` | Persist an authentication attempt, observe it, verify it in a fresh provider process, bind the safe account projection, or cancel it. |
-| `accounts.status` | Read configured identity and the latest authentication observation. `refresh: true` performs a provider account read when supported. |
-| `accounts.usage` | Read the latest quota and usage observation. `refresh: true` performs a provider usage read when supported. |
-| `accounts.usage_history` | Read the bounded, append-only history of account usage observations. |
-| `sessions.create`, `sessions.list`, `sessions.get` | Create and inspect sessions. |
-| `sessions.transfer` | Create a destination session using native or portable continuity. |
-| `sessions.export` | Build a bounded portable evidence bundle. |
-| `runs.submit`, `runs.get`, `runs.list` | Admit and inspect work. |
-| `runs.events` | Read normalized events from a sequence offset. |
-| `runs.stop` | Request cancellation of the exact run. |
-| `runs.resume` | Explicitly submit follow-up work after a terminal run. |
-| `runs.usage`, `runs.subagents` | Read observed usage and subagent coverage. |
-| `accounts.quota` | Read the legacy local quota view. Prefer `accounts.usage` for account-service observations. |
-| `recover` | Mark a lost worker interrupted without retrying it. |
-| `error_cases.list/get` | Read safe deduplicated failures captured by execution workers. |
-| `error_cases.diagnose`, `error_diagnoses.get` | Explicit bounded diagnosis using a separate Cursor session and durable key; reconcile the receipt without repeating inference. |
-| `error_proposals.create/get/validate` | Review a declarative candidate and run structural invariant checks. |
-| `error_rules.get/activate/deactivate` | Explicit revision-checked activation or rollback of exact scoped classifications. |
+| `capabilities` | Declare the fixed Codex proxy route and verification limits. |
+| `accounts.list/status/usage/usage_history` | Read configured references and persisted proxy observations. |
+| `accounts.login.start/status/check/complete/cancel` | Manage the single GrantBridge and local proxy account flow. |
+| `models.list` | List exact model IDs observed or configured for proxy routes. |
+| `instances.create/get/list/transfer/export` | Create model-routed conversations and bounded portable context. |
+| `messages.create/list` | Submit and inspect messages. |
+| `turns.get/list/events/stop` | Inspect or explicitly cancel a turn. |
+| `recover` | Mark a lost worker interrupted without rerunning it. |
+| `error_cases.list/get` | Read safe, deduplicated execution failures. |
+| `error_proposals.create/get/validate`, `error_rules.get/activate/deactivate` | Review and activate scoped failure classifications. |
 
-See [error learning](error-learning.md) for request fields, CLI examples and
-the difference between structural validation and verification of an error's
-meaning. Capturing an unknown failure never starts a diagnostic session or
-retries the original work automatically.
-
-The CLI validates provider-specific options before accepting a run. Unsupported controls are rejected. Account selection, retry policy, permissions and external side effects belong to the embedding application. Account status and usage are observations, not proof of future availability. Codex provides live account reads; Cursor provides cached binding checks; Claude reads bound-profile identity and native OAuth quota windows. Cursor SDK account quota remains unavailable. See interface/implementation-status.md for the implemented subset and remaining work.
+The earlier `accounts.quota.reset`, direct diagnosis and native account quota
+paths are unsupported in v2. See [implementation status](interface/implementation-status.md),
+[usage and failures](usage-and-failures.md) and [error learning](error-learning.md)
+for the current boundaries.

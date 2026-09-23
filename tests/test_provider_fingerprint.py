@@ -1,7 +1,6 @@
 """Offline inspection fixtures never resolve accounts, credentials or agents."""
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -71,7 +70,6 @@ def test_schema_json_rejects_duplicates_nonfinite_and_invalid_encoding(data):
 def test_codex_inspection_is_bounded_clean_and_reproducible(native, monkeypatch):
     monkeypatch.setenv('OPENAI_API_KEY', 'fixture-secret')
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'fixture-secret')
-    monkeypatch.setenv('CURSOR_API_KEY', 'fixture-secret')
     first = fingerprint.inspect_surface('codex')
     second = fingerprint.inspect_surface('codex')
     assert first == second
@@ -177,111 +175,11 @@ def test_generated_schema_root_cannot_redirect_to_unrelated_data(tmp_path):
         fingerprint._schemas(root)
 
 
-def cursor_package(root, *, version='1.0.31', status='finished'):
-    types = '''from dataclasses import dataclass
-from typing import Literal
-RunResultStatus = Literal[%r, "error", "cancelled", "expired"]
-''' % status
-    for name in ('AgentOptions', 'LocalAgentOptions', 'SendOptions', 'SDKModel', 'RunResult'):
-        types += '@dataclass\nclass ' + name + ':\n    value: str | None = None\n'
-    root.mkdir()
-    (root / 'types.py').write_text(types)
-    bridge = root / '_vendor' / 'bridge'
-    (bridge / 'dist').mkdir(parents=True)
-    (bridge / 'dist' / 'constants.js').write_text('''export const CURSOR_SDK_BRIDGE_PROTOCOL_VERSION = "sdk.v1";
-export const CURSOR_SDK_BRIDGE_CAPABILITIES = ["agent.create", "run.wait",];
-''')
-    package = bridge / 'node_modules' / '@cursor' / 'sdk'
-    package.mkdir(parents=True)
-    (package / 'package.json').write_text(json.dumps({'name': '@cursor/sdk', 'version': version}))
-    return root
-
-
-@pytest.fixture
-def cursor(tmp_path, monkeypatch):
-    root = cursor_package(tmp_path / 'cursor_sdk')
-    distribution = SimpleNamespace(version='1.0.31', locate_file=lambda name: root)
-    monkeypatch.setattr(fingerprint.importlib.metadata, 'distribution', lambda name: distribution)
-    monkeypatch.setattr(fingerprint, 'read_output', lambda *args, **kwargs: pytest.fail('No provider subprocess for SDK inspection'))
-    return root, distribution
-
-
-def test_cursor_reads_same_interpreter_artifacts_without_importing_sdk(cursor):
-    value = fingerprint.inspect_surface('cursor')
-    assert value['component'] == 'cursor-sdk' and value['version'] == '1.0.31'
-    assert value['evidence_kind'] == 'cursor_python_ast_bridge_v1'
-    assert 'run.wait' in value['surface_names'] and 'python:RunResultStatus' in value['surface_names']
-    assert 'bundled_sdk_version_mismatch' not in value['limitations']
-
-
-def test_cursor_ast_ignores_comments_but_detects_type_and_protocol_changes(cursor):
-    root, _ = cursor
-    original = fingerprint.inspect_surface('cursor')['structural_hash']
-    types = root / 'types.py'
-    types.write_text('# New comment\n' + types.read_text() + '\n')
-    assert fingerprint.inspect_surface('cursor')['structural_hash'] == original
-    types.write_text(types.read_text().replace('finished', 'future_terminal'))
-    changed = fingerprint.inspect_surface('cursor')['structural_hash']
-    assert changed != original
-    bridge = root / '_vendor/bridge/dist/constants.js'
-    bridge.write_text(bridge.read_text().replace('sdk.v1', 'sdk.v2'))
-    assert fingerprint.inspect_surface('cursor')['structural_hash'] != changed
-
-
-def test_cursor_same_structure_new_version_requires_explicit_binding(cursor):
-    root, distribution = cursor
-    first = fingerprint.inspect_surface('cursor')
-    distribution.version = '1.0.32'
-    package = root / '_vendor/bridge/node_modules/@cursor/sdk/package.json'
-    package.write_text(package.read_text().replace('1.0.31', '1.0.32'))
-    second = fingerprint.inspect_surface('cursor')
-    assert first['structural_hash'] == second['structural_hash']
-    assert second['version'] == '1.0.32'
-    assert 'exact_binding_review_required' in second['limitations']
-
-
-def test_cursor_mismatched_bundled_version_cannot_be_reused(cursor):
-    _, distribution = cursor
-    distribution.version = '1.0.32'
-    with pytest.raises(BridgeError) as error:
-        fingerprint.inspect_surface('cursor')
-    assert error.value.code == 'provider_contract_changed'
-    assert error.value.details == {'engine': 'cursor', 'version': '1.0.32', 'component': 'cursor-sdk'}
-
-
-def test_cursor_malformed_sources_are_rejected_without_executing_them(cursor):
-    root, _ = cursor
-    (root / 'types.py').write_text('raise RuntimeError("fixture-secret")\n')
-    with pytest.raises(BridgeError) as error:
-        fingerprint.inspect_surface('cursor')
-    assert 'fixture-secret' not in str(error.value)
-
-
-def test_cursor_method_binding_changes_are_structural_drift(cursor):
-    root, _ = cursor
-    source = root / 'types.py'
-    source.write_text(source.read_text() + '''
-class FixtureResult:
-    @staticmethod
-    def decode(value: str) -> str:
-        return value
-''')
-    first = fingerprint.inspect_surface('cursor')['structural_hash']
-    source.write_text(source.read_text().replace('@staticmethod', '@classmethod'))
-    assert fingerprint.inspect_surface('cursor')['structural_hash'] != first
-
-
-def test_unknown_engine_missing_executable_and_missing_sdk(monkeypatch):
+def test_unknown_engine_and_missing_executable(monkeypatch):
     with pytest.raises(BridgeError) as error:
         fingerprint.inspect_surface('unrecognized')
     assert error.value.code == 'invalid_engine'
     monkeypatch.setattr(fingerprint.shutil, 'which', lambda _: None)
     with pytest.raises(BridgeError) as error:
         fingerprint.inspect_surface('codex')
-    assert error.value.code == 'provider_unavailable'
-    def missing(_):
-        raise fingerprint.importlib.metadata.PackageNotFoundError()
-    monkeypatch.setattr(fingerprint.importlib.metadata, 'distribution', missing)
-    with pytest.raises(BridgeError) as error:
-        fingerprint.inspect_surface('cursor')
     assert error.value.code == 'provider_unavailable'

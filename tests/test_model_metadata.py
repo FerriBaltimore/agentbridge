@@ -1,46 +1,26 @@
 """Catalog fields from native schemas, with no real provider or credentials."""
 import json
 
-from agentbridge import Account, Bridge
+from agentbridge import Bridge
 from agentbridge.catalog import _model
 from agentbridge.commands.model_actions import print_models
+from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
 
-def test_codex_native_reasoning_options_are_available_in_public_catalog(tmp_path, monkeypatch):
-    from agentbridge import catalog
-
-    class Probe:
-        def __init__(self, account):
-            assert account.id == 'fixture'
-
-        def list_models(self):
-            return [
-                {'id': 'fixture-model', 'model': 'wire-model', 'displayName': 'Fixture',
-                 'hidden': False, 'isDefault': True, 'defaultReasoningEffort': 'high',
-                 'supportedReasoningEfforts': [
-                     {'reasoningEffort': 'high', 'description': 'More reasoning'},
-                     {'reasoningEffort': 'future-level', 'description': 'Provider-defined'}],
-                 'inputModalities': ['text', 'image'],
-                 'serviceTiers': [{'id': 'fast', 'name': 'Fast', 'description': 'Faster'}],
-                 'defaultServiceTier': 'fast'},
-                {'id': 'hidden-model', 'hidden': True},
-            ]
-
-    monkeypatch.setattr(catalog, 'CodexAppServerProbe', Probe)
+def test_proxy_catalog_does_not_invent_native_model_metadata(tmp_path):
     with Bridge(tmp_path) as bridge:
-        bridge.register(Account('fixture', 'codex', home=str(tmp_path)))
-        result = bridge.models('codex', account_ref='fixture', refresh=True)
-        assert len(result['items']) == 1
+        register_verified_proxy_account(bridge.store, 'fixture', 11011,
+                                        model='fixture-model', provider='codex')
+        result = bridge.models(account_ref='fixture')
         model = result['items'][0]
-        assert model['reasoning_efforts'] == ['high', 'future-level']
-        assert model['reasoning_effort_options'][0]['description'] == 'More reasoning'
-        assert model['default_reasoning_effort'] == 'high'
-        assert model['default_service_tier'] == 'fast'
-        assert model['resolved_model'] == 'wire-model'
+        assert model['id'] == 'fixture-model'
+        assert model['availability'] == 'proxy_observed'
         assert model['context_windows'] == []
-        assert model['max_output_tokens'] is None
-        assert model['stale'] is False and model['observed_at'] == result['observed_at']
-        assert len(bridge.models('codex', account_ref='fixture', refresh=True, include_hidden=True)['items']) == 2
+        assert model['input_modalities'] == []
+        assert model['reasoning_efforts'] == []
+        assert model['account_capabilities'][0]['metadata_source'] is None
+        assert 'max_output_tokens' not in model
+        assert result['stale'] is False
         assert bridge.runs() == []
 
 
@@ -60,7 +40,7 @@ def test_claude_initialize_effort_fields_do_not_invent_context_or_modalities():
     assert model['availability'] == 'unknown'
 
 
-def test_cursor_parameters_and_variants_preserve_provider_choices_without_inference():
+def test_parameters_and_variants_preserve_provider_choices_without_inference():
     model = _model({'id': 'fixture', 'display_name': 'Fixture', 'parameters': [
         {'id': 'reasoning_effort', 'display_name': 'Reasoning',
          'values': [{'value': 'high', 'display_name': 'High'}, {'value': 'ultra'}]},
@@ -76,7 +56,7 @@ def test_cursor_parameters_and_variants_preserve_provider_choices_without_infere
     assert model['max_output_tokens'] is None
 
 
-def test_cursor_observed_effort_parameter_is_not_confused_with_fast_mode():
+def test_observed_effort_parameter_is_not_confused_with_fast_mode():
     model = _model({'id': 'grok-4.6', 'display_name': 'Grok 4.6', 'parameters': [
         {'id': 'effort', 'display_name': 'Effort', 'values': [
             {'value': 'low'}, {'value': 'medium'}, {'value': 'high'}, {'value': 'xhigh'}]},

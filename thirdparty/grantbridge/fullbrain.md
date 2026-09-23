@@ -1,27 +1,22 @@
 # Future Fullbrain host
 
-Fullbrain can host the same GrantBridge library after the AgentBridge adapter is
-proven locally. During development, AgentBridge remains a valid host and does
-not need a second parent application.
+Fullbrain should use AgentBridge's public login methods rather than call
+GrantBridge or CLIProxyAPI directly. It supplies the authenticated user and
+account scope, displays safe attempt state and keeps mission, workspace and
+business policy outside the authentication layer.
 
-Fullbrain should map its authenticated user and account scope to a GrantBridge
-owner, publish only the attempt ID and safe authorization URL to the cockpit,
-and keep workspace, mission and business-operation policy outside GrantBridge.
+1. Fullbrain prepares or selects an empty, dedicated local CLIProxyAPI sidecar.
+2. It calls `accounts.login.start` with provider, name, proxy URL and key
+   environment variable references and persists `attempt_id` and `owner_ref`.
+3. GrantBridge coordinates provider OAuth through the sidecar Management API.
+   CLIProxyAPI owns the credential. Fullbrain displays the safe authorization
+   challenge but never receives a token or management key value.
+4. Fullbrain polls status, requests a fresh check and completes the account
+   only after AgentBridge verifies one identity and the model catalogue.
+5. Fullbrain chooses a model; AgentBridge selects a compatible account and
+   always runs Codex through that account's proxy route.
 
-The flow should be:
-
-1. Fullbrain admits an authenticated connection request.
-2. GrantBridge starts the provider attempt and stores state and credentials on
-   the execution server.
-3. Fullbrain's edge publishes the authorization URL or hosted browser to the
-   user's phone.
-4. GrantBridge completes and checks the authorization.
-5. Fullbrain records connection metadata and the operation receipt.
-6. AgentBridge receives an account reference and runs the selected agent.
-
-Fullbrain must not import AgentBridge or GrantBridge private SQLite files,
-browser profiles or vault files. It should use public adapter methods and its
-own guarded writers. The same account identity and credential-handoff rules
-apply whether the host is the AgentBridge CLI or Fullbrain. A phone only
-controls the server-side session; it does not become the account that later
-runs Claude, Codex or Cursor.
+The initial browser mode assumes browser and sidecar are on the same host.
+Authenticated remote browser presentation and callback routing need separate
+implementation and live acceptance. Fullbrain must not read private SQLite,
+GrantBridge vault, CLIProxyAPI auth files or browser profiles.

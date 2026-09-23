@@ -8,11 +8,12 @@ import time
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import RunOptions
 from agentbridge.protocols import Parser
 from agentbridge.execution_outcome import finish
 from agentbridge.session_events import routing
 from agentbridge.worker import parse
+from fixtures.test_proxy_worker_fixture import MODEL, bridge_with_proxy, management_server
 
 
 def _running(pid):
@@ -23,7 +24,7 @@ def _running(pid):
 
 
 @pytest.mark.parametrize('inherit_pipe', [False, True])
-def test_wrapper_exit_closes_descendants_instead_of_waiting_for_run_timeout(tmp_path, inherit_pipe):
+def test_wrapper_exit_closes_descendants_instead_of_waiting_for_run_timeout(tmp_path, monkeypatch, inherit_pipe):
     pid_file = tmp_path / 'descendant.pid'
     script = tmp_path / 'provider.py'
     script.write_text('''import json, signal, subprocess, sys
@@ -34,25 +35,26 @@ child = subprocess.Popen([sys.executable, '-c', child_code], stdin=subprocess.DE
 Path(sys.argv[1]).write_text(str(child.pid))
 print(json.dumps({'type':'turn.completed'}), flush=True)
 ''')
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('fixture', 'codex', home=str(tmp_path / 'home'),
-        command=(sys.executable, str(script), str(pid_file), 'inherit' if inherit_pipe else 'closed')))
-    session = bridge.session('fixture', tmp_path)
-    run = bridge.submit(session['id'], 'fixture', options=RunOptions(timeout=20))
-    try:
-        result = run.wait(8)
-        assert result['state'] == 'completed'
-        descendant = int(pid_file.read_text())
-        deadline = time.monotonic() + 2
-        while _running(descendant) and time.monotonic() < deadline:
-            time.sleep(.02)
-        assert not _running(descendant)
-    finally:
-        if pid_file.exists():
-            try:
-                os.kill(int(pid_file.read_text()), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+    with management_server() as port:
+        bridge = bridge_with_proxy(tmp_path, monkeypatch, port,
+            command=(sys.executable, str(script), str(pid_file),
+                     'inherit' if inherit_pipe else 'closed'))
+        session = bridge.session('fixture', tmp_path, model=MODEL)
+        run = bridge.submit(session['id'], 'fixture', options=RunOptions(timeout=20))
+        try:
+            result = run.wait(8)
+            assert result['state'] == 'completed'
+            descendant = int(pid_file.read_text())
+            deadline = time.monotonic() + 2
+            while _running(descendant) and time.monotonic() < deadline:
+                time.sleep(.02)
+            assert not _running(descendant)
+        finally:
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 
 def test_corrupt_stdout_followed_by_complete_does_not_hide_missing_evidence():

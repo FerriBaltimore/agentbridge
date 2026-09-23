@@ -1,29 +1,27 @@
 # Reviewed error learning
 
 AgentBridge captures unfamiliar provider failures as durable local cases. A
-separate, explicitly requested AI session can suggest an existing normalized
-error category. A reviewed rule improves classification of later matching
-failures. It cannot change execution policy, retry work or edit application
-code.
+reviewed rule can improve classification of later matching failures. It cannot
+change execution policy, retry work or edit application code.
 
 ## Safe evidence
 
-Cases retain the provider engine and exact observed version, occurrence count,
-first/last observation and turn references when available. Error evidence is
-limited to hashes, a fixed vocabulary of signals, recognized JSON field shapes
-and an HTTP error status when reported.
+Cases retain the provider label and exact observed version, occurrence count,
+first and last observation, and turn references when available. Error evidence
+is limited to hashes, a fixed vocabulary of signals, recognized JSON field
+shapes and an HTTP error status when reported.
 
 Original error bodies, arbitrary native code strings, private reasoning,
-credentials and free-form AI explanations are not stored in cases or proposals.
+credentials and free-form explanations are not stored in cases or proposals.
 The raw input is inspected only in memory through a bounded field traversal.
 The stored fingerprint is a hash, not a retained copy of the error message.
 
-Safe signals can be too weak to establish a cause. Such a diagnosis must return
-`insufficient_evidence`. An unknown provider feature or new category still
-requires a normal implementation change; the AI does not invent executable
-parsers or extend the accepted categories automatically.
+Safe signals can be too weak to establish a cause. Reviewers should leave such
+cases unclassified. An unknown provider feature or new category requires a
+normal implementation change; a learned rule does not extend the accepted
+categories or add executable parsers.
 
-## Inspect and diagnose
+## Inspect cases and historical diagnoses
 
 All successful `errors` commands return JSON. Service errors return JSON on
 stderr with a nonzero exit status. Command help and argument validation use
@@ -33,44 +31,24 @@ normal CLI output.
 agentbridge errors cases --limit 20
 agentbridge errors cases --limit 20 --cursor 20
 agentbridge errors case CASE_ID
-agentbridge errors diagnose CASE_ID --account-ref "Diagnostic Cursor" \
-  --model MODEL_ID --idempotency-key diagnosis-request-001 --timeout 60
-agentbridge errors diagnosis diagnosis-request-001
+agentbridge errors diagnosis PREVIOUS_REQUEST_KEY
 ```
 
-The diagnosis currently requires an explicitly selected, bound Cursor account
-and model. That account can investigate cases from Codex, Claude or Cursor.
-The diagnostic backend choice does not change the original failed session,
-account or model. It starts a separate model request and may consume usage.
+AI diagnosis has no verified Codex-to-proxy implementation in v2.
+`agentbridge errors diagnose` and `Bridge.error_diagnose` return
+`unsupported_operation` before selecting an account, calling a provider or
+creating an operation. There is no direct provider diagnostic path.
 
-The provider worker receives only validated safe evidence and allowed target
-codes. It uses a disposable empty home, workspace and native state directory,
-without prior conversations, local settings, tools, MCP servers or subagents.
-Credential references are resolved for the explicitly selected account. The
-supervisor destroys the temporary state and provider process group on exit.
-Native SDK scratch state uses a verified writable `tmpfs` at `/dev/shm`,
-including its temporary home and workspace. Diagnosis fails closed on hosts
-without that volatile filesystem instead of writing native transcripts to disk.
-The current isolated diagnostic backend therefore requires Linux with tmpfs.
-
-The diagnostic subprocess elapsed-time bound is 1-120 seconds, default 60.
-Credential resolution precedes that bound. Both the worker
-response and supervisor output are limited to 8 KiB. These bounds are not token
-or monetary budgets. No automatic account or model fallback is performed, and
-the diagnostic bridge disables its connection retries.
-
-The operation is persisted before inference. Reusing its idempotency key reads
-the saved operation instead of launching another session. Conflicting inputs
-are rejected. An interrupted operation can remain `submitted` with an uncertain
-outcome; reading it does not silently repeat inference. A proposal saved before
-an interruption can be reconciled into its receipt.
-Technical failures carry `state: failed` and bounded reason/phase metadata;
-they are not reported as successful AI judgments of insufficient evidence.
+`errors diagnosis` reads a previously saved diagnostic receipt without
+restarting inference. An interrupted historical operation can remain
+`submitted` with an uncertain outcome. If its proposal was saved before an
+interruption, reading the receipt can reconcile it as `completed`. A `failed`
+receipt remains failed; it is not treated as an insufficient-evidence judgment.
 
 ## Validate, review and activate
 
-A completed diagnostic receipt references a proposal. It does not activate it.
-Inspect that proposal and its case, then validate the proposed classification:
+A manually created proposal or a completed historical diagnostic receipt can
+be inspected and validated:
 
 ```sh
 agentbridge errors proposal PROPOSAL_ID
@@ -80,8 +58,8 @@ agentbridge errors validate PROPOSAL_ID
 Validation checks matching boundaries, preservation of known classifications,
 unknown outcomes and the prohibition on automatic retries. Its result states
 `kind: structural_fixture` and `semantic_verification: false`. Passing these
-checks does not prove the AI correctly understood the provider error. Review
-that conclusion before activating the rule.
+checks does not establish that the proposed cause is correct. Review the case
+and proposed conclusion before activating the rule.
 
 ```sh
 agentbridge errors activate PROPOSAL_ID --expected-revision 2
@@ -95,11 +73,11 @@ rule. A stale revision fails instead of changing a record reviewed earlier.
 Activation and deactivation are explicit local mutations, recorded in a durable
 audit. Deactivation preserves the case, proposal and rule history.
 
-A rule matches the exact engine, provider version and evidence fingerprint.
-An unknown version matches only another unknown version; it is not a wildcard.
+A rule matches the exact provider label, version and evidence fingerprint. An
+unknown version matches only another unknown version; it is not a wildcard.
 Rules classify only failures that the built-in adapter could not recognize.
 They cannot override a recognized safety block, account quota, authentication
-failure or another known native classification.
+failure or another known classification.
 
 Learned classifications retain the original execution phase and outcome,
 including unknown effects. They always keep `retryable: false` and
@@ -108,10 +86,11 @@ error. Historical event records are not rewritten by activation.
 
 ## Python API
 
-The CLI uses `Bridge.error_cases`, `error_case`, `error_diagnose`,
-`error_diagnosis`, `error_proposal`, `error_validate`, `error_activate`,
-`error_deactivate` and `error_rule`. Trusted local callers can also create a
-manual candidate through `error_propose(case_id, result)` with exactly:
+The CLI uses `Bridge.error_cases`, `error_case`, `error_diagnosis`,
+`error_proposal`, `error_validate`, `error_activate`, `error_deactivate` and
+`error_rule`. `Bridge.error_diagnose` exists but returns
+`unsupported_operation` in v2. Trusted local callers can create a manual
+candidate through `error_propose(case_id, result)` with exactly:
 
 ```json
 {"status":"proposed","target_code":"provider_unavailable"}

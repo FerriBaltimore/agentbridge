@@ -8,8 +8,8 @@ feature from existing only as a happy-path method.
 The following list records the intended scope. Actual coverage and remaining
 work are in [implementation-status.md](implementation-status.md).
 
-- Provider discovery: engines, versions, capabilities and parameter schemas.
-- Accounts: registration, asynchronous login, status, identity and cancellation.
+- Provider discovery: proxy provider, versions, capabilities and parameters.
+- Accounts: one asynchronous proxy login, status, identity and cancellation.
 - Models: live catalog, cache, static fallback, deprecation and retirement.
 - Instances: create, inspect, list, update, archive and transfer.
 - Messages: text, multimodal blocks, attachments, transcript pagination and
@@ -22,7 +22,7 @@ work are in [implementation-status.md](implementation-status.md).
 
 ## Required adapter behavior
 
-Every engine adapter must define:
+The Codex execution adapter and each upstream proxy provider must define:
 
 - Supported operations and parameters.
 - Validation before admission.
@@ -50,6 +50,7 @@ claim needs a separate provider acceptance record. Tests must cover:
 
 ## Explicit non-goals
 
-AgentBridge does not own OAuth credentials, host authorization policy, provider
-fallback selection, business retries, external side effects or private model
-reasoning. GrantBridge owns authentication material and browser mechanics.
+AgentBridge does not own OAuth credentials, host authorization policy, business
+retries, external side effects or private model reasoning. GrantBridge
+coordinates browser authorization; CLIProxyAPI stores and renews the upstream
+credential. AgentBridge selects an account only before an automatic turn.

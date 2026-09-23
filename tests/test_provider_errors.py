@@ -44,20 +44,20 @@ def test_rate_limit_does_not_become_usage_exhaustion():
 
 
 def test_unknown_provider_fields_are_not_reflected():
-    issue = normalize('cursor', {'code': 'unknown-secret-provider-code',
+    issue = normalize('claude', {'code': 'unknown-secret-provider-code',
                                  'message': 'secret-password', 'details': {'provider_code': {'secret': 'value'}}})
     assert issue['code'] == 'provider_failed'
     assert 'secret' not in json.dumps(issue)
 
 
-def test_cursor_exception_prefers_structured_code_and_never_raw_headers():
+def test_exception_prefers_structured_code_and_never_raw_headers():
     class SDKError(Exception):
         proto_error_code = 'SDK_ERROR_CODE_USAGE_LIMIT_EXCEEDED'
         code = 'resource_exhausted'
         status = 429
         headers = {'Authorization': 'secret-token'}
         details = [{'secret': 'private'}]
-    issue = exception('cursor', SDKError('secret-body'))
+    issue = exception('claude', SDKError('secret-body'))
     assert issue['code'] == 'quota_exhausted'
     assert issue['outcome'] == 'unknown' and issue['retryable'] is False
     assert issue['details']['http_status'] == 429
@@ -106,8 +106,6 @@ def test_codex_preserves_terminal_safety_error_and_ignores_other_turn():
 @pytest.mark.parametrize('engine,event', [
     ('codex', {'type': 'turn.interrupted'}),
     ('claude', {'type': 'result', 'subtype': 'success', 'terminal_reason': 'aborted_tools'}),
-    ('cursor', {'type': 'bridge_result', 'status': 'expired'}),
-    ('cursor', {'type': 'bridge_result', 'status': 'cancelled'}),
 ])
 def test_provider_interruptions_preserve_unknown_outcome(engine, event):
     parsed, _ = parser(engine)

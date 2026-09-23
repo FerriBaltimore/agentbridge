@@ -1,0 +1,115 @@
+# AgentBridge v2 model routing
+
+Codex is the sole execution engine. Every turn sends Codex Responses traffic
+through a dedicated loopback CLIProxyAPI sidecar bound to one upstream account.
+The account's provider is `codex`, `claude` or `grok`; it does not select a
+second execution engine.
+
+## One account onboarding flow
+
+1. `accounts.login.start(provider, name, request_key?)` starts the only account
+   onboarding flow. By default AgentBridge launches an **empty**, dedicated
+   CLIProxyAPI sidecar with its own loopback port and auth directory. It creates
+   transient client and management keys inside the local supervisor. Preparing
+   the sidecar does not register an AgentBridge account. A compatible
+   CLIProxyAPI executable must be installed or selected with
+   `AGENTBRIDGE_CLIPROXY_BIN`.
+2. Advanced callers may supply `proxy_base_url`, `key_env` and
+   `management_key_env` together for an existing, isolated sidecar. The URL
+   must be local and the two key arguments are environment variable names,
+   never values. This uses the same OAuth and binding flow. The Management API
+   is required for every route, including pinned accounts.
+3. GrantBridge coordinates the selected provider's browser OAuth through that
+   sidecar's Management API. CLIProxyAPI stores and renews the upstream OAuth
+   credential. AgentBridge keeps durable attempt state; GrantBridge returns
+   sanitized authorization evidence without an OAuth token or provider error
+   body.
+4. `accounts.login.status` reports the attempt. `accounts.login.check` verifies
+   one active upstream credential, its identity and the sidecar model catalogue.
+   `accounts.login.complete` repeats the required checks and atomically creates
+   the account. Failed, cancelled, ambiguous or changed identity cannot become
+   a usable account. `accounts.login.cancel` explicitly stops a pending attempt
+   when the proxy confirms it. A missing OAuth state has an unknown outcome:
+   inspect the sidecar for a credential it may have saved, explicitly abandon
+   the local attempt, and use a fresh dedicated sidecar endpoint for a retry.
+   Local abandonment does not claim that remote OAuth was cancelled.
+
+The CLI's blocking `accounts login` uses this same flow. The restart-safe form
+uses `accounts login-start`, then `login-status`, `login-check` and
+`login-complete`. Neither registration nor SDK access offers a second way to
+create a usable account. The initial browser route assumes browser and sidecar
+are on the same host; remote OAuth browser acceptance remains pending.
+
+```sh
+agentbridge accounts login --provider codex --name Example
+```
+
+The proxy client key goes to Codex at execution time. The management key is
+used only for local authorization, identity, catalogue and quota observation;
+it is never passed to Codex or exposed in public account projections. Managed
+key values remain in supervisor memory, not the AgentBridge database. The
+isolated auth directory belongs to CLIProxyAPI. A missing management key
+blocks both automatic and pinned execution.
+
+## Model and turn flow
+
+`models.list` aggregates exact configured IDs for completed proxy accounts.
+Each item distinguishes configured candidate accounts from accounts freshly
+observed at the sidecar. A listed model is local route evidence, not proof of
+live provider entitlement. Missing metadata stays unknown.
+
+When the proxy client model API reports reasoning levels or a context-window
+maximum, `models.list` projects those controls per account. It intersects
+reasoning levels across observed accounts for automatic routing and uses the
+smallest reported context maximum. The playground derives its selectors from
+these SDK fields. A per-turn numeric context override becomes Codex's
+`model_context_window` setting; upstream acceptance still requires a live turn.
+
+`instances.create(model, workspace_path?, account_ref?, provider?, idempotency_key?)`
+selects an eligible proxy account when `account_ref` is omitted. `provider`
+restricts automatic selection to accounts of that provider and is persisted
+for every later turn. A supplied `account_ref` pins that account and still
+requires fresh Management API verification; it cannot be combined with
+`provider`. `messages.create` may reselect an account **between** automatic
+turns. The chosen endpoint remains fixed during a complete turn, including
+tool calls. A change starts a fresh Codex thread with bounded portable context
+and explicit omissions. No new turn can execute through an older direct
+Codex or Claude Code account.
+
+Every selected route must have one active upstream auth file, a clean inventory
+with no hidden API-key or plugin credential route, a stable provider identity,
+the requested exact model in the local catalogue, and available proxy client
+and management keys. The safe identity binding uses SHA-256 fingerprints of
+CLIProxyAPI's `auth_index` and an allowlisted account identifier. For Codex
+OAuth, the identifier comes from `id_token.chatgpt_account_id`; for other
+OAuth providers, an observed email is required. API-key credentials are not
+part of the account login flow. Missing, changed or duplicate identities
+block selection. CLIProxyAPI config-key-only routes are ineligible until the
+proxy exposes a complete attributable inventory.
+
+The scheduler excludes known unavailable or cooling-down accounts and compares
+fresh, applicable quota by used percentage. Known capacity takes priority
+over unknown capacity. If quota cannot be compared, persisted turn counts
+provide a deterministic fairness tie-breaker, not a quota claim. Missing or
+stale usage never means zero.
+
+The account decision and evidence are persisted before execution. An unknown
+outcome, Stop or quota error never authorizes an implicit rerun through another
+account. CLIProxyAPI can change credentials within a request even with retry
+rounds disabled, so the sidecar must stay dedicated to one credential and must
+not be reconfigured during a turn. Strict external pinning requires an
+exclusive sidecar configuration or a proxy-level credential pin.
+
+`accounts.delete` retires an AgentBridge account from selection and onboarding
+name checks after confirming no turn or login is active. Its conversation and
+turn evidence remain readable. This local operation does not remove or revoke
+the OAuth credential in CLIProxyAPI; the operator manages that sidecar
+separately.
+
+## Acceptance boundary
+
+The [CLIProxyAPI lab](../development/cli-proxy-api-lab.md) and v2 integration
+tests verify request routing, a tool loop, local identity checks and automatic
+selection with fixtures. They do not prove live OAuth login, model entitlement,
+quota accuracy or cross-account continuation. Each provider and model needs
+separate live acceptance before those capabilities are claimed.

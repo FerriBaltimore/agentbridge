@@ -66,7 +66,7 @@ NATIVE_CODES = {
 }
 CANONICAL = set(NATIVE_CODES.values()) | {
     'provider_failed', 'provider_protocol_error', 'unknown_outcome',
-    'cursor_sdk_unavailable', 'worker_failed', 'provider_error',
+    'worker_failed', 'provider_error',
     'unsupported_parameter', 'provider_catalog_unsupported', 'unsupported',
 }
 UNKNOWN_OUTCOMES = {'provider_timeout', 'provider_connection_lost', 'provider_protocol_error',
@@ -201,7 +201,7 @@ def normalize(engine, value, *, terminal=True, outcome=None, phase='execution', 
 
 
 def exception(engine, error):
-    """Cursor SDK exposes structured exception fields, never copy details or headers."""
+    """Project only bounded structured exception fields, never details or headers."""
     value = {key: getattr(error, key, None) for key in ('code', 'proto_error_code', 'status')}
     value['message'] = str(error)[:16384]
     if isinstance(error, TimeoutError):

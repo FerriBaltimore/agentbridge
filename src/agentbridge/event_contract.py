@@ -14,6 +14,7 @@ EVENT_KINDS = {
     "error": "run.error",
     "compaction": "context.compacted",
     "model_changed": "model.changed",
+    "route_selected": "route.selected",
     "retry": "run.retrying",
     "permission_required": "permission.required",
     "permission_denied": "permission.denied",

@@ -1,141 +1,88 @@
+"""Proxy-only diagnosis preserves historical receipts without executing AI."""
 import json
 
 import pytest
 
-from agentbridge import Account, Bridge, BridgeError
+from agentbridge import Bridge, BridgeError
 from agentbridge import error_diagnosis
 from agentbridge.error_evidence import capture
+from agentbridge.store import dumps
 
 
-def setup(tmp_path, monkeypatch):
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
+def test_diagnosis_rejects_before_account_lookup_or_receipt_creation(tmp_path):
     bridge = Bridge(tmp_path / 'store')
-    bridge.register(Account('diagnostic', 'cursor', key_env='FIXTURE_CURSOR_KEY'))
-    monkeypatch.setenv('FIXTURE_CURSOR_KEY', 'private-credential')
-    case = bridge.error_learning.capture('claude', capture({'message': 'quota allocation exhausted'}))
-    return bridge, case['id']
+    with bridge.store.connect() as db:
+        before = {row[0] for row in db.execute('SELECT name FROM sqlite_master WHERE type="table"')}
+    with pytest.raises(BridgeError) as failure:
+        bridge.error_diagnose('missing-case', account_ref='missing-account', model='fixture',
+                              idempotency_key='never-submitted')
+    assert failure.value.code == 'unsupported_operation'
+    with bridge.store.connect() as db:
+        after = {row[0] for row in db.execute('SELECT name FROM sqlite_master WHERE type="table"')}
+    assert after == before
+    assert 'error_diagnoses' not in after
 
 
-def test_diagnosis_idempotence_pending_review_and_restart(tmp_path, monkeypatch):
-    bridge, case_id = setup(tmp_path, monkeypatch)
-    calls = []
-    def execute(payload, credentials, timeout):
-        calls.append(payload)
-        assert credentials == {'FIXTURE_CURSOR_KEY': 'private-credential'}
-        assert timeout == 20
-        return {'status': 'proposed', 'target_code': 'quota_exhausted'}
-    monkeypatch.setattr(error_diagnosis, 'execute', execute)
-    kwargs = {'account_ref': 'diagnostic', 'model': 'fixture', 'idempotency_key': 'diagnose-once', 'timeout': 20}
-    first = bridge.error_diagnose(case_id, **kwargs)
-    assert first['state'] == 'completed'
+def test_historical_completed_and_failed_receipts_remain_readable(tmp_path):
+    bridge = Bridge(tmp_path / 'store')
+    error_diagnosis._initialize(bridge.store)
+    with bridge.store.connect() as db:
+        db.execute('INSERT INTO error_diagnoses VALUES(?,?,?,?,?,?,?)',
+                   ('saved-success', 'operation-success', '{}', 'completed',
+                    dumps({'proposal_id': 'saved-proposal'}), 1.0, 2.0))
+        db.execute('INSERT INTO error_diagnoses VALUES(?,?,?,?,?,?,?)',
+                   ('saved-failure', 'operation-failure', '{}', 'failed',
+                    dumps({'code': 'diagnosis_failed', 'retryable': False}), 3.0, 4.0))
     restarted = Bridge(bridge.root)
-    assert restarted.error_diagnose(case_id, **kwargs) == first and len(calls) == 1
-    proposal = restarted.error_proposal(first['result']['proposal_id'])
-    assert proposal['status'] == 'proposed'
-    assert proposal['provenance'] == {'source': 'ai_session', 'operation_id': first['operation_id']}
-    assert b'private-credential' not in bridge.store.path.read_bytes()
-    with pytest.raises(BridgeError, match='another request'):
-        restarted.error_diagnose(case_id, **{**kwargs, 'model': 'different'})
+    completed = restarted.error_diagnosis('saved-success')
+    failed = restarted.error_diagnosis('saved-failure')
+    assert completed == {'operation_id': 'operation-success', 'state': 'completed',
+                         'result': {'proposal_id': 'saved-proposal'}, 'created_at': 1.0,
+                         'updated_at': 2.0, 'retryable': False, 'may_be_running': False}
+    assert failed['state'] == 'failed'
+    assert failed['result'] == {'code': 'diagnosis_failed', 'retryable': False}
+    with pytest.raises(BridgeError) as missing:
+        restarted.error_diagnosis('never-submitted')
+    assert missing.value.code == 'not_found'
 
 
-def test_unknown_diagnostic_outcome_does_not_relaunch(tmp_path, monkeypatch):
-    bridge, case_id = setup(tmp_path, monkeypatch)
-    calls = []
-    def execute(*_):
-        calls.append(1)
-        raise KeyboardInterrupt()
-    monkeypatch.setattr(error_diagnosis, 'execute', execute)
-    kwargs = {'account_ref': 'diagnostic', 'model': 'fixture', 'idempotency_key': 'interrupted'}
-    with pytest.raises(KeyboardInterrupt):
-        bridge.error_diagnose(case_id, **kwargs)
-    result = Bridge(bridge.root).error_diagnose(case_id, **kwargs)
-    assert result['state'] == 'submitted' and result['retryable'] is False
-    assert len(calls) == 1
+def test_historical_submitted_receipt_reconciles_saved_proposal(tmp_path):
+    bridge = Bridge(tmp_path / 'store')
+    operation_id = 'a' * 32
+    case = bridge.error_learning.capture('codex', capture({'message': 'capacity unavailable'}))
+    proposal = bridge.error_learning.propose(case['id'],
+        {'status': 'proposed', 'target_code': 'provider_unavailable'},
+        provenance={'source': 'ai_session', 'operation_id': operation_id})
+    error_diagnosis._initialize(bridge.store)
+    with bridge.store.connect() as db:
+        db.execute('INSERT INTO error_diagnoses VALUES(?,?,?,?,?,?,?)',
+                   ('saved-submitted', operation_id, '{}', 'submitted', None, 1.0, 1.0))
+    receipt = Bridge(bridge.root).error_diagnosis('saved-submitted')
+    assert receipt['state'] == 'completed'
+    assert receipt['result'] == {'proposal_id': proposal['id']}
+    assert receipt['retryable'] is False and receipt['may_be_running'] is False
+    assert Bridge(bridge.root).error_diagnosis('saved-submitted') == receipt
 
 
-def test_reconcile_proposal_saved_before_receipt(tmp_path, monkeypatch):
-    bridge, case_id = setup(tmp_path, monkeypatch)
-    def execute(*_):
-        with bridge.store.connect() as db:
-            operation_id = db.execute('SELECT operation_id FROM error_diagnoses').fetchone()[0]
-        bridge.error_learning.propose(case_id, {'status': 'proposed', 'target_code': 'quota_exhausted'},
-            provenance={'source': 'ai_session', 'operation_id': operation_id})
-        raise KeyboardInterrupt()
-    monkeypatch.setattr(error_diagnosis, 'execute', execute)
-    with pytest.raises(KeyboardInterrupt):
-        bridge.error_diagnose(case_id, account_ref='diagnostic', model='fixture', idempotency_key='saved')
-    receipt = Bridge(bridge.root).error_diagnosis('saved')
-    assert receipt['state'] == 'completed' and receipt['result']['proposal_id']
+def test_historical_submitted_receipt_without_proposal_stays_uncertain(tmp_path):
+    bridge = Bridge(tmp_path / 'store')
+    error_diagnosis._initialize(bridge.store)
+    with bridge.store.connect() as db:
+        db.execute('INSERT INTO error_diagnoses VALUES(?,?,?,?,?,?,?)',
+                   ('saved-uncertain', 'b' * 32, '{}', 'submitted', None, 1.0, 1.0))
+    receipt = Bridge(bridge.root).error_diagnosis('saved-uncertain')
+    assert receipt['state'] == 'submitted' and receipt['result'] is None
+    assert receipt['retryable'] is False and receipt['may_be_running'] is True
 
 
-@pytest.mark.parametrize('value', [
-    {'status': 'proposed', 'target_code': 'quota_exhausted', 'secret': 'private-body'},
-    {'status': 'execute', 'target_code': 'run_shell'},
-    {'status': 'proposed', 'target_code': 'unknown-private-code'},
-])
-def test_invalid_ai_result_is_not_persisted_or_recursively_diagnosed(tmp_path, monkeypatch, value):
-    bridge, case_id = setup(tmp_path, monkeypatch)
-    monkeypatch.setattr(error_diagnosis, 'execute', lambda *_: value)
-    result = bridge.error_diagnose(case_id, account_ref='diagnostic', model='fixture', idempotency_key='invalid')
-    assert result['state'] == 'failed'
-    assert len(bridge.error_cases()['items']) == 1
-    assert b'private' not in bridge.store.path.read_bytes()
-
-
-def test_insufficient_evidence_stays_unclassified(tmp_path, monkeypatch):
-    bridge, case_id = setup(tmp_path, monkeypatch)
-    monkeypatch.setattr(error_diagnosis, 'execute', lambda *_: {'status': 'insufficient_evidence', 'target_code': None})
-    result = bridge.error_diagnose(case_id, account_ref='diagnostic', model='fixture', idempotency_key='insufficient')
-    proposal = bridge.error_proposal(result['result']['proposal_id'])
-    assert proposal['status'] == 'insufficient_evidence'
-    with pytest.raises(BridgeError):
-        bridge.error_validate(proposal['id'])
-
-
-def test_unindexed_diagnostic_sdk_is_not_executed(tmp_path, monkeypatch):
-    bridge, case_id = setup(tmp_path, monkeypatch)
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.32')
-    def unexpected(*args, **kwargs):
-        pytest.fail('Unknown diagnostic SDK must not access credentials or execute')
-    monkeypatch.setattr(error_diagnosis, 'environment', unexpected)
-    monkeypatch.setattr(error_diagnosis, 'execute', unexpected)
-    args = {'account_ref': 'diagnostic', 'model': 'fixture', 'idempotency_key': 'unknown-version'}
-    value = bridge.error_diagnose(case_id, **args)
-    assert value['state'] == 'failed'
-    assert value['result']['code'] == 'provider_contract_unverified'
-    assert bridge.error_diagnose(case_id, **args) == value
-
-
-@pytest.mark.parametrize('mode', ['completed', 'timeout', 'oversized'])
-def test_supervisor_enforces_bounds_and_cleans_ephemeral_home(tmp_path, monkeypatch, mode):
-    import os
-    from pathlib import Path
-    import subprocess
-    import sys
-    script = tmp_path / 'diagnostic.py'
-    script.write_text('import json,os,sys,time\n'
-        'sys.stdin.read()\n'
-        "assert os.environ['HOME'] == os.getcwd()\n"
-        "assert os.environ.get('UNRELATED_SECRET') is None\n"
-        "assert os.environ['FIXTURE_KEY'] == 'credential-only-in-memory'\n"
-        + ('time.sleep(10)\n' if mode == 'timeout' else
-           "sys.stdout.write('x'*9000)\nsys.stdout.flush()\n" if mode == 'oversized' else
-           "print(json.dumps({'status':'insufficient_evidence','target_code':None}))\n"))
-    original = subprocess.Popen
-    children, folders = [], []
-    def popen(argv, **kwargs):
-        folders.append(Path(kwargs['cwd']))
-        child = original([sys.executable, str(script)], **kwargs)
-        children.append(child)
-        return child
-    monkeypatch.setenv('UNRELATED_SECRET', 'must-not-leak')
-    monkeypatch.setattr(subprocess, 'Popen', popen)
-    if mode == 'completed':
-        assert error_diagnosis.execute({}, {'FIXTURE_KEY': 'credential-only-in-memory'}, 2)['status'] == 'insufficient_evidence'
-    else:
-        with pytest.raises(BridgeError):
-            error_diagnosis.execute({}, {'FIXTURE_KEY': 'credential-only-in-memory'}, .3)
-    assert children[0].poll() is not None
-    assert not folders[0].exists()
-    with pytest.raises(ProcessLookupError):
-        os.killpg(children[0].pid, 0)
+def test_historical_failure_adapter_exposes_only_known_fields():
+    value = {'status': 'failed', 'reason': 'provider_failed', 'phase': 'send',
+             'provider_code': 'provider_unavailable', 'private_body': 'secret'}
+    result = error_diagnosis.safe_failure(value)
+    assert result == {'code': 'diagnosis_failed', 'retryable': False,
+                      'reason': 'provider_failed', 'phase': 'send',
+                      'provider_code': 'provider_unavailable'}
+    assert 'secret' not in json.dumps(result)
+    assert error_diagnosis.safe_failure({'status': 'completed'}) is None
+    assert error_diagnosis.safe_failure({'status': 'failed', 'reason': [], 'phase': {}}) == {
+        'code': 'diagnosis_failed', 'retryable': False}

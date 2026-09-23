@@ -1,6 +1,6 @@
 # AgentBridge
 
-Reusable Python SDK, CLI and JSON-RPC stdio API for Codex, Claude Code and Cursor.
+Reusable Python SDK, CLI and JSON-RPC stdio API for Codex execution through local provider proxies.
 
 - Keep the core independent of Fullbrain, machine paths, UI, mission state and credentials.
 - All product-authored CLI output, help, labels and errors must be in English, regardless of the conversation language. Preserve user-supplied account names and other data as entered.

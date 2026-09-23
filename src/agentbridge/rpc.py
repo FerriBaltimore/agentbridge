@@ -16,8 +16,11 @@ def public_account(account, status=None):
         'account_ref': value.get('name') or value.get('id') or value.get('account_ref'),
         'name': value.get('name'),
         'email': value.get('email'),
-        'engine': value.get('engine'),
     }
+    if value.get('provider'):
+        result['provider'] = value['provider']
+    if value.get('supported_models'):
+        result['supported_models'] = list(value['supported_models'])
     if status:
         result['authentication'] = status.get('authentication', {})
         result['identity'] = status.get('identity', {})
@@ -56,7 +59,9 @@ def dispatch(bridge,method,params):
         accounts = bridge.accounts(**params)
         return [public_account(account, bridge.account_status(account.id)) for account in accounts]
     if method=='accounts.register':
-        raise BridgeError('unsupported', 'Accounts must be linked through login or a managed local adapter.')
+        raise BridgeError('authentication_required', 'Create accounts through the proxy login flow.')
+    if method=='accounts.delete':
+        return bridge.account_delete(**params)
     if method=='accounts.status':
         value = dict(params)
         value['account_id'] = value.pop('account_ref', value.pop('account_id', None))

@@ -1,107 +1,100 @@
-"""Published metadata and unavailable discovery must not become invented facts."""
+"""Model discovery trusts only configured and verified local proxy evidence."""
+import json
+
 from types import SimpleNamespace
 
 import pytest
 
-from agentbridge import Account, Bridge, BridgeError
-from agentbridge.account_probe import CodexAppServerProbe, stamp
-from agentbridge.catalog import _model
-from agentbridge.cursor_options import model_selection
-from agentbridge import claude_account, provider_catalog
+from agentbridge import Bridge, BridgeError
+from agentbridge import provider_catalog
+from agentbridge.catalog import ModelCatalog
+from fixtures.test_proxy_account_fixture import proxy_account, register_verified_proxy_account
 
 
-def test_unobserved_catalog_has_no_hardcoded_models_or_validity(tmp_path):
+def test_empty_proxy_catalog_does_not_invent_provider_models(tmp_path):
     with Bridge(tmp_path) as bridge:
-        for engine in ('codex', 'claude', 'cursor'):
-            result = bridge.models(engine)
-            assert result['items'] == [] and result['models'] == []
-            assert result['supported'] is False and result['stale'] is True
-            assert result['source'] == 'static'  # Legacy wire label, never provider evidence.
-            assert result['reason'] == 'live_catalog_requires_account'
+        result = bridge.models()
+        assert result['items'] == [] and result['models'] == []
+        assert result['source'] == 'agentbridge_routing'
+        assert result['stale'] is False
 
 
-def test_missing_flags_and_malformed_metadata_remain_unknown():
-    value = _model({'id': 'future-model', 'isDefault': 'false', 'deprecated': 0,
-                    'toolSupport': {}, 'subagentSupport': 'true', 'displayName': False,
-                    'defaultReasoningEffort': ['high'], 'variants': [{}], 'serviceTiers': 'fast'})
-    assert value['is_default'] is value['deprecated'] is None
-    assert value['tool_support'] is value['subagent_support'] is None
-    assert value['display_name'] == 'future-model' and value['default_reasoning_effort'] is None
-    assert value['variants'][0]['is_default'] is None and value['service_tiers'] == []
-
-
-def test_upgrade_target_is_not_a_retirement_date_or_deprecation_claim():
-    value = _model({'id': 'future-model', 'upgradeTo': 'replacement',
-                    'upgradeInfo': {'model': 'replacement', 'retirementAt': 2000},
-                    'multiAgentVersion': 'v99', 'modelSpecialty': 'future-specialty'})
-    assert value['retirement'] is None and value['deprecated'] is None
-    assert value['upgrade'] == 'replacement' and value['upgrade_info']['retirementAt'] == 2000
-    assert value['multi_agent_version'] == 'v99' and value['subagent_support'] is None
-    assert value['model_specialty'] == 'future-specialty'
-
-
-@pytest.mark.parametrize('items', [[{'id': 'ok'}, {'id': ['bad']}], [{'id': 'same'}, {'id': 'same'}], {}])
-def test_catalog_drift_does_not_return_a_fresh_partial_catalog(tmp_path, monkeypatch, items):
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '1.0.31')
-    monkeypatch.setattr(provider_catalog, 'models', lambda _: items)
+def test_engine_specific_catalog_requests_are_rejected(tmp_path):
     with Bridge(tmp_path) as bridge:
-        bridge.register(Account('fixture', 'cursor'))
-        result = bridge.models('cursor', account_ref='fixture', refresh=True)
-        assert result['supported'] is False and result['stale'] is True
-        assert result['models'] == [] and result['reason'] == 'provider_protocol_error'
+        for engine in ('codex', 'claude', 'grok'):
+            with pytest.raises(BridgeError) as error:
+                bridge.models(engine)
+            assert error.value.code == 'unsupported_parameter'
 
 
-def test_invalid_refresh_flags_are_not_coerced_to_network_requests(tmp_path):
+@pytest.mark.parametrize('flag', ['refresh', 'include_hidden', 'include_deprecated'])
+@pytest.mark.parametrize('value', ['false', 0, None])
+def test_catalog_flags_require_booleans(tmp_path, flag, value):
     with Bridge(tmp_path) as bridge:
         with pytest.raises(BridgeError) as error:
-            bridge.models('codex', refresh='false')
-    assert error.value.code == 'invalid_input'
+            bridge.models(**{flag: value})
+        assert error.value.code == 'invalid_input'
 
 
-@pytest.mark.parametrize('result', [{}, {'models': []}, {'data': None}])
-def test_codex_model_page_requires_published_data_field(tmp_path, monkeypatch, result):
-    probe = CodexAppServerProbe(Account('fixture', 'codex', home=str(tmp_path)))
-    monkeypatch.setattr(probe, '_rpc', lambda method, params: result)
-    with pytest.raises(BridgeError) as error:
-        probe.list_models()
-    assert error.value.code == 'provider_protocol_error'
+def test_verified_proxy_models_have_no_invented_metadata(tmp_path):
+    with Bridge(tmp_path) as bridge:
+        register_verified_proxy_account(bridge.store, 'codex-a', 11011,
+                                        model='fixture-model', provider='codex')
+        result = bridge.models()
+        assert result['stale'] is False
+        assert result['items'] == [{
+            'id': 'fixture-model', 'display_name': 'fixture-model',
+            'availability': 'proxy_observed', 'source': 'account_configuration',
+            'candidate_account_refs': ['codex-a'], 'observed_account_refs': ['codex-a'],
+            'providers': ['codex'], 'reasoning_efforts': [],
+            'context_windows': [], 'input_modalities': [],
+            'account_capabilities': [{
+                'account_ref': 'codex-a', 'provider': 'codex', 'observed': True,
+                'reasoning_efforts': [], 'default_reasoning_effort': None,
+                'context_windows': [], 'input_modalities': [], 'metadata_source': None,
+            }],
+        }]
 
 
-@pytest.mark.parametrize('account', [{}, {'type': 'future-auth-mode'}, ['chatgpt']])
-def test_codex_account_shape_cannot_invent_authenticated_status(tmp_path, monkeypatch, account):
-    probe = CodexAppServerProbe(Account('fixture', 'codex', home=str(tmp_path)))
-    monkeypatch.setattr(probe, '_rpc', lambda method, params: {'account': account, 'requiresOpenaiAuth': 'false'})
-    result = probe.read()
-    assert result['status'] == 'provider_protocol_error'
-    assert result['requires_openai_auth'] is None
+def test_unverified_proxy_observation_cannot_be_reported_as_live(tmp_path):
+    with Bridge(tmp_path) as bridge:
+        account = proxy_account('codex-a', 11011, model='fixture-model', provider='codex')
+        with bridge.store.connect() as db:
+            db.execute('INSERT INTO accounts(id,config) VALUES (?,?)',
+                       (account.id, json.dumps(account.to_dict())))
+        bridge.store.account_observation('codex-a', 'cliproxy_management', 'unknown', {
+            'verified': False, 'reason': 'proxy_observation_unavailable',
+            'models': [{'id': 'fixture-model'}],
+        })
+        result = bridge.models()
+        assert result['stale'] is True
+        assert result['items'][0]['availability'] == 'configured_unverified'
+        assert result['items'][0]['observed_account_refs'] == []
+        assert result['items'][0]['candidate_account_refs'] == ['codex-a']
 
 
-def test_codex_unknown_auth_requirement_is_not_false(tmp_path, monkeypatch):
-    probe = CodexAppServerProbe(Account('fixture', 'codex', home=str(tmp_path)))
-    monkeypatch.setattr(probe, '_rpc', lambda method, params: {})
-    result = probe.read()
-    assert result['status'] == 'unknown' and result['requires_openai_auth'] is None
-    assert stamp(0) == '1970-01-01T00:00:00+00:00'
+def test_pagination_and_account_filter_use_proxy_route_catalog(tmp_path):
+    with Bridge(tmp_path) as bridge:
+        register_verified_proxy_account(bridge.store, 'codex-a', 11011,
+                                        model='model-a', provider='codex')
+        register_verified_proxy_account(bridge.store, 'claude-b', 11012,
+                                        model='model-b', provider='claude')
+        first = bridge.models(limit=1)
+        assert [item['id'] for item in first['items']] == ['model-a']
+        assert first['has_more'] and first['next_cursor'] == 1
+        assert [item['id'] for item in bridge.models(cursor=first['next_cursor'])['items']] == ['model-b']
+        selected = bridge.models(account_ref='claude-b')
+        assert [item['id'] for item in selected['items']] == ['model-b']
+        assert selected['items'][0]['providers'] == ['claude']
 
 
-def test_cursor_malformed_parameter_identifiers_fail_before_model_submission():
-    with pytest.raises(BridgeError) as error:
-        model_selection('fixture', 'high', sdk=None, api_key='fixture-key', catalog=[{
-            'id': 'fixture', 'parameters': [{'id': ['reasoning_effort'], 'values': [{'value': 'high'}]}]}])
-    assert error.value.code == 'provider_protocol_error'
+def test_retired_direct_catalog_adapters_cannot_open_provider_credentials(tmp_path, monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail('direct provider catalog was called')
 
-
-def test_unknown_provider_is_not_routed_to_cursor_catalog(tmp_path, monkeypatch):
-    monkeypatch.setattr(provider_catalog, 'environment', lambda _: pytest.fail('must reject before credentials'))
-    with pytest.raises(BridgeError) as error:
-        provider_catalog.models(SimpleNamespace(engine='future-engine'))
-    assert error.value.code == 'unsupported_operation'
-
-
-def test_claude_truthy_auth_string_is_not_an_authenticated_profile(tmp_path, monkeypatch):
-    account = Account('fixture', 'claude', home=str(tmp_path))
-    monkeypatch.setattr(claude_account, 'environment', lambda _: {})
-    monkeypatch.setattr(claude_account.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout=b'{"loggedIn":"false","email":"fixture@example.test"}'))
-    with pytest.raises(BridgeError):
-        claude_account.identity(account)
+    monkeypatch.setattr('subprocess.Popen', forbidden)
+    for adapter in (lambda: provider_catalog.models(SimpleNamespace(engine='claude')),
+                    lambda: ModelCatalog(None).list('codex', refresh=True)):
+        with pytest.raises(BridgeError) as error:
+            adapter()
+        assert error.value.code == 'unsupported_operation'

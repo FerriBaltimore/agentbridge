@@ -9,6 +9,9 @@ import pytest
 from agentbridge import Account, Bridge
 from agentbridge.errors import BridgeError
 from agentbridge import native
+from fixtures.test_proxy_account_fixture import (register_verified_proxy_account,
+                                                seed_authenticated_proxy_account)
+from test_proxy_management import EMPTY_CONFIG, local_management
 
 
 def artifact(home, version='0.153.0', native_id='fixture-native', engine='codex'):
@@ -117,32 +120,62 @@ def test_newest_unknown_index_schema_does_not_fall_back_to_an_old_database(tmp_p
         assert db.execute('SELECT marker FROM threads').fetchone()[0] == 'old-target'
 
 
-def test_native_transfer_validation_does_not_claim_cursor_file_support(tmp_path):
+def test_native_transfer_validation_is_unavailable_for_proxy_accounts(tmp_path):
     bridge = Bridge(tmp_path / 'store')
-    bridge.register(Account('source', 'cursor'))
-    bridge.register(Account('target', 'cursor'))
-    session = bridge.session('source', tmp_path, model='fixture')
+    register_verified_proxy_account(bridge.store, 'source', 19501)
+    register_verified_proxy_account(bridge.store, 'target', 19502)
+    bridge.store.add_session('source-session', 'source', str(tmp_path), 'fixture-model')
+    session = bridge.get_session('source-session')
     with bridge.store.connect() as db:
         db.execute('UPDATE sessions SET native_id=? WHERE id=?', ('native-fixture', session['id']))
     result = bridge.transfer(session['id'], 'target', mode='native', validate_only=True)
     assert result['supported'] is False and result['reason'] == 'native_continuation_unavailable'
 
 
-def test_auto_transfer_uses_portable_evidence_when_private_versions_differ(tmp_path, monkeypatch):
-    source_home, target_home = tmp_path / 'source', tmp_path / 'target'
-    artifact(source_home)
-    target_home.mkdir()
-    cli(monkeypatch, '0.154.0')
+def test_portable_transfer_validation_requires_observed_target(tmp_path, monkeypatch):
     bridge = Bridge(tmp_path / 'store')
-    bridge.register(Account('source', 'codex', home=str(source_home), command=('fake',)))
-    bridge.register(Account('target', 'codex', home=str(target_home), command=('fake',)))
-    session = bridge.session('source', tmp_path)
-    with bridge.store.connect() as db:
-        db.execute('UPDATE sessions SET native_id=? WHERE id=?', ('fixture-native', session['id']))
-    result = bridge.transfer(session['id'], 'target', mode='auto')
-    assert result['transfer_mode'] == 'portable'
-    assert result['fallback_reason'] == 'native_version_unverified'
-    assert list(target_home.iterdir()) == []
+    register_verified_proxy_account(bridge.store, 'source', 19504)
+    register_verified_proxy_account(bridge.store, 'target', 19505)
+    bridge.store.add_session('source-session', 'source', str(tmp_path), 'fixture-model')
+    monkeypatch.setattr(bridge.routes, 'observation', lambda *_args, **_kwargs: None)
+    result = bridge.transfer('source-session', 'target', mode='portable', validate_only=True)
+    assert result == {'supported': False, 'mode': 'portable', 'same_engine': True,
+                      'reason': 'proxy_binding_unverified'}
+
+
+def test_auto_transfer_uses_portable_evidence_between_proxy_accounts(tmp_path, monkeypatch):
+    monkeypatch.setenv('LAB_PROXY_KEY', 'fixture-client-key')
+    monkeypatch.setenv('LAB_MANAGEMENT_KEY', 'fixture-management-key')
+    responses = {
+        '/v0/management/config': (200, EMPTY_CONFIG, {}),
+        '/v0/management/auth-files': (200, {'files': [{
+            'name': 'target.json', 'auth_index': 'target-index', 'account_type': 'oauth',
+            'provider': 'codex', 'status': 'active', 'disabled': False,
+            'unavailable': False, 'source': 'file', 'runtime_only': False,
+            'id_token': {'chatgpt_account_id': 'target-person'}, 'cooldowns': []}]}, {}),
+        '/v0/management/auth-files/models?name=target.json': (
+            200, {'models': [{'id': 'fixture-model'}]}, {}),
+    }
+    with local_management(responses) as (port, _):
+        bridge = Bridge(tmp_path / 'store')
+        register_verified_proxy_account(bridge.store, 'source', 19503)
+        seed_authenticated_proxy_account(bridge.store, Account('target', 'codex', provider='codex',
+            supported_models=('fixture-model',), proxy_base_url=f'http://127.0.0.1:{port}/v1',
+            key_env='LAB_PROXY_KEY', management_key_env='LAB_MANAGEMENT_KEY'),
+            observe_local=True)
+        assert bridge.routes.observe(bridge.account('target')) is not None
+        bridge.store.add_session('source-session', 'source', str(tmp_path), 'fixture-model')
+        session = bridge.get_session('source-session')
+        result = bridge.transfer(session['id'], 'target', mode='auto',
+                                 idempotency_key='transfer-1')
+        assert result['transfer_mode'] == 'portable'
+        assert result['fallback_reason'] is None
+        assert result['context_omissions'] == 0
+        monkeypatch.setattr(bridge.routes, 'observation', lambda *_args, **_kwargs: None)
+        replay = bridge.transfer(session['id'], 'target', mode='auto',
+                                 idempotency_key='transfer-1')
+        assert replay['id'] == result['id']
+        assert replay['replayed'] is True
 
 
 def test_verified_native_copy_preserves_file_and_excludes_account_configuration(tmp_path, monkeypatch):

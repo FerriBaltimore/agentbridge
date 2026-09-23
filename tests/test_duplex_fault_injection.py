@@ -51,7 +51,7 @@ def test_native_receive_timeout_is_not_an_admission_failure(tmp_path):
     ('provider_connection_lost', 'unknown', 'interrupted'),
 ])
 def test_wrapper_failures_preserve_known_admission_vs_unknown_execution(code, outcome, state):
-    parsed = Parser('claude', lambda *_: None)
+    parsed = Parser('codex', lambda *_: None)
     parsed.feed({'type': 'bridge_error', 'error': {'code': code}, 'outcome': outcome})
     result, error, issue = finish(parsed, exit_code=1)
     assert (result, error) == (state, code)
@@ -59,7 +59,7 @@ def test_wrapper_failures_preserve_known_admission_vs_unknown_execution(code, ou
 
 
 def test_duplex_setup_storage_failure_emits_safe_machine_error(tmp_path, monkeypatch, capsys):
-    payload = {'root': str(tmp_path), 'secret_names': []}
+    payload = {'root': str(tmp_path), 'engine': 'codex', 'secret_names': []}
     monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps(payload)))
     def fail(*_):
         raise sqlite3.OperationalError('PRIVATE STORAGE BODY')
@@ -75,12 +75,12 @@ def test_duplex_setup_storage_failure_emits_safe_machine_error(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize('operation', ['request', 'delivered'])
-def test_permission_persistence_failure_closes_native_channel_and_reports_unknown(
+def test_permission_persistence_failure_closes_codex_channel_and_reports_unknown(
         tmp_path, monkeypatch, capsys, operation):
     delivered = []
     closed = []
     payload = {'root': str(tmp_path), 'secret_names': [], 'command': ['fixture'],
-               'cwd': str(tmp_path), 'engine': 'claude', 'turn_id': 'fixture-turn',
+               'cwd': str(tmp_path), 'engine': 'codex', 'turn_id': 'fixture-turn',
                'options': {'permission_mode': 'default', 'timeout': 1}}
     monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps(payload)))
     class Channel:
@@ -96,11 +96,14 @@ def test_permission_persistence_failure_closes_native_channel_and_reports_unknow
         def wait(self, *_): return 'allow'
         def delivered(self, *_):
             raise sqlite3.OperationalError('PRIVATE DELIVERY BODY')
-    def execute(channel, value, emit, approve):
-        approve({'operation': 'fixture'}, lambda value: delivered.append(value))
+    class Control:
+        def __init__(self, channel, value, emit, approve):
+            self.approve = approve
+        def execute(self):
+            self.approve({'operation': 'fixture'}, lambda value: delivered.append(value))
     monkeypatch.setattr(interactive_worker, 'ProviderChannel', Channel)
     monkeypatch.setattr(interactive_worker, 'Permissions', Broker)
-    monkeypatch.setattr(interactive_worker, 'execute_claude', execute)
+    monkeypatch.setattr(interactive_worker, 'CodexControl', Control)
     with pytest.raises(SystemExit):
         interactive_worker.main()
     output = capsys.readouterr()

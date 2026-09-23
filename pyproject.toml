@@ -4,15 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ferran-agentbridge"
-version = "0.1.0"
-description = "Observable, persistent execution and context continuity for coding agents"
+version = "2.0.0"
+description = "Model-first Codex execution with observable local account routing"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "Ferran Gutierrez"}]
 dependencies = []
 
 [project.optional-dependencies]
-cursor = ["cursor-sdk==1.0.31"]
 test = ["pytest>=8,<10"]
 
 [project.scripts]

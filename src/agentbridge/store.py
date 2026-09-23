@@ -8,15 +8,18 @@ import sqlite3
 import time
 
 from .errors import BridgeError, BusyError
-from .models import Event, TERMINAL, RunOptions, account_name_key
+from .models import Event, RunOptions
 from .auth_store import AuthStoreMixin
+from .routing.persistence import RoutingStoreMixin
+from .routing.binding import ProxyBindingStoreMixin
+from .routing.schema import migrate_v4, migrate_v5
 
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-class Store(AuthStoreMixin):
+class Store(ProxyBindingStoreMixin, RoutingStoreMixin, AuthStoreMixin):
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -29,6 +32,10 @@ class Store(AuthStoreMixin):
                 CREATE TABLE IF NOT EXISTS metadata(version INTEGER NOT NULL);
                 INSERT INTO metadata SELECT 3 WHERE NOT EXISTS(SELECT 1 FROM metadata);
                 CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, config TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS proxy_bindings(
+                    account_id TEXT PRIMARY KEY,
+                    binding_fingerprint TEXT NOT NULL,
+                    identity_fingerprint TEXT NOT NULL UNIQUE);
                 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
                     cwd TEXT NOT NULL, model TEXT, native_id TEXT, parent_id TEXT, context TEXT,
                     created REAL NOT NULL);
@@ -76,11 +83,11 @@ class Store(AuthStoreMixin):
                 CREATE UNIQUE INDEX IF NOT EXISTS auth_owner_request
                     ON auth_attempts(owner, request_key)
                     WHERE request_key IS NOT NULL;
-                CREATE TABLE IF NOT EXISTS auth_runtime(
+                CREATE TABLE IF NOT EXISTS auth_proxy_routes(
                     attempt_id TEXT PRIMARY KEY, config TEXT NOT NULL,
-                    job_id TEXT, kind TEXT, pid INTEGER, identity TEXT, started REAL,
-                    finished INTEGER NOT NULL DEFAULT 1,
-                    cancel_requested INTEGER NOT NULL DEFAULT 0);
+                    connection TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS retired_accounts(
+                    account_id TEXT PRIMARY KEY, retired_at REAL NOT NULL);
             ''')
             version = db.execute('SELECT version FROM metadata').fetchone()[0]
             if version == 1:
@@ -123,7 +130,9 @@ class Store(AuthStoreMixin):
                     UPDATE metadata SET version=3;
                 ''')
                 version = 3
-            if version != 3:
+            version = migrate_v4(db, version)
+            version = migrate_v5(db, version)
+            if version != 5:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)
@@ -221,70 +230,46 @@ class Store(AuthStoreMixin):
         return result
 
     def account(self, account):
-        config = dumps(account.to_dict())
-        with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            old = db.execute('SELECT config FROM accounts WHERE id=?', (account.id,)).fetchone()
-            if old and json.loads(old[0]) != json.loads(config):
-                raise BridgeError('account_changed', 'Account IDs are immutable. Register a new ID for a different identity.')
-            if account.name:
-                wanted_name = account_name_key(account.name)
-                for row in db.execute('SELECT id,config FROM accounts'):
-                    if row['id'] == account.id:
-                        continue
-                    other = json.loads(row['config'])
-                    if other.get('name') and account_name_key(other['name']) == wanted_name:
-                        raise BridgeError('account_name_in_use', 'Account names must be unique.')
-            if account.home:
-                for row in db.execute('SELECT id,config FROM accounts'):
-                    other = json.loads(row['config'])
-                    if row['id'] != account.id and other.get('home') == account.home and other['engine'] == account.engine:
-                        raise BridgeError('home_in_use', 'This native account home already has an ID.')
-            db.execute('INSERT OR IGNORE INTO accounts VALUES (?,?)', (account.id, config))
+        """Reject the former direct registration API, including proxy records."""
+        raise BridgeError('authentication_required', 'Create accounts through the proxy login flow.')
 
     def replace_account_home(self, account):
-        """Promote an authenticated native home while keeping the account ID stable."""
-        config = dumps(account.to_dict())
-        next_config = json.loads(config)
-        with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            old = db.execute('SELECT config FROM accounts WHERE id=?', (account.id,)).fetchone()
-            if not old:
-                raise BridgeError('not_found', 'Account does not exist.')
-            previous = json.loads(old['config'])
-            immutable = ('engine', 'name', 'env_names', 'key_env', 'command')
-            if any(previous.get(key) != next_config.get(key) for key in immutable):
-                raise BridgeError('account_changed', 'Authenticated promotion cannot change account identity or credential references.')
-            active = db.execute("SELECT 1 FROM runs WHERE account_id=? AND state IN ('starting','running','stopping')", (account.id,)).fetchone()
-            if active:
-                raise BusyError()
-            for row in db.execute('SELECT id,config FROM accounts WHERE id<>?', (account.id,)):
-                other = json.loads(row['config'])
-                if other.get('home') == account.home and other.get('engine') == account.engine:
-                    raise BridgeError('home_in_use', 'This native account home already has an ID.')
-            db.execute('UPDATE accounts SET config=? WHERE id=?', (config, account.id))
+        """Native-home promotion is historical and cannot create a v2 route."""
+        raise BridgeError('authentication_required', 'Reauthenticate through the proxy login flow.')
 
-    def add_session(self, id, account_id, cwd, model, native_id=None, parent_id=None,
-                    context=None, request_key=None):
-        payload = dumps({'account_id': account_id, 'cwd': cwd, 'model': model,
-                         'native_id': native_id, 'parent_id': parent_id, 'context': context})
+    def retired_account_ids(self):
+        with self.connect() as db:
+            return {row['account_id'] for row in db.execute('SELECT account_id FROM retired_accounts')}
+
+    def retire_account(self, account_id):
+        """Retire one local route while preserving all historical run evidence."""
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            if request_key:
-                old = db.execute('SELECT session_id,payload FROM instance_requests WHERE request_key=?',
-                                 (request_key,)).fetchone()
-                if old:
-                    if old['payload'] != payload:
-                        raise BridgeError('idempotency_conflict', 'Request key already belongs to different input.')
-                    return old['session_id'], False
-            db.execute('INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)',
-                       (id, account_id, cwd, model, native_id, parent_id, context, time.time()))
-            db.execute('INSERT INTO instance_metadata(session_id,state,version,updated) VALUES (?,?,?,?)',
-                       (id, 'active', 1, time.time()))
-            if request_key:
-                db.execute('INSERT INTO instance_requests(request_key,session_id,payload,created) VALUES (?,?,?,?)',
-                           (request_key, id, payload, time.time()))
-        return id, True
+            row = db.execute('SELECT config FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if row is None:
+                raise BridgeError('account_not_found', 'No account matches that reference.')
+            account = json.loads(row['config'])
+            reference = account.get('name') or account_id
+            existing = db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
+                                  (account_id,)).fetchone()
+            if existing is None:
+                active = db.execute("SELECT 1 FROM runs WHERE account_id=? AND state IN "
+                                    "('starting','running','stopping')", (account_id,)).fetchone()
+                if active:
+                    raise BusyError()
+                pending = db.execute("SELECT 1 FROM auth_attempts WHERE account_id=? AND status NOT IN "
+                    "('failed','cancelled','expired','revoked','replaced','bound','usable')",
+                    (account_id,)).fetchone()
+                if pending:
+                    raise BridgeError('authentication_in_progress',
+                                      'Cancel or complete the pending login before removing this account.')
+                db.execute('INSERT INTO retired_accounts(account_id,retired_at) VALUES (?,?)',
+                           (account_id, time.time()))
+                db.execute('DELETE FROM proxy_bindings WHERE account_id=?', (account_id,))
+                db.execute('DELETE FROM auth_proxy_routes WHERE attempt_id IN '
+                           '(SELECT id FROM auth_attempts WHERE account_id=?)', (account_id,))
+        return {'account_ref': reference, 'removed': True,
+                'upstream_credential_removed': False}
 
     def update_session(self, id, *, expected_version=None, **values):
         allowed = {'model', 'native_id', 'context', 'state'}
@@ -346,37 +331,6 @@ class Store(AuthStoreMixin):
             return row['id']
         return None  # Admission still validates mismatches after secret redaction.
 
-    def admit(self, id, session_id, prompt, options, key, message_id=None):
-        message_id = message_id or id
-        with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            if key:
-                old = db.execute('SELECT * FROM runs WHERE request_key=?',(key,)).fetchone()
-                if old:
-                    if (old['session_id'],old['prompt'],dumps(asdict(RunOptions(**json.loads(old['options']))))) != (session_id,prompt,dumps(asdict(options))):
-                        raise BridgeError('idempotency_conflict', 'Request key already belongs to different input.')
-                    return old['id'], False
-            session = db.execute('SELECT * FROM sessions WHERE id=?',(session_id,)).fetchone()
-            if not session:
-                raise BridgeError('not_found', 'Session does not exist.')
-            metadata = db.execute('SELECT state FROM instance_metadata WHERE session_id=?',
-                                  (session_id,)).fetchone()
-            if metadata and metadata['state'] == 'archived':
-                raise BridgeError('instance_archived', 'Archived instances cannot accept new messages.')
-            now = time.time()
-            try:
-                db.execute('''INSERT INTO runs
-                    (id,message_id,session_id,account_id,state,prompt,options,request_key,created,updated)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                           (id,message_id,session_id,session['account_id'],'starting',
-                            prompt,dumps(asdict(options)),key,now,now))
-            except sqlite3.IntegrityError as e:
-                raise BusyError() from e
-            from .attachments import descriptors
-            self._event(db, id, session_id, 'user', {'text': prompt, 'attachments': descriptors(options.attachments),
-                        'attachment_content_omitted': bool(options.attachments)})
-        return id, True
-
     def claim(self, id, pid, identity):
         with self.connect() as db:
             cursor = db.execute("UPDATE runs SET state='running',worker_pid=?,worker_identity=?,updated=? WHERE id=? AND state='starting' AND worker_pid IS NULL",
@@ -423,17 +377,3 @@ class Store(AuthStoreMixin):
     def stop(self, id):
         with self.connect() as db:
             db.execute("UPDATE runs SET stop_requested=1, updated=? WHERE id=? AND state IN ('starting','running','stopping')",(time.time(),id))
-
-    def finish(self, id, state, code=None, exit_code=None):
-        if state not in TERMINAL:
-            raise ValueError(state)
-        with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT * FROM runs WHERE id=?',(id,)).fetchone()
-            if row['state'] in TERMINAL:
-                return
-            if row['stop_requested'] and state not in ('interrupted',):
-                state,code='cancelled','user_stop'
-            from .turn_outcome import completion
-            self._event(db,id,row['session_id'],'run_finished',completion(db,id,state,code,exit_code))
-            db.execute('UPDATE runs SET state=?,error=?,exit_code=?,updated=? WHERE id=?',(state,code,exit_code,time.time(),id))

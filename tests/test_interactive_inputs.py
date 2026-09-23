@@ -1,37 +1,84 @@
 import base64
+from contextlib import contextmanager
+from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import sys
+from threading import Thread
 import time
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import Bridge, RunOptions
 from agentbridge.errors import BridgeError
 from agentbridge.permissions import Permissions
+from fixtures.test_proxy_account_fixture import proxy_account, seed_authenticated_proxy_account
 
 PICTURE = {'type': 'image', 'media_type': 'image/png',
            'data': base64.b64encode(b'\x89PNG\r\n\x1a\nfixture').decode()}
 FIXTURE = Path(__file__).parent / 'fixtures' / 'test_duplex_provider.py'
 
 
-@pytest.fixture(autouse=True)
-def cleanup(tmp_path):
-    yield
-    if (tmp_path / 'state' / 'bridge.sqlite3').exists():
+@contextmanager
+def management_server():
+    class Handler(BaseHTTPRequestHandler):
+        def handle_get(self):
+            if self.path == '/v0/management/auth-files':
+                body = {'files': [{'name': 'fixture.json', 'provider': 'codex',
+                    'auth_index': 'fixture-test', 'account_type': 'oauth',
+                    'id_token': {'chatgpt_account_id': 'fixture-test'}, 'source': 'file',
+                    'runtime_only': False, 'status': 'active', 'disabled': False,
+                    'unavailable': False, 'cooldowns': []}]}
+            elif self.path == '/v0/management/config':
+                body = {key: [] for key in ('gemini-api-key', 'interactions-api-key',
+                    'claude-api-key', 'codex-api-key', 'xai-api-key', 'meta-api-key',
+                    'vertex-api-key', 'openai-compatibility')}
+                body['plugins'] = {'enabled': False}
+            elif self.path == '/v0/management/auth-files/models?name=fixture.json':
+                body = {'models': [{'id': 'fixture-model'}]}
+            else:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_):
+            pass
+
+    setattr(Handler, 'do_GET', Handler.handle_get)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+    thread.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+@pytest.fixture
+def setup_proxy(tmp_path, monkeypatch):
+    monkeypatch.setenv('FIXTURE_PROXY_KEY', 'fixture-client-key')
+    monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'fixture-management-key')
+    with management_server() as port:
         bridge = Bridge(tmp_path / 'state')
-        for row in bridge.runs():
-            if row['state'] in {'starting', 'running', 'stopping'}:
-                bridge.run(row['id']).stop(wait=True)
 
+        def create(*, native_args=()):
+            account = replace(proxy_account('test', port, provider='codex'),
+                              command=(sys.executable, str(FIXTURE), *native_args))
+            account = seed_authenticated_proxy_account(bridge.store, account,
+                                                       observe_local=True)
+            assert bridge.routes.observe(account)['status'] == 'active'
+            instance = bridge.instance_create(account_ref='test', model='fixture-model',
+                                              workspace_path=str(tmp_path))
+            return bridge, instance['id']
 
-def setup(tmp_path, engine, env_names=(), native_args=()):
-    home = tmp_path / 'native'
-    home.mkdir()
-    bridge = Bridge(tmp_path / 'state')
-    bridge.register(Account('test', engine, home=str(home), command=(sys.executable, str(FIXTURE), *native_args), env_names=env_names))
-    instance = bridge.instance_create(engine=engine, account_ref='test', workspace_path=str(tmp_path))
-    return bridge, instance['id']
+        yield create
+        bridge.close(cancel=True)
 
 
 def pending(bridge, turn):
@@ -44,10 +91,9 @@ def pending(bridge, turn):
     raise AssertionError(bridge.run(turn).snapshot)
 
 
-@pytest.mark.parametrize('engine', ['codex', 'claude'])
 @pytest.mark.parametrize('decision', ['allow', 'deny'])
-def test_native_permission_roundtrip_after_client_restart(tmp_path, engine, decision):
-    bridge, instance = setup(tmp_path, engine)
+def test_permission_roundtrip_after_client_restart(setup_proxy, decision):
+    bridge, instance = setup_proxy()
     turn = bridge.message_create(instance, 'hello', permission_mode='default')['turn_id']
     request = pending(bridge, turn)
     other = Bridge(bridge.root)
@@ -57,7 +103,7 @@ def test_native_permission_roundtrip_after_client_restart(tmp_path, engine, deci
     assert result['state'] == 'queued'
     assert other.permission_respond(turn, request, decision)['replayed']
     assert bridge.run(turn).wait(10)['state'] == 'completed'
-    expected = {'allow': 'accept', 'deny': 'decline'}[decision] if engine == 'codex' else decision
+    expected = {'allow': 'accept', 'deny': 'decline'}[decision]
     assert bridge.run(turn).text.startswith(expected + '|')
     assert other.permission_respond(turn, request, decision)['state'] == 'delivered'
     with pytest.raises(BridgeError) as error:
@@ -65,9 +111,8 @@ def test_native_permission_roundtrip_after_client_restart(tmp_path, engine, deci
     assert error.value.code == 'idempotency_conflict'
 
 
-@pytest.mark.parametrize('engine', ['codex', 'claude'])
-def test_stop_while_waiting_for_permission(tmp_path, engine):
-    bridge, instance = setup(tmp_path, engine)
+def test_stop_while_waiting_for_permission(setup_proxy):
+    bridge, instance = setup_proxy()
     turn = bridge.message_create(instance, 'hello', permission_mode='default')['turn_id']
     request = pending(bridge, turn)
     assert bridge.turn_stop(turn, wait=True)['state'] == 'cancelled'
@@ -76,9 +121,8 @@ def test_stop_while_waiting_for_permission(tmp_path, engine):
     assert error.value.code == 'permission_expired'
 
 
-@pytest.mark.parametrize('engine', ['codex', 'claude'])
-def test_inline_inputs_reach_native_provider_and_replay(tmp_path, engine):
-    bridge, instance = setup(tmp_path, engine)
+def test_inline_inputs_reach_codex_and_replay(setup_proxy):
+    bridge, instance = setup_proxy()
     attachments = [PICTURE, {'type': 'text', 'name': 'report.txt', 'text': 'attached content'}]
     message = bridge.message_create(instance, 'inspect', attachments=attachments, idempotency_key='input-1')
     run = bridge.run(message['turn_id'])
@@ -99,15 +143,15 @@ def test_inline_inputs_reach_native_provider_and_replay(tmp_path, engine):
     {'type': 'text', 'text': 'x', 'path': '/etc/passwd'},
     {'type': 'text', 'text': 'x' * (5 * 1024 * 1024 + 1)},
 ])
-def test_invalid_attachments_fail_before_admission(tmp_path, attachment):
-    bridge, instance = setup(tmp_path, 'codex')
+def test_invalid_attachments_fail_before_admission(setup_proxy, attachment):
+    bridge, instance = setup_proxy()
     with pytest.raises(BridgeError):
         bridge.message_create(instance, 'inspect', attachments=[attachment])
     assert bridge.runs() == []
 
 
-def test_old_options_still_replay_after_schema_extension(tmp_path):
-    bridge, instance = setup(tmp_path, 'codex')
+def test_old_options_still_replay_after_schema_extension(setup_proxy):
+    bridge, instance = setup_proxy()
     options = RunOptions()
     turn, _ = bridge.store.admit('old-turn', instance, 'hello', options, 'old-key')
     with bridge.store.connect() as db:
@@ -119,22 +163,26 @@ def test_old_options_still_replay_after_schema_extension(tmp_path):
     bridge.store.finish(turn, 'cancelled', 'fixture_complete')
 
 
-def test_claude_catalog_uses_initialize_without_inference(tmp_path):
-    bridge, _ = setup(tmp_path, 'claude')
-    result = bridge.models('claude', account_ref='test', refresh=True)
-    assert result['source'] == 'live'
-    assert result['models'][0]['id'] == 'claude-fixture'
+def test_models_come_from_proxy_observation_without_inference(setup_proxy):
+    bridge, _ = setup_proxy()
+    result = bridge.models(account_ref='test', refresh=True)
+    assert result['source'] == 'agentbridge_routing'
+    assert result['models'][0]['id'] == 'fixture-model'
+    assert result['models'][0]['availability'] == 'proxy_observed'
     assert bridge.runs() == []
 
 
-def test_attachment_evidence_redacts_credentials_and_reports_portable_omission(tmp_path, monkeypatch):
-    monkeypatch.setenv('FIXTURE_ATTACHMENT_SECRET', 'fixture-secret-123')
-    bridge, instance = setup(tmp_path, 'codex', env_names=('FIXTURE_ATTACHMENT_SECRET',))
-    inputs = [{'type': 'text', 'text': 'fixture-secret-123'}]
+def test_attachment_evidence_redacts_credentials_and_reports_portable_omission(setup_proxy):
+    bridge, instance = setup_proxy()
+    inputs = [{'type': 'text', 'text': 'fixture-client-key'}, PICTURE]
     message = bridge.message_create(instance, 'fixture', attachments=inputs, idempotency_key='redacted-input')
     run = bridge.run(message['turn_id'])
-    run.wait(10)
-    assert 'fixture-secret-123' not in json.dumps(run.snapshot)
+    outcome = run.wait(10)
+    assert outcome['state'] == 'completed', {
+        'error': outcome['error'],
+        'events': [(event.kind, event.data.get('code')) for event in run.events()],
+    }
+    assert 'fixture-client-key' not in json.dumps(run.snapshot)
     assert Bridge(bridge.root).message_create(instance, 'fixture', attachments=inputs,
                                              idempotency_key='redacted-input')['replayed']
     event = bridge.turn_events(run.id)[0]['data']
@@ -144,21 +192,20 @@ def test_attachment_evidence_redacts_credentials_and_reports_portable_omission(t
 
 
 @pytest.mark.parametrize('value', ['', {}, 0, False, [{'type': []}], [{'type': 'text', 'text': '\ud800'}]])
-def test_malformed_attachment_collection_rejected(tmp_path, value):
-    bridge, instance = setup(tmp_path, 'codex')
+def test_malformed_attachment_collection_rejected(setup_proxy, value):
+    bridge, instance = setup_proxy()
     with pytest.raises(BridgeError):
         bridge.message_create(instance, 'fixture', attachments=value)
     assert not bridge.runs()
 
 
-@pytest.mark.parametrize('engine', ['codex', 'claude'])
-def test_stop_kills_native_child_that_outlives_duplex_wrapper(tmp_path, engine):
+def test_stop_kills_codex_child_that_outlives_duplex_wrapper(setup_proxy):
     from agentbridge.process import alive, identity
-    bridge, instance = setup(tmp_path, engine, native_args=('--ignore-term',))
+    bridge, instance = setup_proxy(native_args=('--ignore-term',))
     turn = bridge.message_create(instance, 'fixture', permission_mode='default')['turn_id']
     pending(bridge, turn)
     data = next(e['data'] for e in bridge.turn_events(turn) if e['kind'] == 'permission.required')
-    pid = int(data['input']['reason']) if engine == 'codex' else data['input']['fixture_pid']
+    pid = int(data['input']['reason'])
     started = identity(pid)
     assert alive(pid, started)
     try:

@@ -13,8 +13,7 @@ from .process import identity
 from .protocols import Parser
 from .security import Redactor, base_environment
 from .store import Store
-from .transports import command, duplex
-from .credentials import CURSOR_KEY_ENV
+from .transports import command, duplex, require_proxy_account
 from .attachments import text_prompt
 from dataclasses import asdict
 from .execution_outcome import finish
@@ -22,6 +21,9 @@ from .provider_errors import normalize
 from .error_observer import ErrorObserver
 from .errors import BridgeError
 from .provider_contracts import ContractRegistry
+from .accounts import AccountService
+from .routing.admission import verify_proxy_model
+from .routing.service import RoutingService
 
 MAX_LINE=8*1024*1024
 
@@ -47,29 +49,40 @@ def main():
         session=store.get('sessions',run['session_id'])
         account=Account(**json.loads(store.get('accounts',run['account_id'])['config']))
         options=RunOptions(**json.loads(run['options']))
-        ContractRegistry(store).verify_run(account,run_id)
-        # Values are passed over this private pipe, never stored or placed in argv.
+        require_proxy_account(account)
+        # The management key arrives on the private pipe and is removed before
+        # any provider environment or duplex payload is assembled.
         secrets=json.loads(sys.stdin.read())
-        redactor=Redactor(secrets.values())
+        management_name=account.management_key_env
+        management_key=secrets.pop(management_name, None)
+        if not management_key:
+            raise BridgeError('credential_unavailable', 'The proxy management credential is unavailable.')
+        previous_management_key=os.environ.get(management_name)
+        os.environ[management_name]=management_key
+        try:
+            verify_proxy_model(RoutingService(store, AccountService(store)), account,
+                               options.model or session['model'], refresh=True)
+        finally:
+            if previous_management_key is None:
+                os.environ.pop(management_name, None)
+            else:
+                os.environ[management_name]=previous_management_key
+        ContractRegistry(store).verify_run(account,run_id)
+        redactor=Redactor((*secrets.values(), management_key))
         emit=lambda kind,data:store.emit(run_id,kind,redactor.clean(data))
         observe_error = ErrorObserver(store, account, run_id)
         parser=Parser(account.engine,emit,error_handler=observe_error)
         env=base_environment()
         env.update(secrets)
         env['PYTHONPATH']=os.path.dirname(os.path.dirname(__file__))
-        if account.engine=='codex':env['CODEX_HOME']=account.home
-        if account.engine=='claude':env['CLAUDE_CONFIG_DIR']=account.home
+        from .proxy import session_home
+        env['CODEX_HOME']=str(session_home(store.root,session['id']))
         cmd=command(account,session,options)
         prompt=run['prompt']
         if session.get('context') and not session.get('native_id'):
             prompt=session['context']+'\n\nCurrent user request:\n'+prompt
         prompt = text_prompt(prompt, options.attachments)
-        if account.engine=='cursor':
-            payload=json.dumps({'prompt':prompt,'cwd':session['cwd'],'model':options.model or session['model'],
-                'native_id':session.get('native_id'),'key_env':account.key_env or CURSOR_KEY_ENV,
-                'sandbox':options.sandbox,'tools':list(options.allowed_tools),'collect_usage':options.collect_usage,
-                'attachments': options.attachments, 'effort': options.effort})
-        elif duplex(account, options):
+        if duplex(account, options):
             payload = json.dumps({'engine': account.engine, 'prompt': prompt, 'cwd': session['cwd'],
                 'model': options.model or session.get('model'), 'native_id': session.get('native_id'),
                 'options': asdict(options), 'root': str(store.root), 'turn_id': run_id,
@@ -170,7 +183,9 @@ def main():
                         phase='execution' if child else 'launch',
                         outcome='unknown' if child else 'not_started')
         if isinstance(error,BridgeError) and code in {
-                'provider_contract_unverified','provider_contract_changed','provider_contract_invalid'}:
+                'provider_contract_unverified','provider_contract_changed','provider_contract_invalid',
+                'invalid_proxy_account','proxy_binding_unverified','model_required','model_unavailable',
+                'credential_unavailable'}:
             issue={**error.safe_data(),'engine':account.engine if account else None,
                    'terminal':True,'provider_retrying':False}
         if claimed:

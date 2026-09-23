@@ -1,23 +1,18 @@
 """Public SDK. No server, event loop or Fullbrain installation required."""
 import json
-from dataclasses import replace
 import os
 from pathlib import Path
 import time
 from uuid import uuid4
 
 from .continuity import build, unresolved
-from .credentials import environment
-from .catalog import ModelCatalog
 from .discovery import DiscoveryMixin
 from .event_contract import public_event
 from .errors import BridgeError, BusyError, UnsupportedError
 from .models import Account, RunOptions, TERMINAL, identifier, page_values
 from .transfer import TransferMixin
 from .process import alive
-from .security import Redactor
 from .store import Store
-from .transports import command
 from . import usage
 from .accounts import AccountService
 from .authentication import AuthenticationService
@@ -25,6 +20,8 @@ from .run_state import Run
 from .transcript import messages as transcript_messages
 from .error_management import ErrorManagementMixin
 from .provider_contracts import ContractRegistry
+from .routing.service import RoutingService
+from .proxy.managed import ManagedProxyClient
 
 
 class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
@@ -32,17 +29,21 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
         self.store=Store(root)
         self.account_service=AccountService(self.store)
-        self.authentication=AuthenticationService(self.store, self.account_service)
-        self.catalog=ModelCatalog(self.account_service)
+        self.managed_proxy=ManagedProxyClient(self.store.root)
+        self.routes=RoutingService(self.store, self.account_service, self.managed_proxy)
+        self.authentication=AuthenticationService(self.store, self.account_service,
+                                                  self.managed_proxy)
         self._children={}
 
     @property
     def root(self):return self.store.root
 
     def register(self, account: Account):
-        return self.account_service.register(account)
+        raise BridgeError('authentication_required', 'Create accounts through the proxy login flow.')
 
     def accounts(self, **filters):
+        if filters.get('engine') is not None:
+            raise BridgeError('unsupported_parameter', 'Accounts are selected by provider and model.')
         return self.account_service.list(**filters)
 
     def account(self, id):
@@ -51,11 +52,38 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
     def resolve_account(self, reference):
         return self.account_service.resolve(reference)
 
+    def account_delete(self, account_ref):
+        account = self.account_service.resolve(account_ref, include_retired=True)
+        result = self.store.retire_account(account.id)
+        if self.managed_proxy.is_managed(account.to_dict(), account.id):
+            try:
+                self.managed_proxy.retire(account.id)
+            except BridgeError:
+                pass
+        return result
+
     def account_status(self, account_id=None, *, account_ref=None, refresh=False):
-        return self.account_service.status(self._account_id(account_id, account_ref), refresh=refresh)
+        account = self.account(self._account_id(account_id, account_ref))
+        if account.id in self.store.retired_account_ids():
+            return self.account_service.status(account.id, refresh=False)
+        if account.proxy_base_url:
+            if refresh or self.managed_proxy.is_managed(account.to_dict(), account.id):
+                self.routes.observation(account, refresh=refresh)
+            return self.account_service.status(account.id, refresh=False)
+        result = self.account_service.status(account.id, refresh=False)
+        result['authentication'] = {**result['authentication'], 'status': 'legacy_read_only'}
+        result['reason'] = 'legacy_read_only'
+        return result
 
     def account_usage(self, account_id=None, *, account_ref=None, refresh=False):
-        return self.account_service.usage(self._account_id(account_id, account_ref), refresh=refresh)
+        account = self.account(self._account_id(account_id, account_ref))
+        if account.id in self.store.retired_account_ids():
+            return {'account_id': account.id, 'scope': 'account', 'supported': False,
+                    'stale': True, 'reason': 'account_removed'}
+        if account.proxy_base_url:
+            return self.routes.usage(account, refresh=refresh)
+        return {'account_id': account.id, 'scope': 'account', 'supported': False,
+                'stale': True, 'reason': 'legacy_read_only'}
 
     def usage(self, scope='account', *, account_ref=None, instance_id=None, turn_id=None,
               refresh=False, include_quota=False, since=None, until=None):
@@ -93,8 +121,7 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         return values[cursor:cursor + limit]
 
     def account_quota_reset(self, account_ref, *, idempotency_key, credit_id=None):
-        from .quota_resets import consume
-        return consume(self.store, self.resolve_account(account_ref), idempotency_key, credit_id)
+        raise UnsupportedError('The local proxy does not expose Codex earned reset redemption.')
 
     def account_login(self, **options):return self.authentication.login(**options)
     def account_login_start(self, **options):return self.authentication.start(**options)
@@ -105,15 +132,18 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
 
     def _account_id(self, account_id, account_ref):
         if account_id or account_ref:
-            return self.resolve_account(account_ref or account_id).id
+            return self.account_service.resolve(account_ref or account_id,
+                                                include_retired=True).id
         raise BridgeError('account_ref_required', 'account_ref is required.')
 
     def _public_instance(self, value):
         result = dict(value)
         result['instance_id'] = result['id']
+        routing = self.store.routing(result['id'])
+        result['routing_mode'] = routing['mode']
+        result['routing_provider'] = routing.get('provider') if routing['mode'] == 'automatic' else None
         account = self.account(result['account_id'])
         result['account_ref'] = account.name or result['account_id']
-        result['engine'] = account.engine
         result['workspace_path'] = result['cwd']
         result['native_session_id'] = result.get('native_id')
         result['created_at'] = result['created']
@@ -124,7 +154,11 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         account=self.account(account_id)
         cwd=str(Path(cwd).expanduser().resolve())
         if not Path(cwd).is_dir():raise BridgeError('invalid_workspace','Workspace must be an existing directory.')
-        if account.engine=='cursor' and not model:raise BridgeError('model_required','Cursor requires an explicit model for reliable resume.')
+        replayed = self.store.replay_pinned_session(request_key, account.id, cwd, model)
+        if replayed:
+            return {**self.get_session(replayed), 'replayed': True}
+        from .routing.admission import verify_proxy_model
+        verify_proxy_model(self.routes, account, model, refresh=True)
         id=uuid4().hex
         session_id, created = self.store.add_session(id, account_id, cwd, model,
                                                      request_key=request_key)
@@ -132,7 +166,8 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         result['replayed'] = not created
         return result
 
-    def instance_create(self, *, engine=None, account_ref=None, workspace_path=None, model=None,
+    def instance_create(self, *, engine=None, account_ref=None, provider=None,
+                        workspace_path=None, model=None,
                         effort=None, context_window=None, permission_mode='dontAsk',
                         sandbox_mode='read-only', allowed_tools=(), metadata=None,
                         provider_options=None, continuity_mode=None, idempotency_key=None):
@@ -140,11 +175,17 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             raise UnsupportedError('Provider-specific options, metadata and continuity require an adapter contract.')
         if effort or context_window or permission_mode != 'dontAsk' or sandbox_mode != 'read-only' or allowed_tools:
             raise UnsupportedError('Instance defaults are configured per turn by this adapter.')
+        if engine is not None:
+            raise BridgeError('unsupported_parameter', 'Execution always uses the routed Codex engine.')
+        if account_ref is not None and provider is not None:
+            raise BridgeError('unsupported_parameter',
+                              'provider filters automatic routing only.')
         if account_ref is None:
-            raise BridgeError('account_ref_required', 'account_ref is required for instance creation.')
+            from .routing.admission import create_automatic_instance
+            return create_automatic_instance(self, workspace_path=workspace_path, model=model,
+                                             idempotency_key=idempotency_key,
+                                             provider=provider)
         account = self.resolve_account(account_ref)
-        if engine and account.engine != engine:
-            raise BridgeError('invalid_engine', 'The account engine does not match the requested engine.')
         result = self.session(account.id, workspace_path or '.', model=model,
                               request_key=idempotency_key)
         return self._public_instance(result)
@@ -159,11 +200,12 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         return value
 
     def instances(self, *, engine=None, account_ref=None, state=None, limit=100, cursor=0, include_last_turn=False):
+        if engine is not None:
+            raise BridgeError('unsupported_parameter', 'Instances are selected by model and account.')
         limit, cursor = page_values(limit, cursor)
         account_id = self.resolve_account(account_ref).id if account_ref else None
         rows = self.store.list('sessions')
-        selected = [row for row in rows if (not engine or self.account(row['account_id']).engine == engine)
-                    and (not account_id or row['account_id'] == account_id)
+        selected = [row for row in rows if (not account_id or row['account_id'] == account_id)
                     and (not state or row.get('state') == state)]
         selected = selected[cursor:cursor + limit]
         if include_last_turn:
@@ -179,6 +221,18 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
             raise UnsupportedError('Only model and state updates are supported by this adapter.')
         values = {}
         if model is not None:
+            current = self.get_session(instance_id)
+            routing = self.store.routing(instance_id)
+            if routing['mode'] == 'automatic':
+                declared = any(account.proxy_base_url and model in account.supported_models
+                               and (routing.get('provider') is None
+                                    or account.provider == routing['provider'])
+                               for account in self.accounts())
+            else:
+                account = self.account(current['account_id'])
+                declared = bool(account.proxy_base_url and model in account.supported_models)
+            if not declared:
+                raise BridgeError('model_unavailable', 'No account declares support for this model.')
             values['model'] = model
         if state is not None:
             values['state'] = state
@@ -206,7 +260,8 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         run = self.submit(instance_id, prompt, options=options, request_key=idempotency_key)
         message_id = run.snapshot.get('message_id', run.id)
         return {'turn_id': run.id, 'message_id': message_id, 'instance_id': instance_id,
-                'state': run.status, 'replayed': bool(getattr(run, 'replayed', False))}
+                'state': run.status, 'replayed': bool(getattr(run, 'replayed', False)),
+                'account_ref': self.account(run.snapshot['account_id']).name or run.snapshot['account_id']}
 
     @staticmethod
     def _message_text(content):
@@ -230,6 +285,7 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         value['message_id'] = value.get('message_id', value['id'])
         value['created_at'] = value['created']
         value['updated_at'] = value['updated']
+        value['account_ref'] = self.account(value['account_id']).name or value['account_id']
         from .turn_outcome import detail
         with self.store.connect() as db:
             issue = detail(db, turn_id, value['state'], value.get('error'))
@@ -323,24 +379,14 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         session=self.get_session(session_id)
         if session.get('state') == 'archived':
             raise BridgeError('instance_archived', 'Archived instances cannot accept new messages.')
-        account=self.account(session['account_id'])
-        command(account,session,options) # Refuse unsupported controls before recording a request.
-        contracts = ContractRegistry(self.store)
-        receipt = contracts.check(account, enforce=True)
-        secrets=environment(account)
-        redactor = Redactor(secrets.values())
-        prompt = redactor.clean(prompt)
-        options = replace(options, attachments=tuple(
-            {key: redactor.clean(value) if key in {'name', 'text'} else value for key, value in item.items()}
-            for item in options.attachments))
-        id,created=self.store.admit(uuid4().hex,session_id,prompt,options,request_key,
-                                    message_id=message_id or uuid4().hex)
+        from .routing.execution import admit_turn
+        id,created,receipt,secrets = admit_turn(self, session, prompt, options, request_key, message_id)
         if not created:
             run = Run(self, id)
             run.replayed = True
             return run
         try:
-            contracts.record_run(id, receipt)
+            ContractRegistry(self.store).record_run(id, receipt)
         except Exception:
             self.store.finish(id,'failed','launch_failed')
             raise BridgeError('launch_failed', 'Could not persist provider compatibility before execution.') from None
@@ -361,11 +407,7 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
         return self.export_context(instance_id, budget_bytes=budget_bytes)
 
     def quota(self, account_id, *, allow_network=False, oauth_env=None):
-        account = self.account(account_id)
-        if allow_network:
-            ContractRegistry(self.store).check(account, enforce=True)
-        token=os.environ.get(oauth_env) if oauth_env else None
-        return usage.snapshot(account,oauth_token=token,allow_network=allow_network)
+        raise UnsupportedError('Read observed proxy usage with accounts.usage.')
 
     def recover(self, instance_id=None, turn_id=None):
         """Reattach live workers. Never repeat an interrupted request automatically."""
@@ -393,7 +435,6 @@ class Bridge(DiscoveryMixin, TransferMixin, ErrorManagementMixin):
 
     def close(self, *, cancel=False):
         """Default detaches; cancel=True waits for runs owned by this Bridge instance."""
-        self.authentication.runtime.reap()
         for id,proc in list(self._children.items()):
             if cancel and self.run(id).status not in TERMINAL:self.run(id).stop(wait=True)
             if proc.poll() is not None:proc.wait();self._children.pop(id,None)

@@ -1,5 +1,4 @@
 """Connect execution errors to durable cases without initiating diagnosis or recovery."""
-import importlib.metadata
 import re
 
 from .catalog_process import read_output
@@ -14,20 +13,17 @@ def provider_version(account):
     if account.command:
         return None  # Custom launchers have no guaranteed version-query contract.
     try:
-        if account.engine == 'cursor':
-            version = importlib.metadata.version('cursor-sdk')
-        else:
-            env = base_environment()
-            version = read_output([account.engine, '--version'], env=env,
-                                  timeout=2, max_bytes=256).decode('utf-8')
+        env = base_environment()
+        version = read_output([account.engine, '--version'], env=env,
+                              timeout=2, max_bytes=256).decode('utf-8')
         # Version labels are a compatibility boundary, not free-text search.
         # Never assign prerelease/build/custom output to the stable version's rules.
         number = r'([0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5})'
         pattern = {'codex': r'codex-cli ' + number,
-                   'claude': number + r' \(Claude Code\)', 'cursor': number}[account.engine]
+                   'claude': number + r' \(Claude Code\)'}[account.engine]
         match = re.fullmatch(pattern, version.strip())
         return match.group(1) if match else None
-    except (BridgeError, OSError, UnicodeDecodeError, importlib.metadata.PackageNotFoundError):
+    except (BridgeError, OSError, UnicodeDecodeError):
         return None
 
 

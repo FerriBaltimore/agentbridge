@@ -3,25 +3,37 @@ import json
 from .usage_output import print_usage
 
 
+def _provider(value):
+    return value.get('provider') or '-'
+
+
+def _models(value):
+    return ', '.join(value.get('supported_models') or ()) or '-'
+
+
 def print_account_human(command, value, account_name=None):
     if command == "list":
         if not value:
             print("No accounts registered.")
             return
-        print("Name | Engine | Email")
-        print("---|---|---")
+        print("Name | Provider | Models | Email")
+        print("---|---|---|---")
         for account in value:
-            print(" | ".join(str(account.get(key) or "-") for key in ("name", "engine", "email")))
+            print(" | ".join((str(account.get('name') or '-'), _provider(account),
+                              _models(account), str(account.get('email') or '-'))))
         return
-    if command == "add":
-        print(f"Account added: {value['name']} ({value['engine']})")
+    if command == "delete":
+        print(f"Account removed from AgentBridge: {value['account_ref']}")
+        if value.get('upstream_credential_removed') is False:
+            print("The CLIProxyAPI OAuth credential remains in the local proxy.")
         return
     if command == "status":
         auth = value.get("authentication", {})
         identity = value.get("identity") or {}
         configured = value.get("configured") or {}
         print(f"Account: {account_name or configured.get('name') or value.get('account_id')}")
-        print(f"Engine: {configured.get('engine') or '-'}")
+        print(f"Provider: {_provider(configured)}")
+        print(f"Models: {_models(configured)}")
         print(f"Configured name: {configured.get('name') or '-'}")
         print(f"Configured email: {configured.get('email') or '-'}")
         print(f"Authentication: {auth.get('status') or '-'}")
@@ -53,7 +65,7 @@ def print_account_human(command, value, account_name=None):
         return
     if command == "login":
         account = value.get("account") or {}
-        print(f"Account authenticated: {account.get('name') or account.get('id') or '-'} ({account.get('engine') or '-'})")
+        print(f"Account authenticated: {account.get('name') or account.get('id') or '-'} ({_provider(account)})")
         if value.get("identity", {}).get("email"):
             print(f"Observed identity: {value['identity']['email']}")
         print("Authentication: authenticated")

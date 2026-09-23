@@ -36,7 +36,7 @@ def _index():
     releases = set()
     for binding in value['bindings']:
         release = (binding['engine'], binding['version'])
-        component = 'cursor-sdk' if binding['engine'] == 'cursor' else binding['engine'] + '-cli'
+        component = binding['engine'] + '-cli'
         if (release in releases or profiles.get(binding['contract_id']) != binding['engine']
                 or binding['engine'] not in ENGINES or binding['component'] != component):
             raise BridgeError('provider_contract_invalid', 'The installed release bindings are inconsistent.')
@@ -80,7 +80,7 @@ class ContractRegistry:
         inspection = self.latest(account.engine, version, decisive=True) if version else None
         if binding and inspection and inspection['status'] == 'drift_detected':
             state = 'drift_detected'
-        value = {'engine': account.engine, 'component': 'cursor-sdk' if account.engine == 'cursor' else account.engine + '-cli',
+        value = {'engine': account.engine, 'component': account.engine + '-cli',
                  'version': version, 'contract_id': binding['contract_id'] if binding else None,
                  'status': state, 'native_operations_allowed': state in {'reviewed', 'custom_adapter'},
                  'verification': 'reviewed_binding' if state == 'reviewed' else 'unverified',

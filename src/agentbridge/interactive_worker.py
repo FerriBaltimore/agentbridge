@@ -1,9 +1,8 @@
-"""Native duplex transports, isolated inside the supervised provider process group."""
+"""Codex proxy duplex transport inside the supervised process group."""
 import json
 import os
 import sys
 
-from .claude_control import execute as execute_claude
 from .codex_control import CodexControl
 from .errors import BridgeError
 from .permissions import Permissions
@@ -25,13 +24,12 @@ def main():
         broker.delivered(payload['turn_id'], permission_id, decision)
     try:
         payload = json.load(sys.stdin)
+        if payload.get('engine') != 'codex':
+            raise BridgeError('invalid_proxy_account', 'Interactive execution requires Codex.')
         broker = Permissions(Store(payload['root']))
         redactor = Redactor(os.environ.get(key, '') for key in payload['secret_names'])
         with ProviderChannel(payload['command'], cwd=payload['cwd'], env=os.environ.copy()) as channel:
-            if payload['engine'] == 'codex':
-                CodexControl(channel, payload, emit, approve).execute()
-            else:
-                execute_claude(channel, payload, emit, approve)
+            CodexControl(channel, payload, emit, approve).execute()
     except BridgeError as error:
         emit({'type': 'bridge_error', 'error': error.safe_data(),
               'outcome': 'not_started' if error.phase == 'launch' else 'unknown'})

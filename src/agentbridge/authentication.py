@@ -1,233 +1,335 @@
-"""Persistent, non-blocking authentication orchestration through GrantBridge."""
-import time
+"""One account login: GrantBridge coordinates OAuth in a local CLIProxyAPI."""
+
 import hashlib
+import time
 from uuid import uuid4
 
+from . import auth_contract
+from .auth_proxy_binding import bind_proxy_account
 from .errors import BridgeError
 from .grantbridge import GrantBridgeClient
-from .models import ENGINES, account_name_key, identifier
-from .auth_runtime import AuthRuntime
-from .auth_binding import bind_account
-from . import auth_contract
+from .models import account_name_key, identifier
+from .proxy import ManagementClient, ProxyRoute
 
 
-TERMINAL = {'failed', 'cancelled', 'expired', 'interrupted', 'revoked', 'replaced'}
+TERMINAL = {'failed', 'cancelled', 'expired', 'interrupted', 'abandoned', 'revoked', 'replaced'}
+PROVIDERS = ('codex', 'claude', 'grok')
 
 
 class AuthenticationService:
-    def __init__(self, store, accounts):
+    def __init__(self, store, accounts, managed_proxy=None):
         self.store = store
         self.accounts = accounts
-        self.runtime = AuthRuntime(store)
+        self.managed_proxy = managed_proxy
 
-    def start(self, *, engine, name, email=None, grantbridge_root=None, data_dir=None,
-              mode='browser', browser='same_host', request_key=None, owner_ref=None, client=None):
-        if engine not in ENGINES:
-            raise BridgeError('invalid_engine', 'Unknown engine.')
-        if not isinstance(name, str) or not name.strip():
-            raise BridgeError('invalid_name', 'Account name is required.')
-        existing = next((item for item in self.accounts.list()
-                         if item.name and account_name_key(item.name) == account_name_key(name)), None)
-        if existing and existing.engine != engine:
-            raise BridgeError('account_engine_mismatch', 'The existing account name belongs to a different engine.')
-        owner = owner_ref or self._owner_for(request_key)
-        identifier(owner)
+    def start(self, *, provider, name, proxy_base_url=None, key_env=None,
+              management_key_env=None, email=None, grantbridge_root=None, data_dir=None,
+              mode='browser', browser='same_host', request_key=None, owner_ref=None):
+        if provider not in PROVIDERS:
+            raise BridgeError('invalid_provider', 'Choose a supported proxy provider.')
+        if not isinstance(name, str) or not name.strip() or len(name) > 128:
+            raise BridgeError('invalid_name', 'Account name must contain 1-128 non-space characters.')
+        if mode != 'browser' or browser != 'same_host':
+            raise BridgeError('unsupported_operation', 'Proxy login currently supports a local browser.')
         if request_key is not None and (not isinstance(request_key, str) or not 1 <= len(request_key) <= 256):
             raise BridgeError('invalid_request', 'request_key must contain 1-256 characters.')
-        connection = None if client is not None else GrantBridgeClient(
-            grantbridge_root, data_dir=data_dir).configuration()
-        attempt = {
-            'id': uuid4().hex,
-            'owner': owner,
-            'account_id': existing.id if existing else uuid4().hex,
-            'engine': engine,
-            'name': existing.name if existing else name.strip(),
-            'email': email,
-            'mode': mode,
-            'browser': browser,
-            'status': 'starting',
-            'data': {},
-        }
-        stored, created = self.store.create_auth_attempt(attempt, request_key=request_key, connection=connection)
-        if not created:
-            return self._public(stored)
-        if client is None:
-            self.runtime.launch(attempt['id'], 'start')
-            return self._public(stored)
+        connection = GrantBridgeClient(grantbridge_root, data_dir=data_dir).configuration()
+        owner = owner_ref or self._owner_for(request_key)
+        identifier(owner)
+        accounts = self.accounts.list()
+        existing = next((item for item in accounts
+                         if item.name and account_name_key(item.name) == account_name_key(name)), None)
+        if existing and existing.provider != provider:
+            raise BridgeError('account_migration_required',
+                              'The existing account belongs to a different provider.')
+        account_id = existing.id if existing else uuid4().hex
+        supplied = (proxy_base_url, key_env, management_key_env)
+        managed_created = not existing and not any(value is not None for value in supplied)
+        if any(value is not None for value in supplied) and not all(value is not None for value in supplied):
+            raise BridgeError('invalid_proxy_route', 'Provide all proxy route references or let AgentBridge manage them.')
+        if not any(value is not None for value in supplied):
+            if self.managed_proxy is None:
+                raise BridgeError('proxy_unavailable', 'Managed CLIProxyAPI is unavailable.')
+            if request_key:
+                replay = self.store.auth_attempt_for_request(owner, request_key)
+                if replay is not None:
+                    expected = (provider, existing.name if existing else name, email, mode, browser)
+                    actual = tuple(replay.get(field) for field in ('engine', 'name', 'email', 'mode', 'browser'))
+                    if actual != expected:
+                        raise BridgeError('idempotency_conflict',
+                                          'Request key already belongs to different authentication input.')
+                    return self._public(replay)
+            if existing:
+                if not self.managed_proxy.is_managed(existing.to_dict(), account_id):
+                    raise BridgeError('account_migration_required',
+                                      'This account uses an externally configured proxy route.')
+                config = self.managed_proxy.ensure(account_id, existing.proxy_base_url)
+            else:
+                config = self.managed_proxy.provision(account_id)
+            proxy_base_url = config['proxy_base_url']
+            key_env = config['key_env']
+            management_key_env = config['management_key_env']
+        if key_env == management_key_env:
+            raise BridgeError('invalid_environment', 'Proxy client and management keys must use different environment variables.')
+        route = ProxyRoute(account_id, proxy_base_url, key_env)
+        if any(item.id != account_id and item.proxy_base_url == route.base_url for item in accounts):
+            raise BridgeError('proxy_endpoint_shared', 'The proxy endpoint belongs to another account.')
+        management = ManagementClient(route, management_key_env)
+        config = {'proxy_base_url': proxy_base_url, 'key_env': key_env,
+                  'management_key_env': management_key_env}
+        attempt = {'id': uuid4().hex, 'owner': owner, 'account_id': account_id,
+                   'engine': provider, 'name': existing.name if existing else name,
+                   'email': email, 'mode': mode, 'browser': browser, 'status': 'starting',
+                   'data': {}}
         try:
-            remote = client.start(owner=attempt['owner'], engine=engine, mode=mode,
-                                  browser=browser, request_key=attempt['id'])
-            remote = auth_contract.attempt(remote, engine=engine)
-            stored = self.store.update_auth_attempt(
-                attempt['id'], attempt['owner'], grantbridge_id=remote.get('id'),
-                status=self._status(remote), data=remote)
-        except BridgeError as error:
-            stored = self.store.update_auth_attempt(
-                attempt['id'], attempt['owner'], status='failed',
-                data={'error': {'code': error.code}})
+            saved, created = self.store.create_auth_attempt(
+                attempt, request_key=request_key, connection=connection, proxy_route=config)
+        except BridgeError:
+            if managed_created:
+                try:
+                    self.managed_proxy.retire(account_id)
+                except BridgeError:
+                    pass
             raise
-        return self._public(stored)
+        if not created:
+            return self._public(saved)
+        try:
+            if existing:
+                self._check_existing(existing, provider, config, management)
+            else:
+                management.ensure_empty()
+        except BridgeError as error:
+            self.store.update_auth_attempt(
+                attempt['id'], owner, status='failed', data={'error': {'code': error.code}})
+            if managed_created:
+                try:
+                    self.managed_proxy.retire(account_id)
+                except BridgeError:
+                    pass
+            raise
+        client = GrantBridgeClient(**connection)
+        try:
+            remote = client.proxy_start(provider, proxy_base_url, management_key_env)
+            remote = auth_contract.attempt(remote, engine=provider)
+            saved = self.store.update_auth_attempt(
+                attempt['id'], owner, grantbridge_id=remote['id'],
+                status=auth_contract.status(remote), data=remote)
+        except BridgeError as error:
+            # Once dispatched, an interrupted response cannot prove whether
+            # CLIProxyAPI created an OAuth session. Do not retry automatically.
+            self.store.update_auth_attempt(
+                attempt['id'], owner, status='interrupted',
+                data={'error': {'code': 'authentication_outcome_unknown'}})
+            raise BridgeError('authentication_outcome_unknown',
+                              'OAuth start has an unknown outcome. Abandon this attempt and use a new local proxy endpoint.') from error
+        finally:
+            client.close()
+        return self._public(saved)
 
     def status(self, attempt_id, *, owner_ref=None, account_ref=None,
-               grantbridge_root=None, data_dir=None, client=None):
+               grantbridge_root=None, data_dir=None):
         row = self._owned(attempt_id, owner_ref, account_ref)
-        self.runtime.reap()
-        job = self.runtime.get(attempt_id)
-        if client is None and self.runtime.active(job):
-            return {**self._public(row), 'checking': job['kind'] != 'start',
-                    'cancel_requested': bool(job['cancel_requested'])}
-        if row['status'] in TERMINAL | {'bound', 'usable'}:
+        if row['status'] in TERMINAL | {'verified', 'bound'}:
             return self._public(row)
         if not row['grantbridge_id']:
-            if job and not job['job_id'] and time.time() - row['created'] < 15:
-                return self._public(row)
-            if job and not self.runtime.active(job):
-                with self._client(row) as probe:
-                    remote = probe.find(attempt_id, row['owner'])
-                if remote:
-                    remote = auth_contract.attempt(remote, engine=row['engine'])
-                    row = self.store.update_auth_attempt(attempt_id, row['owner'],
-                        grantbridge_id=remote['id'], status=self._status(remote), data=remote)
-                    return self._public(row)
-                row = self.store.update_auth_attempt(attempt_id, row['owner'], status='interrupted',
-                    data={'error': {'code': 'authentication_interrupted'}})
-            return self._public(row)
-        owns_client = client is None
-        client = client or self._client(row, grantbridge_root, data_dir)
+            raise BridgeError('authentication_attempt_not_ready', 'Authentication has not started.')
+        route, connection = self._route(row)
+        client = self._client(connection, grantbridge_root, data_dir)
         try:
-            remote = client.get(row['grantbridge_id'], row['owner'])
-            row = self._save_remote(row, remote)
+            try:
+                remote = client.proxy_status(row['grantbridge_id'], row['engine'],
+                                             route['proxy_base_url'], route['management_key_env'])
+            except BridgeError as error:
+                if error.code != 'authentication_outcome_unknown':
+                    raise
+                row = self.store.update_auth_attempt(
+                    attempt_id, row['owner'], status='interrupted',
+                    data={'error': {'code': error.code}})
+                return self._public(row)
+            remote = auth_contract.attempt(remote, engine=row['engine'], attempt_id=row['grantbridge_id'])
+            row = self.store.update_auth_attempt(attempt_id, row['owner'],
+                                                 status=auth_contract.status(remote),
+                                                 data={**row['data'], **remote})
         finally:
-            if owns_client:
-                client.close()
+            client.close()
         return self._public(row)
 
     def check(self, attempt_id, *, owner_ref=None, account_ref=None,
-              grantbridge_root=None, data_dir=None, client=None, inference=False):
-        if not isinstance(inference, bool):
-            raise BridgeError('invalid_params', 'inference must be a boolean.')
+              grantbridge_root=None, data_dir=None, inference=False):
+        if inference:
+            raise BridgeError('unsupported_operation', 'Proxy login checks do not start a model turn.')
         row = self._owned(attempt_id, owner_ref, account_ref)
-        if row['status'] in TERMINAL:
-            raise BridgeError('authentication_required', 'This authentication attempt has ended.')
-        if row['status'] == 'bound':
+        if row['status'] == 'verified':
             return self._public(row)
-        if not row['grantbridge_id']:
-            raise BridgeError('authentication_attempt_not_ready', 'Authentication attempt has not started.')
-        if client is None and self.runtime.get(attempt_id):
-            if row['status'] not in {'authorized', 'verified'}:
-                raise BridgeError('authentication_attempt_not_ready', 'Authorize the login before checking it.')
-            self.runtime.launch(attempt_id, 'inference' if inference else 'check')
-            return {**self._public(row), 'checking': True}
-        owns_client = client is None
-        client = client or self._client(row, grantbridge_root, data_dir, timeout=160)
-        try:
-            remote = (client.check(row['grantbridge_id'], row['owner'], inference=True) if inference else
-                      client.check(row['grantbridge_id'], row['owner']))
-            row = self._save_remote(row, remote)
-        finally:
-            if owns_client:
-                client.close()
-        return self._public(row)
-
-    def cancel(self, attempt_id, *, owner_ref=None, account_ref=None,
-               grantbridge_root=None, data_dir=None, client=None):
-        row = self._owned(attempt_id, owner_ref, account_ref)
-        if row['status'] in TERMINAL or row['status'] in {'bound', 'usable'}:
-            return self._public(row)
-        if self.runtime.get(attempt_id):
-            self.runtime.request_cancel(attempt_id)
-        if row['status'] in {'authorized', 'verified'}:
-            row = self.store.update_auth_attempt(attempt_id, row['owner'], status='cancelled')
-            return self._public(row)
-        if not row['grantbridge_id']:
-            if not self.runtime.active(self.runtime.get(attempt_id)):
-                row = self.store.update_auth_attempt(attempt_id, row['owner'], status='cancelled')
-            return {**self._public(row), 'cancel_requested': True}
-        owns_client = client is None
-        client = client or self._client(row, grantbridge_root, data_dir)
-        try:
-            remote = client.cancel(row['grantbridge_id'], row['owner'])
-            row = self._save_remote(row, remote)
-        finally:
-            if owns_client:
-                client.close()
+        if row['status'] in TERMINAL | {'bound'}:
+            raise BridgeError('authentication_required', 'This login cannot be checked.')
+        current = self.status(attempt_id, owner_ref=row['owner'],
+                              grantbridge_root=grantbridge_root, data_dir=data_dir)
+        if current['status'] != 'authorized':
+            raise BridgeError('authentication_attempt_not_ready', 'Authorize the proxy login before checking it.')
+        row = self.store.get_auth_attempt(attempt_id, row['owner'])
+        route, _ = self._route(row)
+        observed = ManagementClient(
+            ProxyRoute(row['account_id'], route['proxy_base_url'], route['key_env']),
+            route['management_key_env']).observe()
+        self._verify_observation(row, observed)
+        data = {**row['data'], 'verification': {'proxyBinding': 'passed'},
+                'proxy_binding': {'binding_fingerprint': observed['binding_fingerprint'],
+                                  'identity_fingerprint': observed['identity_fingerprint']}}
+        row = self.store.update_auth_attempt(attempt_id, row['owner'], status='verified', data=data)
         return self._public(row)
 
     def complete(self, attempt_id, *, owner_ref=None, account_ref=None,
-                 grantbridge_root=None, data_dir=None, client=None):
+                 grantbridge_root=None, data_dir=None):
         row = self._owned(attempt_id, owner_ref, account_ref)
         if row['status'] == 'bound':
+            if row['account_id'] in self.store.retired_account_ids():
+                raise BridgeError('authentication_required',
+                                  'This account was removed. Start a new proxy login.')
             account = self.accounts.get(row['account_id'])
             return {'account': account.to_dict(), 'attempt': self._public(row),
-                    'identity': row['data'].get('identity', {}), 'home': account.home}
+                    'identity': row['data'].get('identity', {})}
         if row['status'] != 'verified':
-            raise BridgeError('authentication_not_verified', 'A fresh provider check must pass before activation.')
-        job = self.runtime.get(attempt_id)
-        if self.runtime.active(job) and job['kind'] != 'start':
-            raise BridgeError('authentication_attempt_not_ready', 'Provider verification is still running.')
-        owns_client = client is None
-        client = client or self._client(row, grantbridge_root, data_dir)
-        try:
-            activation = client.activate(row['grantbridge_id'], row['owner'])
-        finally:
-            if owns_client:
-                client.close()
-        job = self.runtime.get(attempt_id)
-        account, row = bind_account(self.store, row, activation, job['config'] if job else None)
+            raise BridgeError('authentication_not_verified', 'Verify the proxy account before activation.')
+        route, _ = self._route(row)
+        observed = ManagementClient(
+            ProxyRoute(row['account_id'], route['proxy_base_url'], route['key_env']),
+            route['management_key_env']).observe()
+        self._verify_observation(row, observed)
+        checked = row['data'].get('proxy_binding') or {}
+        if any(checked.get(key) != observed.get(key) for key in
+               ('binding_fingerprint', 'identity_fingerprint')):
+            raise BridgeError('proxy_binding_changed', 'The proxy credential changed after verification.')
+        account, row = bind_proxy_account(self.store, row, route, observed)
         return {'account': account.to_dict(), 'attempt': self._public(row),
-                'identity': row['data'].get('identity', {}), 'home': account.home}
+                'identity': row['data'].get('identity', {})}
 
-    def login(self, *, engine, name, email=None, grantbridge_root=None, data_dir=None,
-              mode='browser', browser='same_host', timeout=600, poll_interval=1.0,
-              on_attempt=None, client=None, inference=False):
+    def cancel(self, attempt_id, *, owner_ref=None, account_ref=None,
+               grantbridge_root=None, data_dir=None):
+        row = self._owned(attempt_id, owner_ref, account_ref)
+        if row['status'] == 'interrupted':
+            # The remote outcome is unknown. This only abandons local ownership;
+            # it must never claim that the proxy cancelled OAuth.
+            row = self.store.update_auth_attempt(attempt_id, row['owner'], status='abandoned')
+            return self._public(row)
+        if row['status'] in TERMINAL | {'bound'}:
+            return self._public(row)
+        if row['status'] in {'authorized', 'verified'}:
+            raise BridgeError('already_finished',
+                              'OAuth already completed; the proxy credential remains available for activation.')
+        if not row['grantbridge_id']:
+            self.store.update_auth_attempt(
+                attempt_id, row['owner'], status='interrupted',
+                data={'error': {'code': 'authentication_outcome_unknown'}})
+            raise BridgeError('authentication_outcome_unknown',
+                              'OAuth start may be in progress. Abandon this attempt and use a new local proxy endpoint.')
+        if row['grantbridge_id']:
+            route, connection = self._route(row)
+            client = self._client(connection, grantbridge_root, data_dir)
+            try:
+                try:
+                    remote = client.proxy_cancel(row['grantbridge_id'], row['engine'],
+                                                 route['proxy_base_url'], route['management_key_env'])
+                except BridgeError as error:
+                    if error.code != 'authentication_outcome_unknown':
+                        raise
+                    self.store.update_auth_attempt(
+                        attempt_id, row['owner'], status='interrupted',
+                        data={'error': {'code': error.code}})
+                    raise BridgeError('authentication_outcome_unknown',
+                                      'Proxy cancellation has an unknown outcome. Abandon this attempt and use a new local proxy endpoint.') from error
+                remote = auth_contract.attempt(remote, engine=row['engine'],
+                                               attempt_id=row['grantbridge_id'])
+                outcome = auth_contract.status(remote)
+            finally:
+                client.close()
+            if outcome == 'authorized':
+                self.store.update_auth_attempt(attempt_id, row['owner'], status='authorized')
+                raise BridgeError('already_finished',
+                                  'OAuth already completed; the proxy credential remains available for activation.')
+            if outcome == 'failed':
+                return self._public(self.store.update_auth_attempt(
+                    attempt_id, row['owner'], status='failed', data=remote))
+            if outcome != 'cancelled':
+                raise BridgeError('provider_protocol_error', 'The proxy did not confirm cancellation.')
+        row = self.store.update_auth_attempt(attempt_id, row['owner'], status='cancelled')
+        if self.managed_proxy and not any(
+                account.id == row['account_id'] for account in self.accounts.list()):
+            route = self.store.auth_proxy_route(row['id'])['config']
+            if self.managed_proxy.is_managed(route, row['account_id']):
+                try:
+                    self.managed_proxy.retire(row['account_id'])
+                except BridgeError:
+                    pass
+        return self._public(row)
+
+    def login(self, *, provider, name, proxy_base_url=None, key_env=None, management_key_env=None,
+              email=None, grantbridge_root=None, data_dir=None, mode='browser',
+              browser='same_host', timeout=600, poll_interval=1.0, on_attempt=None,
+              inference=False):
         if not isinstance(timeout, (int, float)) or not 1 <= timeout <= 86400:
             raise BridgeError('invalid_timeout', 'Login timeout must be in [1, 86400] seconds.')
         if not isinstance(poll_interval, (int, float)) or not 0.05 <= poll_interval <= 60:
             raise BridgeError('invalid_poll_interval', 'Login poll interval must be in [0.05, 60] seconds.')
-        try:
-            attempt = self.start(engine=engine, name=name, email=email,
-                                 grantbridge_root=grantbridge_root, data_dir=data_dir,
-                                 mode=mode, browser=browser, client=client)
+        attempt = self.start(
+            provider=provider, name=name, proxy_base_url=proxy_base_url, key_env=key_env,
+            management_key_env=management_key_env, email=email, grantbridge_root=grantbridge_root,
+            data_dir=data_dir, mode=mode, browser=browser)
+        if on_attempt:
+            on_attempt(attempt)
+        started = time.monotonic()
+        while attempt['status'] not in TERMINAL | {'authorized', 'verified', 'bound'}:
+            if time.monotonic() - started >= timeout:
+                self.cancel(attempt['attempt_id'], owner_ref=attempt['owner_ref'])
+                raise BridgeError('login_timeout', 'The proxy login timed out.')
+            time.sleep(poll_interval)
+            attempt = self.status(attempt['attempt_id'], owner_ref=attempt['owner_ref'])
             if on_attempt:
                 on_attempt(attempt)
-            started = time.monotonic()
-            while attempt['status'] not in TERMINAL | {'authorized', 'verified', 'bound', 'usable'}:
-                if time.monotonic() - started >= timeout:
-                    self.cancel(attempt['attempt_id'], owner_ref=attempt['owner_ref'],
-                                grantbridge_root=grantbridge_root, data_dir=data_dir, client=client)
-                    raise BridgeError('login_timeout', 'The authentication attempt timed out.')
-                time.sleep(poll_interval)
-                attempt = self.status(attempt['attempt_id'], owner_ref=attempt['owner_ref'],
-                                      grantbridge_root=grantbridge_root, data_dir=data_dir, client=client)
-                if on_attempt:
-                    on_attempt(attempt)
-            if attempt['status'] in TERMINAL:
-                raise BridgeError('login_failed', 'The provider did not complete authentication.')
-            while client is None and self.runtime.active(self.runtime.get(attempt['attempt_id'])):
-                if time.monotonic() - started >= timeout:
-                    raise BridgeError('login_timeout', 'Authentication is still running.')
-                time.sleep(poll_interval)
-            attempt = self.check(attempt['attempt_id'], owner_ref=attempt['owner_ref'],
-                                 grantbridge_root=grantbridge_root, data_dir=data_dir, client=client, inference=inference)
-            while client is None and self.runtime.active(self.runtime.get(attempt['attempt_id'])):
-                if time.monotonic() - started >= timeout:
-                    raise BridgeError('login_timeout', 'The provider verification is still running.')
-                time.sleep(poll_interval)
-                attempt = self.status(attempt['attempt_id'], owner_ref=attempt['owner_ref'])
-            if client is None:
-                attempt = self.status(attempt['attempt_id'], owner_ref=attempt['owner_ref'])
-            if on_attempt:
-                on_attempt(attempt)
-            return self.complete(attempt['attempt_id'], owner_ref=attempt['owner_ref'],
-                                 grantbridge_root=grantbridge_root, data_dir=data_dir, client=client)
-        finally:
-            if client is not None:
-                client.close()
+        if attempt['status'] in TERMINAL:
+            if attempt['status'] == 'interrupted' and attempt.get('error', {}).get('code') == 'authentication_outcome_unknown':
+                raise BridgeError('authentication_outcome_unknown',
+                                  'The proxy OAuth result is unknown. Abandon this attempt and use a new local proxy endpoint.')
+            raise BridgeError('login_failed', 'The provider did not complete authentication.')
+        self.check(attempt['attempt_id'], owner_ref=attempt['owner_ref'], inference=inference)
+        return self.complete(attempt['attempt_id'], owner_ref=attempt['owner_ref'])
 
-    def _client(self, row, root=None, data_dir=None, **options):
-        job = self.runtime.get(row['id'])
-        return (GrantBridgeClient(**job['config'], **options) if job else
-                GrantBridgeClient(root, data_dir=data_dir, **options))
+    def _check_existing(self, account, provider, config, management):
+        if (not account.proxy_base_url or account.engine != 'codex'
+                or account.provider != provider
+                or any(getattr(account, key) != value for key, value in config.items())):
+            raise BridgeError('account_migration_required', 'This account cannot be changed by proxy login.')
+        binding = self.store.proxy_binding(account.id)
+        if binding is None:
+            raise BridgeError('account_migration_required', 'The existing proxy account has no verified binding.')
+        if management.credential_count() == 1:
+            observed = management.observe()
+            if observed['identity_fingerprint'] != binding['identity_fingerprint']:
+                raise BridgeError('identity_changed', 'The local proxy belongs to another account.')
+
+    def _verify_observation(self, row, observed):
+        if (observed.get('provider') != row['engine'] or observed.get('status') != 'active'
+                or observed.get('disabled') is not False
+                or observed.get('unavailable') is not False or not observed.get('models')):
+            raise BridgeError('proxy_binding_unverified', 'The authenticated proxy account is not usable.')
+        if row.get('email') and row['email'] != observed.get('email'):
+            raise BridgeError('identity_changed', 'The proxy identity does not match the requested email.')
+        existing = next((account for account in self.accounts.list() if account.id == row['account_id']), None)
+        if existing:
+            binding = self.store.proxy_binding(existing.id)
+            if binding is None or binding['identity_fingerprint'] != observed['identity_fingerprint']:
+                raise BridgeError('identity_changed', 'Reauthentication cannot replace the account identity.')
+
+    def _route(self, row):
+        saved = self.store.auth_proxy_route(row['id'])
+        route = saved['config']
+        if self.managed_proxy and self.managed_proxy.is_managed(route, row['account_id']):
+            self.managed_proxy.ensure(row['account_id'], route['proxy_base_url'])
+        return saved['config'], saved['connection']
+
+    @staticmethod
+    def _client(connection, root=None, data_dir=None):
+        return GrantBridgeClient(**connection) if connection else GrantBridgeClient(root, data_dir=data_dir)
 
     def _owned(self, attempt_id, owner_ref, account_ref):
         if owner_ref:
@@ -235,32 +337,15 @@ class AuthenticationService:
         if account_ref:
             account = self.accounts.resolve(account_ref)
             row = self.store.latest_auth_attempt(account.id)
-            if row:
-                target = self.store.get_auth_attempt(attempt_id, row['owner'])
-                if target['account_id'] == account.id:
-                    return target
-        raise BridgeError('authentication_owner_required', 'owner_ref is required for this authentication attempt.')
+            if row and row['id'] == attempt_id:
+                return row
+        raise BridgeError('authentication_owner_required', 'owner_ref is required for this login.')
 
     @staticmethod
     def _owner_for(request_key):
         if not request_key:
             return uuid4().hex
-        digest = hashlib.sha256(str(request_key).encode()).hexdigest()[:32]
-        return 'request-' + digest
-
-    def _save_remote(self, row, remote):
-        row = self.store.get_auth_attempt(row['id'], row['owner'])
-        if row['status'] in TERMINAL | {'bound', 'usable'}:
-            return row
-        try:
-            remote = auth_contract.attempt(remote, engine=row['engine'], attempt_id=row['grantbridge_id'])
-        except BridgeError:
-            self.store.update_auth_attempt(row['id'], row['owner'], status='failed',
-                data={'error': {'code': 'provider_protocol_error'}})
-            raise
-        return self.store.update_auth_attempt(row['id'], row['owner'],
-                                              status=self._status(remote, row['status']),
-                                              data=remote)
+        return 'request-' + hashlib.sha256(request_key.encode()).hexdigest()[:32]
 
     @staticmethod
     def _status(remote, current=None):
@@ -269,23 +354,15 @@ class AuthenticationService:
     @staticmethod
     def _public(row):
         data = auth_contract.projection(row.get('data'))
-        mapping = {
-            'authorizationUrl': 'authorization_url', 'userCode': 'user_code',
-            'createdAt': 'created_at', 'updatedAt': 'updated_at',
-            'expiresAt': 'expires_at', 'probeError': 'probe_error',
-            'autoCheck': 'auto_check', 'autoChecked': 'auto_checked',
-            'manualCodeRequired': 'manual_code_required',
-        }
-        result = {
-            'attempt_id': row['id'], 'owner_ref': row['owner'],
-            'account_ref': row['name'], 'engine': row['engine'],
-            'status': row['status'],
-        }
-        for source, target in mapping.items():
+        result = {'attempt_id': row['id'], 'owner_ref': row['owner'],
+                  'account_ref': row['name'], 'provider': row['engine'],
+                  'status': row['status']}
+        for source, target in (('authorizationUrl', 'authorization_url'),
+                               ('userCode', 'user_code'), ('createdAt', 'created_at'),
+                               ('updatedAt', 'updated_at'), ('expiresAt', 'expires_at')):
             if source in data:
                 result[target] = data[source]
-        for key in ('provider', 'mode', 'browser', 'identity', 'verification',
-                    'error', 'checking', 'auto_check'):
+        for key in ('identity', 'verification', 'error'):
             if key in data:
                 result[key] = data[key]
         return result

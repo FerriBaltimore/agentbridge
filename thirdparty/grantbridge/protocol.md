@@ -1,88 +1,59 @@
 # Private GrantBridge adapter protocol
 
-AgentBridge consumes the JSON-RPC 2.0 stdio adapter in GrantBridge, currently
-reviewed at revision `798ef3518778a82953b2d2365ee270271cad2f7a`.
-The executable sources are `src/agentbridge-protocol.mjs`,
-`src/agentbridge-credentials.mjs` and `scripts/agentbridge-adapter.mjs`.
-This private boundary is distinct from AgentBridge's public snake_case RPC.
-It does not establish compatibility with arbitrary future GrantBridge revisions.
+AgentBridge consumes the local GrantBridge JSON-RPC 2.0 stdio adapter. This is
+a private trusted boundary, separate from public AgentBridge `accounts.login.*`
+methods. The v2 proxy methods are `auth.proxy_start`, `auth.proxy_status` and
+`auth.proxy_cancel`. Version compatibility must be checked against the pinned
+GrantBridge checkout; older native `auth.start` and `auth.activate` are not
+account onboarding methods in v2.
 
 ## Framing and ownership
 
-One JSON object per line. Each response has `jsonrpc: "2.0"`, the request `id`
-and exactly one of `result` or `error`. The error envelope carries a numeric
-JSON-RPC code and may carry `data.code`. Unknown private error codes become
-`grantbridge_failed`; provider error bodies are not exposed or persisted.
-Malformed matching envelopes become `provider_protocol_error`.
+Each line is one JSON object. A response has `jsonrpc: "2.0"`, the matching
+request ID and exactly one of `result` or `error`. Unknown private error codes
+are sanitized to `grantbridge_failed`; malformed matching envelopes produce
+`provider_protocol_error`. Raw provider and Management API bodies must never
+enter AgentBridge state, events or public errors.
 
-Every account operation requires `owner`. It is AgentBridge's durable attempt
-owner, not the account name or a new owner on every retry. The local host chooses
-the adapter executable and its private data directory; public RPC cannot change
-these references. `health` returns the service and version. `auth.close` closes
-the sidecar; pending native work follows GrantBridge's interrupted-state rules.
+AgentBridge scopes each durable attempt to an opaque owner. GrantBridge's
+`auth.proxy_*` methods forward the sidecar OAuth state and do not persist that
+attempt. A lost start response is an unresolved OAuth-start outcome unless
+the sidecar state can be recovered; a supplied durable request key prevents an
+automatic second start. The local host chooses the adapter executable and data
+directory; public RPC cannot change them. `health` reports version and
+service. Closing a sidecar does not silently restart or rerun an attempt.
 
-## Start, inspect and reconcile
+## Proxy OAuth methods
 
-```json
-{"jsonrpc":"2.0","id":1,"method":"auth.start","params":{"owner":"owner-ref","engine":"codex","mode":"browser","browser":"same_host","request_key":"durable-key","auto_check":false}}
-```
+`auth.proxy_start` receives the provider (`codex`, `claude` or `grok`), the
+loopback proxy base URL and the management key resolved from the configured
+environment variable. The key value crosses only this trusted local stdio
+boundary. It is never a public RPC field, account record, log field, command
+argument or Codex configuration value. GrantBridge calls CLIProxyAPI's
+Management API to start the provider OAuth flow and returns sanitized
+attempt state and authorization information.
 
-The result uses native field names:
+`auth.proxy_status` reads the sidecar OAuth state and reports bounded
+state. `auth.proxy_cancel` cancels a pending attempt when CLIProxyAPI confirms
+it. An unknown or expired proxy state is `authentication_outcome_unknown`,
+because it could also be a completed OAuth session. AgentBridge records that
+state as interrupted and requires explicit local abandonment and proxy
+restart before another attempt; a saved credential must be resolved at the
+proxy first. An already granted upstream OAuth credential
+is not assumed revoked by a local cancellation. The AgentBridge
+login state machine maps the private status into safe public
+`accounts.login.status`; a callback by itself does not mark the account
+verified.
 
-```json
-{"jsonrpc":"2.0","id":1,"result":{"id":"opaque-attempt-id","provider":"codex","status":"starting","authorizationUrl":null,"expiresAt":1760000000000}}
-```
+AgentBridge performs a fresh sidecar inventory, identity and model check for
+`accounts.login.check` and repeats required checks in
+`accounts.login.complete`. It requires exactly one active credential in an
+otherwise clean sidecar and a stable identity. It commits a usable account
+atomically; failed, cancelled, ambiguous or changed identity cannot bind.
+The management key is required for these checks even if a later route is
+pinned. CLIProxyAPI retains and renews the credential; GrantBridge does not
+hand an upstream token or native home to AgentBridge.
 
-`auth.get` takes `attempt_id` and `owner`. `auth.find` takes `request_key` and
-`owner`, returning the existing attempt or null. It reconciles a lost start
-response without creating another provider login.
-
-Known remote states: `starting`, `awaiting_user`, `exchanging`, `authorized`,
-`failed`, `cancelled`, `expired`, `interrupted`, `revoked`, `replaced`.
-`verified`, `bound` and `usable` are AgentBridge states, never accepted as remote
-GrantBridge authorization evidence. Unknown states or mismatched provider/ID
-produce `provider_protocol_error`; a saved verified attempt is invalidated on
-such a refresh and cannot subsequently activate using its older observation.
-
-The public projection copies bounded identity fields and the documented
-verification observations, timestamps, authorization URL and device user code.
-Opaque added fields, nested credentials and error messages are dropped. New
-optional fields do not invalidate an otherwise compatible attempt. Additive
-fields needed by the product must be added deliberately with regression tests.
-
-## Check, complete and cancel
-
-`auth.check` takes `attempt_id`, `owner` and optional `inference` (boolean).
-The result is an attempt with `verification.freshProcess`, optional
-`verification.inference`, and `checking`. AgentBridge verifies only an
-`authorized` attempt whose check is no longer running and whose fresh-process
-result is explicitly `passed`. `loaded_only` does not verify usability.
-An inference probe is explicit and consumes provider usage.
-
-`auth.activate` takes `attempt_id` and `owner`. Its result includes
-`attempt_id`, `provider`, `identity` and either a native `home` for Codex/Claude
-or Cursor `credential_ref` (`provider`, `attempt_id`) and `expires_at_ms`.
-AgentBridge validates provider, attempt and expected identity before atomically
-binding the account. Relogin preserves the account ID and cannot silently change
-its identity. The native home is a trusted local-host reference, never a public
-RPC field. GrantBridge owns the provisioned directory under its configured root.
-
-`auth.cancel` takes `attempt_id` and `owner`. Repeating cancellation is safe.
-Existing authorized provider grants are not revoked by local cancellation.
-A cancelled AgentBridge attempt cannot later bind, even if a remote check ends.
-
-`auth.submit_code` is a private protected input taking `attempt_id`, `owner`
-and `code`. It is not exposed by AgentBridge's public dispatcher.
-
-## Private credential handoff
-
-`auth.credentials` takes `attempt_id` and `owner`; only the trusted execution
-adapter may call it. For Cursor its result contains `provider`, `api_key` and
-`expires_at_ms`. This result intentionally carries a credential in the private
-pipe, never in public RPC, SQLite, command arguments, logs or events. GrantBridge
-checks the verified attempt, credential expiry, identity and supported backend.
-
-Codex/Claude workers use an explicit isolated home with `CODEX_HOME` or
-`CLAUDE_CONFIG_DIR`. Cursor workers resolve the bound reference at execution time
-and receive the credential through a private environment handoff. Ambient
-operator credentials never substitute for an explicit account binding.
+The initial browser mode is `same_host`. A URL-only fixture or local
+Management API response is not live provider acceptance. Remote callbacks,
+credential refresh and authenticated model execution need separate evidence.

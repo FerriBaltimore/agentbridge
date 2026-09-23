@@ -1,8 +1,9 @@
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import RunOptions
 from agentbridge.event_contract import public_event
 from agentbridge.models import Event
 from agentbridge.protocols import Parser
 from agentbridge.quota_windows import project
+from fixtures.test_proxy_worker_fixture import MODEL, bridge_with_proxy, management_server
 
 
 def test_claude_stream_fraction_is_not_oauth_percent():
@@ -36,19 +37,20 @@ def test_public_quota_event_normalizes_nested_native_payload():
     assert public['data']['windows'][0]['used_percent'] == 50
 
 
-def test_safety_error_is_identical_in_turn_and_final_event(tmp_path):
-    bridge = Bridge(tmp_path)
-    bridge.register(Account('fixture', 'codex', home=str(tmp_path)))
-    instance = bridge.instance_create(account_ref='fixture', workspace_path=str(tmp_path))
-    turn, _ = bridge.store.admit('fixture-turn', instance['id'], 'test', RunOptions(), 'fixture')
-    parser = Parser('codex', lambda kind, data: bridge.store.emit(turn, kind, data))
-    parser.feed({'type': 'turn.failed', 'error': {'message':
-        'This request was blocked by our safety systems. Reason: Potentially unintended activity. PRIVATE BODY'}})
-    bridge.store.finish(turn, 'failed', 'safety_blocked')
-    value = bridge.turn(turn, include_error=True)
-    final = bridge.turn_events(turn)[-1]
-    assert value['outcome'] == 'failed'
-    assert value['error_detail']['code'] == 'safety_blocked'
-    assert value['error_detail']['retryable'] is False
-    assert final['data']['error_detail'] == value['error_detail']
-    assert 'PRIVATE BODY' not in str(bridge.turn_events(turn))
+def test_safety_error_is_identical_in_turn_and_final_event(tmp_path, monkeypatch):
+    with management_server() as port:
+        bridge = bridge_with_proxy(tmp_path, monkeypatch, port)
+        instance = bridge.instance_create(account_ref='fixture', model=MODEL,
+                                          workspace_path=str(tmp_path))
+        turn, _ = bridge.store.admit('fixture-turn', instance['id'], 'test', RunOptions(), 'fixture')
+        parser = Parser('codex', lambda kind, data: bridge.store.emit(turn, kind, data))
+        parser.feed({'type': 'turn.failed', 'error': {'message':
+            'This request was blocked by our safety systems. Reason: Potentially unintended activity. PRIVATE BODY'}})
+        bridge.store.finish(turn, 'failed', 'safety_blocked')
+        value = bridge.turn(turn, include_error=True)
+        final = bridge.turn_events(turn)[-1]
+        assert value['outcome'] == 'failed'
+        assert value['error_detail']['code'] == 'safety_blocked'
+        assert value['error_detail']['retryable'] is False
+        assert final['data']['error_detail'] == value['error_detail']
+        assert 'PRIVATE BODY' not in str(bridge.turn_events(turn))

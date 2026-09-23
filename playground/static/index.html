@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AgentBridge Playground</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/components.css">
+  <link rel="stylesheet" href="/static/responsive.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 0 1-8 8 9 9 0 0 1-3.6-.7L4 20l1.2-4.4A8 8 0 1 1 20 11.5Z"/></symbol>
+    <symbol id="icon-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2H3ZM16 5.5a3 3 0 0 1 0 5.8M17 14a5 5 0 0 1 4 5v1h-3"/></symbol>
+    <symbol id="icon-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9a7 7 0 0 1 12.4-2L20 12M4 12l2.1 5a7 7 0 0 0 12.4-2"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="icon-spark" viewBox="0 0 24 24"><path d="m12 2 1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2ZM19 17l.6 1.4L21 19l-1.4.6L19 21l-.6-1.4L17 19l1.4-.6L19 17Z"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6"/></symbol>
+    <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+    <symbol id="icon-external" viewBox="0 0 24 24"><path d="M13 5h6v6M19 5l-9 9"/><path d="M19 13v6H5V5h6"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="M5 5 19 19M19 5 5 19"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <div><strong>AgentBridge</strong><small>Local playground</small></div>
+      </div>
+      <p class="sidebar-label">WORKSPACE</p>
+      <nav class="nav-list" aria-label="Views">
+        <button class="nav-link is-active" data-view="overview" data-testid="nav-overview" aria-current="page"><svg><use href="#icon-grid"></use></svg><span>Overview</span></button>
+        <button class="nav-link" data-view="chat" data-testid="nav-chat"><svg><use href="#icon-chat"></use></svg><span>Chat</span></button>
+        <button class="nav-link" data-view="accounts" data-testid="nav-accounts"><svg><use href="#icon-users"></use></svg><span>Accounts</span></button>
+        <button class="nav-link" data-view="activity" data-testid="nav-activity"><svg><use href="#icon-activity"></use></svg><span>Activity</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-note"><span class="pulse-dot"></span><div><strong>Runs locally</strong><small>Codex with your accounts</small></div></div>
+        <div class="sidebar-version">AgentBridge <span>v2</span></div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <div class="topbar">
+        <div class="topbar-actions">
+          <span id="refresh-time" class="refresh-time" aria-live="off">Waiting for data</span>
+          <button id="refresh-button" class="icon-button" type="button" aria-label="Refresh data" title="Refresh data"><svg><use href="#icon-refresh"></use></svg></button>
+        </div>
+      </div>
+      <div id="global-error" class="global-error" role="alert" hidden></div>
+
+      <main id="main-content">
+        <section id="view-overview" class="view" aria-labelledby="overview-heading">
+          <div class="hero">
+            <div class="hero-copy"><span class="eyebrow"><span class="eyebrow-line"></span> YOUR LOCAL CONTROL ROOM</span><h1 id="overview-heading">One engine.<br><em>Every account.</em></h1><p id="overview-description">Explore your routed models, watch account usage, and start a conversation with your connected accounts.</p><button id="hero-start-chat" class="button button-light" type="button">Start a conversation <svg><use href="#icon-arrow"></use></svg></button></div>
+            <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="orbit-core"><span class="brand-mark brand-mark-large"><span></span><span></span><span></span></span></div><span class="orbit-node node-one"></span><span class="orbit-node node-two"></span><span class="orbit-node node-three"></span></div>
+          </div>
+          <div class="metric-grid" aria-label="Workspace summary">
+            <article class="metric-card"><div class="metric-head"><span>Connected accounts</span><span class="metric-icon metric-icon-blue"><svg><use href="#icon-users"></use></svg></span></div><strong id="metric-accounts">—</strong><small id="metric-accounts-detail">Loading accounts</small></article>
+            <article class="metric-card"><div class="metric-head"><span>Observed models</span><span class="metric-icon metric-icon-purple"><svg><use href="#icon-grid"></use></svg></span></div><strong id="metric-models">—</strong><small id="metric-models-detail">Loading models</small></article>
+            <article class="metric-card"><div class="metric-head"><span>Usage signals</span><span class="metric-icon metric-icon-green"><svg><use href="#icon-activity"></use></svg></span></div><strong id="metric-usage">—</strong><small id="metric-usage-detail">Loading observations</small></article>
+            <article class="metric-card"><div class="metric-head"><span>Conversations</span><span class="metric-icon metric-icon-orange"><svg><use href="#icon-chat"></use></svg></span></div><strong id="metric-instances">—</strong><small id="metric-instances-detail">Loading conversations</small></article>
+          </div>
+          <div class="content-grid">
+            <section class="surface models-surface" aria-labelledby="models-heading"><div class="section-heading"><div><span class="overline">ROUTING CATALOG</span><h2 id="models-heading">Available models</h2><p>Exact model IDs observed from connected accounts.</p></div><button id="overview-open-chat" class="text-button" type="button" data-go="chat">Open chat <svg><use href="#icon-arrow"></use></svg></button></div><div id="overview-models" class="model-grid"></div></section>
+            <section class="surface account-surface" aria-labelledby="snapshot-heading"><div class="section-heading"><div><span class="overline">ACCOUNT HEALTH</span><h2 id="snapshot-heading">Usage snapshot</h2><p>Unknown and stale values stay visible.</p></div></div><div id="overview-usage" class="usage-list"></div><button id="overview-manage-accounts" class="surface-link" type="button" data-go="accounts">Manage accounts <svg><use href="#icon-arrow"></use></svg></button></section>
+          </div>
+        </section>
+
+        <section id="view-accounts" class="view" aria-labelledby="accounts-heading" hidden>
+          <div class="page-intro"><div><span class="overline">CONNECTED IDENTITIES</span><h1 id="accounts-heading">Accounts</h1><p>Connect a provider account through its authorization page.</p></div><button id="accounts-add" data-testid="add-account" class="button button-primary" type="button"><svg><use href="#icon-plus"></use></svg>Add account</button></div>
+          <div id="accounts-summary" class="account-summary"></div>
+          <div id="accounts-list" data-testid="accounts-list" class="account-list"></div>
+          <div id="accounts-removal-note" class="info-strip"><svg><use href="#icon-activity"></use></svg><p>Removing an account stops AgentBridge from using it. The provider authorization is not revoked.</p></div>
+        </section>
+
+        <section id="view-chat" class="view chat-view" aria-labelledby="chat-heading" hidden>
+          <div class="page-intro chat-intro"><div><span class="overline">ROUTED CONVERSATIONS</span><h1 id="chat-heading">Chat</h1><p>Choose a model, then let AgentBridge route each turn or pin an account.</p></div><button id="new-conversation" class="button button-secondary" type="button"><svg><use href="#icon-plus"></use></svg>New conversation</button></div>
+          <div class="chat-layout">
+            <aside class="conversation-rail" aria-label="Conversations"><div class="rail-heading"><strong>Conversations</strong><span id="conversation-count">0</span></div><div id="conversation-list" data-testid="conversation-list" class="conversation-list"></div></aside>
+            <div class="chat-column">
+              <details id="route-settings" class="route-settings" open><summary><span class="route-settings-title"><svg><use href="#icon-spark"></use></svg> Conversation settings</span><span id="route-summary">Choose a model</span></summary><div class="route-fields"><label>Provider<select id="chat-provider" data-testid="chat-provider"><option value="">All providers</option></select></label><label>Model<select id="chat-model" data-testid="chat-model" required><option value="">Select a model</option></select></label><label>Account route<select id="chat-account" data-testid="chat-account"><option value="">Automatic · least usage</option></select></label><label>Workspace<input id="chat-workspace" data-testid="chat-workspace" type="text" autocomplete="off" placeholder="Local workspace path"></label><label id="effort-field" hidden>Reasoning effort<select id="chat-effort" data-testid="chat-effort"></select></label><label id="context-field" hidden>Context window<select id="chat-context" data-testid="chat-context"></select></label><label id="permission-field" hidden>Permission mode<select id="chat-permission" data-testid="chat-permission"></select></label></div><p id="route-help" class="field-help">Model and account availability reflect account observations.</p></details>
+              <div class="chat-surface"><div class="chat-surface-head"><div><span class="chat-avatar"><svg><use href="#icon-spark"></use></svg></span><div><strong id="chat-conversation-title">New conversation</strong><small id="chat-conversation-subtitle">Ready when you are</small></div></div><button id="stop-turn" data-testid="chat-stop" class="button button-stop" type="button" hidden><svg><use href="#icon-stop"></use></svg>Stop turn</button></div><div id="chat-messages" data-testid="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Conversation"><div class="chat-empty"><span class="empty-mark"><svg><use href="#icon-spark"></use></svg></span><h2>What can we work on?</h2><p>Select an observed model and send a message. Your conversation stays connected to one AgentBridge instance.</p></div></div><form id="chat-form" class="composer"><label for="chat-input" class="visually-hidden">Message</label><textarea id="chat-input" data-testid="chat-input" rows="2" placeholder="Ask AgentBridge anything…" required></textarea><div class="composer-bottom"><span id="composer-hint">Enter to send · Shift+Enter for a new line</span><button id="chat-send" data-testid="chat-send" class="button button-primary" type="submit">Send <svg><use href="#icon-arrow"></use></svg></button></div></form></div>
+              <details class="event-drawer"><summary>Turn activity <span id="event-count">0 events</span></summary><div id="chat-event-list" class="event-list"></div></details>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-activity" class="view" aria-labelledby="activity-heading" hidden><div class="page-intro"><div><span class="overline">EXECUTION EVIDENCE</span><h1 id="activity-heading">Activity</h1><p>Events from the selected conversation, in the order AgentBridge recorded them.</p></div></div><div class="surface activity-surface"><div class="section-heading"><div><h2 id="activity-title">No conversation selected</h2><p id="activity-subtitle">Open a conversation in Chat to inspect its events.</p></div><button id="activity-refresh" class="button button-secondary" type="button"><svg><use href="#icon-refresh"></use></svg>Refresh events</button></div><div id="activity-list" data-testid="activity-list" class="event-list event-list-large"></div></div></section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="login-dialog" data-testid="login-dialog" class="modal">
+    <form method="dialog" class="modal-close-form"><button class="icon-button" aria-label="Close dialog" title="Close dialog"><svg><use href="#icon-close"></use></svg></button></form>
+    <div class="modal-body">
+      <span class="overline">CONNECT AN IDENTITY</span>
+      <h2>Add an account</h2>
+      <p class="modal-lead">Choose a provider and name, then authorize the account in your browser.</p>
+      <ol class="stepper" aria-label="Login progress"><li id="login-step-config" class="is-current"><span>1</span>Choose</li><li id="login-step-authorize"><span>2</span>Authorize</li><li id="login-step-verify"><span>3</span>Verify</li></ol>
+      <div id="login-feedback" class="form-feedback" role="alert" hidden></div>
+      <form id="login-form">
+        <div class="form-grid">
+          <label>Provider<select id="login-provider" data-testid="login-provider" required></select></label>
+          <label>Account name<input id="login-name" data-testid="login-name" type="text" maxlength="128" autocomplete="off" placeholder="Personal account" required></label>
+        </div>
+        <p class="field-help">The name is only used to identify this account in AgentBridge.</p>
+        <div class="modal-actions"><button id="login-start" data-testid="login-start" class="button button-primary" type="submit">Start sign-in <svg><use href="#icon-arrow"></use></svg></button></div>
+      </form>
+      <div id="login-progress" hidden>
+        <div id="login-status" data-testid="login-status" class="status-banner" aria-live="polite"></div>
+        <a id="login-open-url" data-testid="login-open-url" class="button button-primary external-button" target="_blank" rel="noopener noreferrer" hidden>Open authorization page <svg><use href="#icon-external"></use></svg></a>
+        <div id="login-user-code" class="user-code" hidden><small>Verification code</small><strong id="login-code-value"></strong></div>
+        <p id="login-progress-help" class="field-help">Waiting for the provider authorization to finish in your browser.</p>
+        <div class="modal-actions"><button id="login-retry-check" class="button button-secondary" type="button" hidden>Retry verification</button><button id="login-cancel" data-testid="login-cancel" class="button button-ghost" type="button">Cancel login</button></div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="remove-dialog" data-testid="remove-dialog" class="modal confirm-modal"><div class="modal-body"><span class="danger-symbol"><svg><use href="#icon-trash"></use></svg></span><h2>Remove account?</h2><p id="remove-account-name" class="confirm-name"></p><p>This stops AgentBridge from using the account. Its provider authorization is not revoked.</p><div id="remove-feedback" class="form-feedback" role="alert" hidden></div><div class="modal-actions"><button id="remove-cancel" class="button button-secondary" type="button">Keep account</button><button id="remove-confirm" data-testid="remove-confirm" class="button button-danger" type="button">Remove account</button></div></div></dialog>
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
+  <noscript><div class="noscript">This playground needs JavaScript to call the local AgentBridge HTTP API.</div></noscript>
+</body>
+</html>

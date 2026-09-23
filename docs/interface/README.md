@@ -9,20 +9,24 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 
 - resources.md: account, model, instance, message and turn records.
 - operations.md: method names, parameters and return values.
-- capabilities.md: native, adapted, fallback and unsupported behavior.
+- capabilities.md: v2 proxy behavior, support and acceptance maturity.
 - events.md: event envelope and stream semantics.
 - interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
 - errors.md: stable error envelope and retry behavior.
 - review.md: completeness checklist and acceptance evidence.
 - provider-acceptance.md: release matrix and live-provider gate.
+- v2-model-routing.md: model-first Codex proxy routing and evidence limits.
 - rationale.md: why each operation exists and how unsupported parameters behave.
 
 ## Contract rules
 
-AgentBridge is an execution and observation layer. The host decides account
-selection, authorization for tools, external side effects and retry policy.
-AgentBridge persists evidence and never silently retries an unknown provider
-outcome.
+AgentBridge is an execution and observation layer. The host chooses the model,
+authorizes tools and external side effects, and owns product retry policy.
+For automatic proxy instances, AgentBridge selects an account before each
+turn and persists the route and its evidence. Pinned proxy instances keep an
+explicit account. Historical direct instances remain readable but cannot
+execute. AgentBridge never silently retries an
+unknown provider outcome or changes accounts during a turn.
 
 The AgentBridge contract is the only public contract. Provider protocols,
 commands, SDK objects and native field names stay inside adapters. A capability

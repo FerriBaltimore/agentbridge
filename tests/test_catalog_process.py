@@ -1,4 +1,4 @@
-"""Catalog transport bounds use local fixtures, never accounts or providers."""
+"""Bounded subprocess transport for native version inspection uses local fixtures."""
 import json
 import os
 from pathlib import Path
@@ -7,7 +7,6 @@ import subprocess
 import sys
 import time
 import tracemalloc
-from types import SimpleNamespace
 
 import pytest
 
@@ -118,27 +117,9 @@ def test_descendants_are_stopped_after_leader_exit_or_output_failure(tmp_path, m
             process.wait(timeout=2)
 
 
-@pytest.mark.parametrize('body,expected', [
-    ('print(\'[ {"id": "future", "display_name": "Future", "native_extra": true} ]\')', None),
-    ('pass', 'provider_protocol_error'),
-    ('print("[")', 'provider_protocol_error'),
-    ('import os;os.write(1,b"\\xff")', 'provider_protocol_error'),
-    ('print("{}")', 'provider_protocol_error'),
-    ('raise SystemExit(1)', 'provider_unavailable'),
-    ('import os\nfor _ in range(48):os.write(1,b"x"*(512*1024))', 'provider_protocol_error'),
-])
-def test_provider_catalog_uses_bounded_transport_and_reports_invalid_eof(monkeypatch, body, expected):
-    original = subprocess.Popen
-    def launch(argv, **kwargs):
-        assert argv[-2:] == ['agentbridge.provider_catalog', 'FIXTURE_CURSOR_KEY']
-        assert kwargs['env']['FIXTURE_CURSOR_KEY'] == 'fixture-only-key'
-        return original(command(body), **kwargs)
-    monkeypatch.setattr(catalog_process.subprocess, 'Popen', launch)
-    monkeypatch.setattr(provider_catalog, 'environment', lambda _: {'FIXTURE_CURSOR_KEY': 'fixture-only-key'})
-    account = SimpleNamespace(engine='cursor', key_env='FIXTURE_CURSOR_KEY')
-    if expected:
-        with pytest.raises(BridgeError) as error:
-            provider_catalog.models(account)
-        assert error.value.code == expected
-    else:
-        assert provider_catalog.models(account) == [{'id': 'future', 'display_name': 'Future', 'native_extra': True}]
+def test_retired_provider_catalog_entry_point_does_not_launch_a_worker(monkeypatch):
+    monkeypatch.setattr(catalog_process.subprocess, 'Popen',
+                        lambda *_args, **_kwargs: pytest.fail('native catalog worker launched'))
+    with pytest.raises(SystemExit) as error:
+        provider_catalog.main()
+    assert 'unavailable' in str(error.value)
