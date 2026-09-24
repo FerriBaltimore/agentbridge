@@ -70,13 +70,21 @@ AgentBridge reads each sidecar's `/v1/models?client_version=pi` client catalog.
 It accepts the Codex-style `models` array and a compatibility `data` array, then
 matches exact model IDs to the separately verified account inventory. Only
 allowlisted, bounded `supported_reasoning_levels` values become reasoning
-choices. For a context override, `max_context_window` is the reported ceiling;
-`context_window` is used when no valid maximum is reported. Missing or invalid
-fields stay unknown. `models.list` projects these controls per account,
-intersects efforts across observed accounts for automatic routing, and uses
-the smallest reported context ceiling. The playground derives its controls
-from those SDK fields. A per-turn numeric context override becomes Codex's
-`model_context_window` setting. This path is covered by proxy and browser
+choices. For context selection, the observed `context_window` default and a
+larger `max_context_window` become suggested token counts; they are not an
+exhaustive enum of values accepted by Codex. The reported maximum is the safe
+ceiling; the default is the only known safe ceiling when no valid maximum is
+reported. Missing or invalid fields stay unknown. `models.list` projects these
+controls per account, intersects efforts across observed accounts for
+automatic routing, and offers only observed context choices within every
+observed eligible account's known ceiling. If any such ceiling is unknown,
+automatic context choices stay unknown. The playground derives its controls
+from those SDK fields. At turn admission, an override requires a fresh
+verified ceiling on the selected account. Automatic routing excludes accounts
+with unknown or insufficient ceilings before balancing; if none qualify, the
+turn fails with `context_window_unavailable` before execution. A per-turn
+numeric context override becomes Codex's `model_context_window` setting. This
+path is covered by proxy and browser
 fixtures; live provider acceptance of each effort or override remains unverified.
 
 `instances.create(model, workspace_path?, account_ref?, provider?, idempotency_key?)`

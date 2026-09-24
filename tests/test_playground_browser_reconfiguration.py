@@ -98,8 +98,9 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
             page.locator('#route-settings summary').click()
             account.select_option('OpenAI Personal')
             effort.select_option('high')
-            assert context.get_attribute('max') == '131072'
-            context.fill('100000')
+            assert context.locator('option').evaluate_all(
+                '(items) => items.map((item) => item.value)') == ['', '131072']
+            context.select_option('131072')
             _send_and_wait(page, 'First route')
             first = bridge.instances()[0]
             instance_id = first['id']
@@ -115,11 +116,11 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
             assert effort.locator('option').evaluate_all(
                 '(items) => items.map((item) => item.value)') == ['', 'low']
             effort.select_option('low')
-            assert context.get_attribute('max') == '65536'
-            context.fill('70000')
-            playwright_api.expect(page.get_by_test_id('chat-send')).to_be_disabled()
+            assert context.locator('option').evaluate_all(
+                '(items) => items.map((item) => item.value)') == ['', '65536']
+            assert context.input_value() == ''
             assert len(bridge.turns(instance_id=instance_id)) == 1
-            context.fill('50000')
+            context.select_option('65536')
             playwright_api.expect(page.get_by_test_id('chat-send')).to_be_enabled()
             assert 'Pending' in page.locator('#route-summary').inner_text()
             assert bridge.instance_get(instance_id)['model'] == OPENAI_MODEL
@@ -147,9 +148,9 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
             assert len(calls) == 2
             first_call = next(call for call in calls if OPENAI_MODEL in call['argv'])
             second_call = next(call for call in calls if CLAUDE_MODEL in call['argv'])
-            assert 'model_context_window=100000' in first_call['argv']
+            assert 'model_context_window=131072' in first_call['argv']
             assert 'model_reasoning_effort="high"' in first_call['argv']
-            assert 'model_context_window=50000' in second_call['argv']
+            assert 'model_context_window=65536' in second_call['argv']
             assert 'model_reasoning_effort="low"' in second_call['argv']
             assert 'Pending' not in page.locator('#route-summary').inner_text()
             page.reload(wait_until='networkidle')

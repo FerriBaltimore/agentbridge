@@ -239,7 +239,9 @@ def test_model_controls_come_from_the_proxy_client_catalog(tmp_path, monkeypatch
         item = result['models'][0]
         assert item['id'] == 'fixture/model'
         assert item['reasoning_efforts'] == ['low', 'high']
-        assert item['context_windows'] == [262144]
+        assert item['context_windows'] == [131072, 262144]
+        assert item['default_context_window'] == 131072
+        assert item['max_context_window'] == 262144
         assert item['input_modalities'] == ['text', 'image']
         assert item['account_capabilities'][0]['metadata_source'] == 'cliproxy_client_models'
         assert ('/v1/models?client_version=pi', 'Bearer client-fixture-value') in seen

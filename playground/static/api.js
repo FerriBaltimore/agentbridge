@@ -73,6 +73,8 @@ export const api = {
   instanceEvents: (id, afterSeq = 0) => request(`/api/instances/${ref(id)}/events${query({ after_seq: afterSeq })}`),
   turn: (id) => request(`/api/turns/${ref(id)}`),
   turnEvents: (id, afterSeq = 0) => request(`/api/turns/${ref(id)}/events${query({ after_seq: afterSeq })}`),
+  streamTurnEvents: (id, afterSeq = 0) => new EventSource(
+    `/api/turns/${ref(id)}/stream${query({ after_seq: afterSeq })}`),
   loginStart: (values) => request('/api/accounts/login/start', { method: 'POST', body: values }),
   loginAttempts: (limit = 3, cursor = 0) => request(
     `/api/accounts/login/attempts${query({ limit, cursor })}`),

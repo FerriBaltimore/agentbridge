@@ -163,7 +163,7 @@ def test_reopen_running_turn_then_stop_without_retry_or_account_change(local_pla
             turn_id = bridge.runs()[0]['id']
             assert bridge.turn(turn_id)['account_ref'] == 'Fixture Primary'
 
-            page.reload(wait_until='networkidle')
+            page.reload(wait_until='domcontentloaded')
             page.get_by_test_id('nav-chat').click()
             page.get_by_test_id('conversation-item').first.click()
             page.get_by_test_id('chat-stop').wait_for(state='visible', timeout=15000)

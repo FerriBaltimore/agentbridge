@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from agentbridge import Bridge, BridgeError
+from .turn_stream import last_event_seq, serve_turn_stream
 
 
 MAX_BODY_BYTES = 64 * 1024
@@ -94,9 +95,17 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                 self._mutation_guard()
             segments = [unquote(item) for item in parsed.path.split('/') if item]
             query = parse_qs(parsed.query, keep_blank_values=True)
+            if (method == 'GET' and len(segments) == 4
+                    and segments[:2] == ['api', 'turns'] and segments[3] == 'stream'):
+                cursor = max(_query_number(query, 'after_seq', 0),
+                             last_event_seq(self.headers.get('Last-Event-ID')))
+                return serve_turn_stream(self, self.server.bridge, segments[2], cursor)
             body = self._body() if method == 'POST' else None
             result = self._dispatch(method, segments, query, body)
             self._json(200, {'result': result})
+        except (BrokenPipeError, ConnectionResetError):
+            # A closed browser tab ends observation without affecting the turn.
+            return
         except BridgeError as error:
             status = (403 if error.code == 'forbidden' else
                       405 if error.code == 'method_not_allowed' else

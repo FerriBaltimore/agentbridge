@@ -309,8 +309,10 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             effort.select_option('high')
             context = page.locator('#chat-context')
             context.wait_for(state='visible')
-            assert context.get_attribute('max') == '131072'
-            context.fill('131072')
+            assert context.evaluate('(element) => element.tagName') == 'SELECT'
+            assert context.locator('option').evaluate_all(
+                '(items) => items.map((item) => item.value)') == ['', '131072']
+            context.select_option('131072')
             page.get_by_test_id('chat-input').fill('Hello from the browser fixture')
             page.get_by_test_id('chat-send').click()
             page.get_by_test_id('chat-messages').get_by_text('Browser fixture answer').wait_for(timeout=15000)

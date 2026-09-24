@@ -4,13 +4,21 @@ from test_playground_browser import _launch_browser, local_playground, playwrigh
 from test_playground_browser_layout import _observed_page
 
 
-def _chat_geometry(page):
-    return page.evaluate('''() => {
+def _chat_geometry(page, *, fill_messages=False):
+    return page.evaluate('''(fillMessages) => {
       const rect = (selector) => {
         const box = document.querySelector(selector).getBoundingClientRect();
         return { top: box.top, bottom: box.bottom, left: box.left, right: box.right };
       };
       const messages = document.querySelector('#chat-messages');
+      if (fillMessages && messages.scrollHeight <= messages.clientHeight) {
+        for (let index = 0; index < 24; index += 1) {
+          const item = document.createElement('div');
+          item.className = 'message is-assistant';
+          item.textContent = `Long conversation item ${index}: ` + 'Details '.repeat(30);
+          messages.append(item);
+        }
+      }
       return {
         viewport: { width: innerWidth, height: innerHeight },
         documentOverflowX: document.documentElement.scrollWidth - innerWidth,
@@ -20,7 +28,7 @@ def _chat_geometry(page):
         rail: rect('.conversation-rail'), messages: rect('#chat-messages'),
         messagesOverflow: messages.scrollHeight - messages.clientHeight,
       };
-    }''')
+    }''', fill_messages)
 
 
 def _assert_in_viewport(box, viewport):
@@ -45,21 +53,10 @@ def test_chat_keeps_route_rail_and_composer_visible_at_desktop_and_mobile(local_
             page.locator('#conversation-count').get_by_text('1').wait_for()
             playwright_api.expect(page.locator('#new-conversation')).to_be_enabled(
                 timeout=15000)
-            page.wait_for_load_state('networkidle')
-
-            page.evaluate('''() => {
-              const messages = document.querySelector('#chat-messages');
-              for (let index = 0; index < 24; index += 1) {
-                const item = document.createElement('div');
-                item.className = 'message is-assistant';
-                item.textContent = `Long conversation item ${index}: ` + 'Details '.repeat(30);
-                messages.append(item);
-              }
-            }''')
 
             for width, height in [(1440, 900), (390, 844), (320, 700)]:
                 page.set_viewport_size({'width': width, 'height': height})
-                geometry = _chat_geometry(page)
+                geometry = _chat_geometry(page, fill_messages=True)
                 assert geometry['documentOverflowX'] <= 1, geometry
                 assert geometry['documentOverflowY'] <= 1, geometry
                 for key in ['composer', 'send', 'provider', 'model', 'rail', 'messages']:

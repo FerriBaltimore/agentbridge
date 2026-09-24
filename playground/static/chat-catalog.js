@@ -29,38 +29,51 @@ function commonValues(rows, key) {
   return lists.reduce((shared, values) => shared.filter((value) => values.includes(value)));
 }
 
-function commonContextLimit(rows) {
-  const maxima = [];
-  for (const row of rows) {
-    const values = Array.isArray(row.context_windows)
-      ? row.context_windows.map(Number).filter((value) => Number.isSafeInteger(value) && value > 0) : [];
-    if (!values.length) return null;
-    maxima.push(Math.max(...values));
-  }
-  return maxima.length ? Math.min(10_000_000, ...maxima) : null;
+function observedWindows(row) {
+  return Array.isArray(row?.context_windows)
+    ? row.context_windows.filter((value) => Number.isSafeInteger(value) && value > 0) : [];
+}
+
+function contextOptions(rows) {
+  if (!rows.length) return [];
+  const maxima = rows.map((row) => {
+    const windows = observedWindows(row);
+    const reported = row?.max_context_window;
+    return Number.isSafeInteger(reported) && reported > 0
+      ? reported : windows.length ? Math.max(...windows) : null;
+  });
+  if (maxima.includes(null)) return [];
+  const ceiling = Math.min(...maxima);
+  return [...new Set(rows.flatMap(observedWindows))]
+    .filter((value) => value <= ceiling).sort((left, right) => left - right);
+}
+
+function commonDefaultWindow(rows) {
+  const defaults = rows.map((row) => row.default_context_window);
+  return defaults.length && Number.isSafeInteger(defaults[0]) && defaults[0] > 0
+    && defaults.every((value) => value === defaults[0]) ? defaults[0] : null;
 }
 
 function selectedMetadata(model, provider, accountRef, accounts) {
   const eligible = eligibleAccounts(model, provider, accounts)
     .filter((item) => !accountRef || item.account_ref === accountRef);
-  if (!eligible.length) return { efforts: [], contextLimit: null };
+  if (!eligible.length) return { efforts: [], windows: [], defaultWindow: null };
   const refs = new Set(eligible.map((item) => item.account_ref));
   if (!Array.isArray(model.account_capabilities)) {
     return !provider && !accountRef ? {
       efforts: Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts.map(String) : [],
-      contextLimit: commonContextLimit([model]),
-    } : { efforts: [], contextLimit: null };
+      windows: contextOptions([model]), defaultWindow: model.default_context_window || null,
+    } : { efforts: [], windows: [], defaultWindow: null };
   }
   const rows = model.account_capabilities.filter((item) => item.observed === true
     && refs.has(item.account_ref) && (!provider || item.provider === provider));
-  if (rows.length !== eligible.length) return { efforts: [], contextLimit: null };
+  if (rows.length !== eligible.length) return { efforts: [], windows: [], defaultWindow: null };
   return { efforts: commonValues(rows, 'reasoning_efforts'),
-    contextLimit: commonContextLimit(rows) };
+    windows: contextOptions(rows), defaultWindow: commonDefaultWindow(rows) };
 }
 
-function validContext(value, limit) {
-  return value === '' || (limit !== null && /^[0-9]+$/.test(value)
-    && Number.isSafeInteger(Number(value)) && Number(value) > 0 && Number(value) <= limit);
+function validContext(value, windows) {
+  return value === '' || windows.some((window) => String(window) === value);
 }
 
 export function setupChatCatalog(onChange) {
@@ -76,7 +89,7 @@ export function setupChatCatalog(onChange) {
   let capabilities = null;
   let lockedInstance = null;
   let busy = false;
-  let contextLimit = null;
+  let availableWindows = [];
 
   function pinnedProvider() {
     return accounts.find((item) => item.account_ref === lockedInstance?.account_ref)?.provider || '';
@@ -145,12 +158,17 @@ export function setupChatCatalog(onChange) {
     for (const value of metadata.efforts) effort.append(option(value, value));
     effort.value = metadata.efforts.includes(previousEffort) ? previousEffort : '';
     byId('effort-field').hidden = !effortAllowed || !metadata.efforts.length;
-    contextLimit = contextAllowed ? metadata.contextLimit : null;
+    availableWindows = contextAllowed ? metadata.windows : [];
     const previousContext = context.value;
-    context.max = contextLimit === null ? '' : String(contextLimit);
-    context.placeholder = contextLimit === null ? 'Default' : `Default · max ${contextLimit.toLocaleString()}`;
-    context.value = validContext(previousContext, contextLimit) ? previousContext : '';
-    byId('context-field').hidden = contextLimit === null;
+    const defaultLabel = metadata.defaultWindow
+      ? `Provider default · ${metadata.defaultWindow.toLocaleString()} tokens`
+      : 'Provider default';
+    clear(context).append(option('', defaultLabel));
+    for (const window of availableWindows) {
+      context.append(option(String(window), `${window.toLocaleString()} tokens`));
+    }
+    context.value = validContext(previousContext, availableWindows) ? previousContext : '';
+    byId('context-field').hidden = !availableWindows.length;
     const permissionParameter = capabilities?.parameters?.permission_mode;
     const permissionValues = Array.isArray(permissionParameter?.values)
       ? permissionParameter.values.filter((item) => item && typeof item.value === 'string') : [];
@@ -171,7 +189,7 @@ export function setupChatCatalog(onChange) {
       && !eligible.some((item) => item.account_ref === account.value)
       ? 'This account has not observed the selected model. Choose Automatic routing or another model.'
       : selectedModel && eligible.length
-      ? `${route}${contextLimit === null ? '' : ` Context accepts a positive integer up to ${contextLimit.toLocaleString()} tokens; the provider may reject the override.`}`
+      ? `${route}${availableWindows.length ? ' Context sizes come from the observed model catalog; the provider may reject an override.' : ''}`
       : 'Choose a model observed from a connected account.';
   }
 
@@ -216,7 +234,7 @@ export function setupChatCatalog(onChange) {
   });
   model.addEventListener('change', sync);
   account.addEventListener('change', () => { populateParameters(); updateSummary(); onChange?.(); });
-  context.addEventListener('input', () => onChange?.());
+  context.addEventListener('change', () => onChange?.());
 
   return {
     update({ models, accountRows, capabilityData, workspacePath }) {
@@ -236,7 +254,7 @@ export function setupChatCatalog(onChange) {
     },
     canSend() {
       const choice = this.selected();
-      if (!validContext(choice.context, contextLimit) || !context.validity.valid) return false;
+      if (!validContext(choice.context, availableWindows)) return false;
       const item = listModels(catalog).find((row) => row.id === choice.model);
       const eligible = eligibleAccounts(item, choice.provider, accounts);
       if (lockedInstance?.routing_mode === 'automatic' && choice.account) return false;

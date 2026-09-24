@@ -24,6 +24,7 @@ ACTION = {
     "safety_blocked": "inspect",
     "billing_required": "inspect",
     "context_window_exceeded": "inspect",
+    "context_window_unavailable": "inspect",
     "output_limit_exceeded": "resume",
     "budget_exhausted": "inspect",
     "max_turns_exceeded": "resume",
@@ -61,7 +62,8 @@ class BridgeError(Exception):
             category = 'safety'
         elif self.code == 'billing_required':
             category = 'billing'
-        elif self.code in {'context_window_exceeded', 'output_limit_exceeded',
+        elif self.code in {'context_window_exceeded', 'context_window_unavailable',
+                           'output_limit_exceeded',
                            'budget_exhausted', 'max_turns_exceeded', 'structured_output_failed'}:
             category = 'limit'
         elif self.code == 'unknown_outcome':

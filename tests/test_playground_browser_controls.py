@@ -93,7 +93,7 @@ def test_codex_catalog_models_shape_exposes_chat_effort_and_context(local_playgr
     ]}, {})
     catalog = local_playground['bridge'].models(account_ref='OpenAI Personal', refresh=True)
     assert catalog['items'][0]['reasoning_efforts'] == ['low', 'high']
-    assert catalog['items'][0]['context_windows'] == [262144]
+    assert catalog['items'][0]['context_windows'] == [131072, 262144]
     assert catalog['items'][0]['account_capabilities'][0]['metadata_source'] == 'cliproxy_client_models'
 
     with playwright_api.sync_playwright() as playwright:
@@ -109,11 +109,15 @@ def test_codex_catalog_models_shape_exposes_chat_effort_and_context(local_playgr
             effort.select_option('high')
             context = page.get_by_test_id('chat-context')
             context.wait_for(state='visible')
-            assert context.get_attribute('max') == '262144'
+            assert context.evaluate('(element) => element.tagName') == 'SELECT'
+            assert context.locator('option').evaluate_all(
+                '(items) => items.map((item) => item.value)') == ['', '131072', '262144']
+            assert context.locator('option').all_text_contents() == [
+                'Provider default · 131,072 tokens', '131,072 tokens', '262,144 tokens']
             page.get_by_test_id('chat-input').fill('Test observed Codex controls')
-            context.fill('262145')
-            playwright_api.expect(page.get_by_test_id('chat-send')).to_be_disabled()
-            context.fill('262144')
+            assert '262145' not in context.locator('option').evaluate_all(
+                '(items) => items.map((item) => item.value)')
+            context.select_option('262144')
             playwright_api.expect(page.get_by_test_id('chat-send')).to_be_enabled()
             page.get_by_test_id('chat-send').click()
             page.get_by_test_id('chat-messages').get_by_text('Browser fixture answer').wait_for(

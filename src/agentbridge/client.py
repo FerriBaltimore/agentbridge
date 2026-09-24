@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from .continuity import build, unresolved
 from .discovery import DiscoveryMixin
-from .event_contract import public_event
+from .event_stream import EventStreamMixin
 from .errors import BridgeError, BusyError, UnsupportedError
 from .models import Account, RunOptions, TERMINAL, identifier, page_values
 from .message_submission import MessageSubmissionMixin
@@ -31,7 +31,7 @@ from .workspace_policy import validate_execution_workspace, validate_workspace
 from .account_retirement import AccountRetirementMixin
 
 
-class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
+class Bridge(EventStreamMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
     def __init__(self, root=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
@@ -288,27 +288,6 @@ class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, Di
                     if (not instance_id or row['session_id'] == instance_id)
                     and (not state or row['state'] == state)]
         return [dict(row, turn_id=row['id']) for row in selected[cursor:cursor + limit]]
-
-    def turn_events(self, turn_id, *, after_seq=0, limit=1000, follow=False, timeout_ms=None):
-        if timeout_ms is not None and (not isinstance(timeout_ms, (int, float))
-                                       or isinstance(timeout_ms, bool) or timeout_ms < 0):
-            raise BridgeError('invalid_timeout', 'timeout_ms must be nonnegative.')
-        run = self.run(turn_id)
-        engine = self.account(run.session['account_id']).engine
-        return [public_event(event, engine) for event in run.events(
-            after=after_seq, limit=limit, follow=follow,
-            timeout=(timeout_ms / 1000) if timeout_ms is not None else None)]
-
-    def instance_events(self, instance_id, *, after_seq=0, limit=1000, follow=False, timeout_ms=None):
-        if follow:
-            raise UnsupportedError('Conversation event follow is not supported; poll with after_seq.')
-        if timeout_ms is not None and (not isinstance(timeout_ms, (int, float))
-                                       or isinstance(timeout_ms, bool) or timeout_ms < 0):
-            raise BridgeError('invalid_timeout', 'timeout_ms must be nonnegative.')
-        session = self.get_session(instance_id)
-        engine = self.account(session['account_id']).engine
-        events = self.store.events(session_id=instance_id, after=after_seq, limit=limit)
-        return [public_event(event, engine) for event in events]
 
     def turn_stop(self, turn_id, *, reason=None, grace_period_ms=None, wait=False):
         if grace_period_ms is not None and (not isinstance(grace_period_ms, (int, float))

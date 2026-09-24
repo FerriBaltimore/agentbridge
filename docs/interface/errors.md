@@ -36,8 +36,10 @@ Authentication orchestration also uses `authentication_attempt_not_found`,
 when the local callback listener cannot be opened. Proxy onboarding and
 routing additionally use
 `account_migration_required`, `proxy_binding_unverified`,
-`proxy_binding_changed`, `proxy_endpoint_shared`, `model_required` and
-`context_stale`. Account retirement may return
+`proxy_binding_changed`, `proxy_endpoint_shared`, `model_required`,
+`context_window_unavailable` and `context_stale`. `context_window_unavailable`
+rejects a turn before execution if no verified eligible account has a known
+ceiling large enough for its requested context override. Account retirement may return
 `busy` when a turn is active; `account_unavailable` identifies an incompatible
 historical account record.
 Inputs and observations also use `invalid_attachment`, `invalid_permissions`,

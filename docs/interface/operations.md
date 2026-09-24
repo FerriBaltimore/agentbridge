@@ -195,8 +195,11 @@ it never replays an uncertain side effect or changes account silently.
 
 `instances.events` is the incremental conversation feed. Clients should
 page with `after_seq` and persist their cursor after consuming the page.
-The v2 adapter accepts a positive numeric per-turn `context_window`, subject
-to observed model metadata and live provider behavior. It rejects
+The v2 adapter accepts a positive numeric per-turn `context_window` only
+when the freshly selected account's observed model ceiling covers it. An
+automatic route filters insufficient or unknown ceilings before balancing;
+otherwise admission returns `context_window_unavailable` without a turn.
+Live provider acceptance remains separate. It rejects
 `allowed_tools`, `max_budget`, `provider_options` and arbitrary metadata.
 `context_package` and `mcp` use the bounded private execution contract in
 [context-and-mcp.md](context-and-mcp.md). See

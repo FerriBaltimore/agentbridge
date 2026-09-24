@@ -8,6 +8,7 @@ import pytest
 from agentbridge import Bridge, BridgeError
 from agentbridge import provider_catalog
 from agentbridge.catalog import ModelCatalog
+from agentbridge.proxy.model_catalog import catalog_metadata
 from fixtures.test_proxy_account_fixture import proxy_account, register_verified_proxy_account
 
 
@@ -47,13 +48,49 @@ def test_verified_proxy_models_have_no_invented_metadata(tmp_path):
             'availability': 'proxy_observed', 'source': 'account_configuration',
             'candidate_account_refs': ['codex-a'], 'observed_account_refs': ['codex-a'],
             'providers': ['codex'], 'reasoning_efforts': [],
-            'context_windows': [], 'input_modalities': [],
+            'context_windows': [], 'default_context_window': None,
+            'max_context_window': None, 'input_modalities': [],
             'account_capabilities': [{
                 'account_ref': 'codex-a', 'provider': 'codex', 'observed': True,
                 'reasoning_efforts': [], 'default_reasoning_effort': None,
-                'context_windows': [], 'input_modalities': [], 'metadata_source': None,
+                'context_windows': [], 'default_context_window': None,
+                'max_context_window': None, 'input_modalities': [], 'metadata_source': None,
             }],
         }]
+
+
+def _record_model_controls(store, account_id, **reported):
+    saved = store.latest_account_observation(account_id)
+    data = {**saved['data'], 'model_metadata': catalog_metadata({
+        'models': [{'slug': 'fixture-model', **reported}],
+    }), 'model_metadata_source': 'cliproxy_client_models'}
+    store.account_observation(account_id, 'cliproxy_management', 'active', data)
+
+
+def test_automatic_context_choices_fit_every_observed_account(tmp_path):
+    with Bridge(tmp_path) as bridge:
+        for account_id, port in (('codex-a', 11011), ('codex-b', 11012)):
+            register_verified_proxy_account(bridge.store, account_id, port,
+                                            model='fixture-model', provider='codex')
+        _record_model_controls(bridge.store, 'codex-a', context_window=131072,
+                               max_context_window=262144)
+        _record_model_controls(bridge.store, 'codex-b', context_window=131072,
+                               max_context_window=200000)
+
+        model = bridge.models()['items'][0]
+        assert model['context_windows'] == [131072, 200000]
+        assert model['default_context_window'] == 131072
+        assert model['max_context_window'] == 200000
+        assert bridge.models(account_ref='codex-a')['items'][0]['context_windows'] == [
+            131072, 262144]
+
+        _record_model_controls(bridge.store, 'codex-b', context_window=True,
+                               max_context_window='200000')
+        model = bridge.models()['items'][0]
+        assert model['context_windows'] == []
+        assert model['default_context_window'] is None
+        assert model['max_context_window'] is None
+        assert model['account_capabilities'][1]['max_context_window'] is None
 
 
 def test_unverified_proxy_observation_cannot_be_reported_as_live(tmp_path):

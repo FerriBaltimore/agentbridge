@@ -128,12 +128,35 @@ class RoutingService:
                 in_flight=load['in_flight'], assigned_turns=load['assigned_turns']))
         return result
 
-    def select(self, model, *, provider=None, refresh=True, excluded_account_refs=()):
+    def context_ceiling(self, account, model, *, refresh=False):
+        """Return the verified proxy catalog ceiling, or unknown."""
+        saved = self.observation(account, refresh=refresh)
+        if not self._verified(account, saved):
+            return None
+        metadata = saved['data'].get('model_metadata')
+        controls = metadata.get(model) if isinstance(metadata, dict) else None
+        maximum = controls.get('max_context_window') if isinstance(controls, dict) else None
+        return maximum if type(maximum) is int and 0 < maximum <= 10_000_000 else None
+
+    def select(self, model, *, provider=None, refresh=True, excluded_account_refs=(),
+               context_window=None):
         from .admission import normalized_exclusions
 
         excluded = normalized_exclusions(excluded_account_refs)
-        return select_route(model, self.candidates(
-            model, provider=provider, refresh=refresh, excluded_account_refs=excluded))
+        if (context_window is not None and
+                (type(context_window) is not int or not 0 < context_window <= 10_000_000)):
+            raise BridgeError('invalid_context_window', 'context_window must be a positive token count.')
+        candidates = self.candidates(model, provider=provider, refresh=refresh,
+                                     excluded_account_refs=excluded)
+        if context_window is not None:
+            declared_candidates = candidates
+            candidates = [item for item in candidates if
+                (ceiling := self.context_ceiling(self.accounts.resolve(item.account_id), model))
+                is not None and context_window <= ceiling]
+            if not candidates and declared_candidates:
+                raise BridgeError('context_window_unavailable',
+                                  'No verified account supports the requested context window.')
+        return select_route(model, candidates)
 
     def models(self, *, account_ref=None, provider=None, refresh=False):
         """Return a configured catalog, marking proxy observations separately."""
@@ -154,6 +177,7 @@ class RoutingService:
                     'availability': 'configured_unverified', 'source': 'account_configuration',
                     'candidate_account_refs': [], 'observed_account_refs': [],
                     'providers': [], 'reasoning_efforts': [], 'context_windows': [],
+                    'default_context_window': None, 'max_context_window': None,
                     'input_modalities': [], 'account_capabilities': []})
                 reference = self.accounts.reference(account.id)
                 row['candidate_account_refs'].append(reference)
@@ -164,6 +188,8 @@ class RoutingService:
                     'reasoning_efforts': controls.get('reasoning_efforts', []),
                     'default_reasoning_effort': controls.get('default_reasoning_effort'),
                     'context_windows': controls.get('context_windows', []),
+                    'default_context_window': controls.get('default_context_window'),
+                    'max_context_window': controls.get('max_context_window'),
                     'input_modalities': controls.get('input_modalities', []),
                     'metadata_source': saved['data'].get('model_metadata_source')
                     if controls else None,
@@ -178,10 +204,17 @@ class RoutingService:
             if observed:
                 row['reasoning_efforts'] = [value for value in observed[0]['reasoning_efforts']
                                             if all(value in item['reasoning_efforts'] for item in observed)]
-                windows = [item['context_windows'][0] for item in observed
-                           if item['context_windows']]
-                if len(windows) == len(observed):
-                    row['context_windows'] = [min(windows)]
+                maxima = [item['max_context_window'] for item in observed]
+                if all(type(value) is int and value > 0 for value in maxima):
+                    ceiling = min(maxima)
+                    row['max_context_window'] = ceiling
+                    row['context_windows'] = sorted({value for item in observed
+                        for value in item['context_windows']
+                        if type(value) is int and 0 < value <= ceiling})
+                defaults = [item['default_context_window'] for item in observed]
+                if (all(type(value) is int and value > 0 for value in defaults)
+                        and len(set(defaults)) == 1):
+                    row['default_context_window'] = defaults[0]
                 row['input_modalities'] = [value for value in observed[0]['input_modalities']
                                            if all(value in item['input_modalities'] for item in observed)]
         items = [grouped[key] for key in sorted(grouped)]

@@ -64,9 +64,10 @@ model, effort, workspace_path, timeout_ms, permission_mode, sandbox_mode,
 allowed_tools, max_turns and max_budget are common parameters because they
 describe execution intent. They are not all usable in the v2 adapter:
 `allowed_tools`, `max_budget` and advanced instance defaults are unsupported.
-The adapter accepts a positive numeric `context_window` per turn; a host should
-expose it only when a model maximum has been observed. Provider acceptance
-remains pending. Attachments
+The adapter accepts a positive numeric `context_window` per turn and verifies
+it against the selected account's freshly observed model ceiling. Automatic
+routing excludes accounts with unknown or insufficient ceilings. A host should
+expose only observed choices; provider acceptance remains pending. Attachments
 accept bounded inline text and images, with explicit omissions on portable
 transfer. Provider-only switches belong under provider_options and remain
 unsupported without a reviewed contract.

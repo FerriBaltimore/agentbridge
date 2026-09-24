@@ -29,10 +29,16 @@ def catalog_metadata(payload):
             identifier = model_id(raw.get('slug') or raw.get('id'))
         except BridgeError:
             continue
-        # Codex caps model_context_window at max_context_window when supplied.
-        # Without that bound, use the catalog's reported context_window.
-        window = (_positive_window(raw.get('max_context_window'))
-                  or _positive_window(raw.get('context_window')))
+        # Preserve the observed default and maximum as suggested choices.
+        # Codex caps model_context_window at max_context_window when supplied;
+        # without it, the observed default is the only known safe ceiling.
+        default_window = _positive_window(raw.get('context_window'))
+        reported_maximum = _positive_window(raw.get('max_context_window'))
+        maximum_window = reported_maximum or default_window
+        if default_window is not None and maximum_window < default_window:
+            default_window = None
+        windows = list(dict.fromkeys(value for value in (default_window, maximum_window)
+                                     if value is not None))
         levels = raw.get('supported_reasoning_levels')
         efforts = []
         if isinstance(levels, list) and len(levels) <= 20:
@@ -50,7 +56,9 @@ def catalog_metadata(payload):
         result[identifier] = {
             'reasoning_efforts': efforts,
             'default_reasoning_effort': default,
-            'context_windows': [window] if window is not None else [],
+            'context_windows': windows,
+            'default_context_window': default_window,
+            'max_context_window': maximum_window,
             'input_modalities': list(dict.fromkeys(modalities)),
         }
     return result

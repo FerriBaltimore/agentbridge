@@ -94,8 +94,27 @@ def test_chat_streams_tool_compaction_and_answer_in_sequence(local_playground):
             page.get_by_test_id('nav-chat').click()
             page.set_viewport_size({'width': 320, 'height': 700})
             _route(page)
+            page.evaluate('''() => {
+              const NativeEventSource = window.EventSource;
+              window.streamTrace = [];
+              window.EventSource = class extends NativeEventSource {
+                constructor(url, options) {
+                  super(url, options);
+                  const trace = { url: String(url), source: this, kinds: [], ended: false };
+                  this.addEventListener('message', (message) => {
+                    try { trace.kinds.push(JSON.parse(message.data).kind); } catch { /* Fixture check. */ }
+                  });
+                  this.addEventListener('end', () => { trace.ended = true; });
+                  window.streamTrace.push(trace);
+                }
+              };
+            }''')
             page.get_by_test_id('chat-input').fill('Show the live timeline')
-            page.get_by_test_id('chat-send').click()
+            with page.expect_response(lambda response: '/api/turns/' in response.url
+                                      and '/stream' in response.url) as streamed:
+                page.get_by_test_id('chat-send').click()
+            assert streamed.value.status == 200
+            assert streamed.value.headers['content-type'].startswith('text/event-stream')
             page.get_by_test_id('chat-stop').wait_for(state='visible', timeout=15000)
             timeline = page.get_by_test_id('chat-messages')
             timeline.locator('[data-kind="tool.started"]').get_by_text('running').wait_for(timeout=15000)
@@ -105,11 +124,23 @@ def test_chat_streams_tool_compaction_and_answer_in_sequence(local_playground):
             assert overflow > 90
             timeline.evaluate('(item) => { item.scrollTop = 0; }')
             timeline.get_by_text('Partial fixture answer').wait_for(timeout=15000)
+            page.wait_for_function('''() => window.streamTrace.some((trace) =>
+              ['tool.started', 'context.compacting', 'context.compacted', 'message.delta']
+                .every((kind) => trace.kinds.includes(kind)))''', timeout=15000)
             assert timeline.evaluate('(item) => item.scrollTop') < 5
             assert page.get_by_test_id('chat-stop').is_visible()
             timeline.locator('[data-kind="tool.completed"]').wait_for(timeout=15000)
             timeline.get_by_text('Final fixture answer').wait_for(timeout=15000)
             page.get_by_test_id('chat-stop').wait_for(state='hidden', timeout=15000)
+            page.wait_for_function('''() => window.streamTrace.length > 0
+              && window.streamTrace.every((trace) => trace.source.readyState === 2)''',
+              timeout=15000)
+            window_stream = page.evaluate('''() => window.streamTrace.map((trace) => ({
+              url: trace.url, kinds: trace.kinds, ended: trace.ended,
+              readyState: trace.source.readyState,
+            }))''')
+            assert window_stream
+            assert '/stream' in window_stream[0]['url']
             kinds = timeline.locator('[data-testid="chat-timeline-event"]').evaluate_all(
                 '(items) => items.map((item) => item.dataset.kind)')
             assert kinds.index('tool.started') < kinds.index('context.compacted')

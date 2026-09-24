@@ -33,11 +33,13 @@ An implemented `models.list` item has:
 
     id, display_name, availability, source, providers,
     candidate_account_refs, observed_account_refs, reasoning_efforts,
-    context_windows, input_modalities, account_capabilities
+    context_windows, default_context_window, max_context_window,
+    input_modalities, account_capabilities
 
 Each `account_capabilities` item has `account_ref`, `provider`, `observed`,
 `reasoning_efforts`, `default_reasoning_effort`, `context_windows`,
-`input_modalities` and `metadata_source`. The aggregate result also has
+`default_context_window`, `max_context_window`, `input_modalities` and
+`metadata_source`. The aggregate result also has
 `source`, `stale`, `models`, `items`, `next_cursor` and `has_more`.
 `candidate_account_refs` are declarations; `observed_account_refs` have fresh
 local proxy evidence. The item's `source` is `account_configuration` and its
@@ -46,6 +48,22 @@ availability proves live entitlement. Missing metadata is an empty list or
 null source, never an invented default. Generic target fields such as
 `description`, `is_default`, retirement, tool support and service tier are not
 returned by the current v2 model item.
+
+`context_windows` contains selectable token counts observed in the local
+Codex client catalog: its default context window and, when larger, its
+reported maximum. These are suggestions derived from observed bounds, not an
+exhaustive provider enum. `default_context_window` is the observed default or
+null. `max_context_window` is the reported maximum, or the observed default
+as the only known safe ceiling when no maximum is reported. A conflicting
+default above the reported maximum is omitted. In an automatic model item,
+the maximum is the smallest known ceiling across observed eligible accounts;
+its choices are observed values within that ceiling. If any such account has
+no known ceiling, the aggregate has no context choices or maximum. Account
+filtering recomputes these fields. `max_output_tokens`, where separately
+available in native metadata, describes output capacity and is not a context
+window or a supported v2 output-budget control. Context window values are
+nominal model settings; Codex may reserve part of that window for instructions,
+tools and output, so they are not promised user-prompt token budgets.
 
 ## Instance
 

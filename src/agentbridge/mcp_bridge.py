@@ -70,7 +70,7 @@ def dispatch(bound, request):
             version = '2025-06-18'
         return reply(request_id, result={'protocolVersion': version,
             'capabilities': {'tools': {'listChanged': False}},
-            'serverInfo': {'name': 'agentbridge-execution', 'version': '2.3.0'}})
+            'serverInfo': {'name': 'agentbridge-execution', 'version': '2.3.1'}})
     if method == 'ping':
         return reply(request_id, result={})
     if method == 'tools/list':

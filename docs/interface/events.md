@@ -12,6 +12,33 @@ cursor. An unknown provider event uses `provider.event` after safe projection;
 a known unreadable or lost segment uses `recovery.gap`. The adapter must not
 invent a successful result.
 
+## Python live iterator
+
+`Bridge.turn_events_stream(turn_id, after_seq=0, timeout_ms=None)` yields the
+same public dictionaries as `Bridge.turn_events`. It first replays saved events
+with `seq > after_seq`, then follows new observations in store order. The
+iterator uses bounded pages and does not depend on an upstream provider's
+stream format. Persist the last consumed `seq` and pass it as `after_seq` when
+reconnecting; replay does not create another provider turn.
+
+The iterator stops after a terminal turn and its saved events have been
+drained. `timeout_ms` is an optional idle limit: it resets after each yielded
+event, `0` drains currently saved events without waiting, and `None` waits
+until terminal. An idle timeout returns normally while the turn may still be
+active; read `turns.get.state` before reporting completion. Closing the
+iterator stops observation only. Use `turns.stop` for explicit cancellation.
+
+## Bounded long polling
+
+`Bridge.turn_events(turn_id, after_seq=..., limit=..., follow=True,
+timeout_ms=...)` and the JSON-RPC `turns.events` method return one available
+page immediately. When no event is available, they wait for the first saved
+event and return its page. An idle timeout or a drained terminal turn returns
+an empty list. Empty does not mean complete: read the turn state separately.
+Continue with the last returned `seq` to avoid duplicates. With `follow=False`,
+the method reads one available snapshot without waiting. The lower-level
+`Run.events(follow=True)` iterator keeps its legacy timeout exception.
+
 ## Normalized kinds
 
     message.created

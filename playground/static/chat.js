@@ -1,10 +1,12 @@
 import { api } from './api.js';
 import { setupChatCatalog } from './chat-catalog.js';
+import { createChatStream } from './chat-stream.js';
 import { renderChatHeader, renderConversations, renderEvents, renderMessages } from './chat-view.js';
 import { byId, describeError, toast } from './ui.js';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted', 'incomplete']);
 const LAST_INSTANCE_KEY = 'agentbridge.playground.last_instance_id';
+const POLL_INTERVAL_MS = 2000;
 
 function lastViewedInstance() {
   try { return localStorage.getItem(LAST_INSTANCE_KEY); } catch { return null; }
@@ -66,6 +68,27 @@ export function setupChat({ onDataChanged }) {
   let busy = false;
   let refreshPromise = null;
   let restorePending = true;
+  const stream = createChatStream((event) => {
+    if (event.turn_id !== activeTurn) return;
+    if (!events.some((item) => item.seq === event.seq)) {
+      events.push(event);
+      events.sort((a, b) => a.seq - b.seq);
+      events = retainTimelineEvents(events);
+      render();
+    }
+    if (['message.created', 'message.delta', 'message.completed'].includes(event.kind)) {
+      void refreshConversation().catch((error) => toast(describeError(error), true));
+    }
+    if (event.kind === 'run.finished') {
+      stopPolling();
+      timer = setTimeout(pollTurn, 0);
+    }
+  }, (turnId) => {
+    if (turnId === activeTurn) {
+      stopPolling();
+      timer = setTimeout(pollTurn, 0);
+    }
+  });
 
   function stopPolling() {
     if (timer) clearTimeout(timer);
@@ -103,7 +126,7 @@ export function setupChat({ onDataChanged }) {
         let advanced = false;
         for (const event of newEvents) {
           if (typeof event.seq !== 'number' || event.seq <= eventCursor) continue;
-          events.push(event);
+          if (!events.some((item) => item.seq === event.seq)) events.push(event);
           eventCursor = event.seq;
           advanced = true;
         }
@@ -111,6 +134,7 @@ export function setupChat({ onDataChanged }) {
         newEvents = await api.instanceEvents(id, eventCursor);
       }
       if (instanceId(current) !== id) return;
+      events.sort((a, b) => a.seq - b.seq);
       events = retainTimelineEvents(events);
       render();
     })();
@@ -125,6 +149,7 @@ export function setupChat({ onDataChanged }) {
       if (turnId !== activeTurn) return;
       if (TERMINAL.has(turn.state)) {
         activeTurn = null;
+        stream.close();
         stopPolling();
         await refreshConversation().catch((error) => toast(describeError(error), true));
         render();
@@ -132,7 +157,7 @@ export function setupChat({ onDataChanged }) {
         else toast(`Turn ended: ${turn.state}${turn.error ? ` (${turn.error})` : ''}.`, true);
         await onDataChanged();
       } else {
-        timer = setTimeout(pollTurn, 500);
+        timer = setTimeout(pollTurn, POLL_INTERVAL_MS);
       }
     } catch (error) {
       toast(describeError(error), true);
@@ -143,6 +168,7 @@ export function setupChat({ onDataChanged }) {
   async function selectConversation(id) {
     if (activeTurn || busy || id === instanceId(current)) return;
     busy = true;
+    stream.close();
     updateControls();
     try {
       current = await api.instance(id);
@@ -158,6 +184,7 @@ export function setupChat({ onDataChanged }) {
       pendingSend = null;
       await refreshConversation();
       if (activeTurn) {
+        stream.open(activeTurn, eventCursor);
         stopPolling();
         timer = setTimeout(pollTurn, 300);
       }
@@ -180,6 +207,7 @@ export function setupChat({ onDataChanged }) {
     const lastTurn = latest.last_turn;
     activeTurn = lastTurn && !TERMINAL.has(lastTurn.state) ? lastTurn.turn_id : null;
     if (activeTurn) {
+      stream.open(activeTurn, eventCursor);
       stopPolling();
       timer = setTimeout(pollTurn, 300);
     }
@@ -188,6 +216,7 @@ export function setupChat({ onDataChanged }) {
   function newConversation() {
     if (activeTurn || busy) return;
     restorePending = false;
+    stream.close();
     stopPolling();
     current = null;
     messages = [];
@@ -256,6 +285,7 @@ export function setupChat({ onDataChanged }) {
       pendingSend = null;
       input.value = '';
       render();
+      stream.open(activeTurn, eventCursor);
       stopPolling();
       timer = setTimeout(pollTurn, 300);
       try {

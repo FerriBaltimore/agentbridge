@@ -20,7 +20,7 @@ def normalized_exclusions(value):
     return tuple(value)
 
 
-def verify_proxy_model(routes, account, model, *, refresh):
+def verify_proxy_model(routes, account, model, *, refresh, context_window=None):
     require_proxy_account(account)
     if not account.management_key_env:
         raise BridgeError('proxy_binding_unverified', 'This proxy account needs a management key reference.')
@@ -35,6 +35,14 @@ def verify_proxy_model(routes, account, model, *, refresh):
     if model not in {item.get('id') for item in observed['data']['models']
                      if isinstance(item, dict)}:
         raise BridgeError('model_unavailable', 'The proxy does not currently expose this model.')
+    if context_window is not None:
+        ceiling = routes.context_ceiling(account, model)
+        if ceiling is None:
+            raise BridgeError('context_window_unavailable',
+                              'The selected account has no verified context window ceiling.')
+        if context_window > ceiling:
+            raise BridgeError('context_window_unavailable',
+                              'The requested context window exceeds the selected account ceiling.')
 
 
 def create_automatic_instance(bridge, *, workspace_path, model, provider=None,
@@ -67,15 +75,18 @@ def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
         if excluded_account_refs:
             raise BridgeError('invalid_request', 'Pinned accounts cannot use route exclusions.')
         account = bridge.account(session['account_id'])
-        verify_proxy_model(bridge.routes, account, options.model or session['model'], refresh=True)
+        verify_proxy_model(bridge.routes, account, options.model or session['model'],
+                           refresh=True, context_window=options.context_window)
         return account, None, None, 0, None
     model = options.model or session['model']
     if model is None:
         raise BridgeError('model_required', 'Choose a model for automatic routing.')
     decision = bridge.routes.select(model, provider=routing['provider'],
-                                    excluded_account_refs=excluded_account_refs)
+                                    excluded_account_refs=excluded_account_refs,
+                                    context_window=options.context_window)
     account = bridge.account(decision.account_id)
-    verify_proxy_model(bridge.routes, account, model, refresh=False)
+    verify_proxy_model(bridge.routes, account, model, refresh=False,
+                       context_window=options.context_window)
     previous = routing['last_completed_account_id']
     prior = bridge.store.last_session_run(session['id'])
     account_changed = (prior is not None and prior['account_id'] != account.id) or (
