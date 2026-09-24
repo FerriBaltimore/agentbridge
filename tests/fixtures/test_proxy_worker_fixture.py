@@ -65,7 +65,7 @@ def bridge_with_proxy(tmp_path, monkeypatch, port, *, command=(), model=MODEL):
     """Seed an account through the internal store for execution tests."""
     monkeypatch.setenv(CLIENT_KEY_ENV, "fixture-client-key")
     monkeypatch.setenv(MANAGEMENT_KEY_ENV, "fixture-management-key")
-    bridge = Bridge(tmp_path / "state")
+    bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
     seed_authenticated_proxy_account(bridge.store, Account(
         "fixture", "codex", provider="codex", supported_models=(model,),
         proxy_base_url=f"http://127.0.0.1:{port}/v1",

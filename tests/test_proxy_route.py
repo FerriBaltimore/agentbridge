@@ -94,7 +94,7 @@ def test_management_key_reference_cannot_enter_codex_environment(other_reference
 
 def test_pinned_proxy_turn_requires_a_verified_management_binding(tmp_path, monkeypatch):
     monkeypatch.setenv("CLIENT_KEY", "local-fixture-key")
-    bridge = Bridge(tmp_path / "state")
+    bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
     account = Account("account_a", "codex", provider="codex",
         supported_models=("gpt-5",), proxy_base_url="http://127.0.0.1:8317/v1",
         key_env="CLIENT_KEY")

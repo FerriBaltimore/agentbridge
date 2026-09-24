@@ -3,8 +3,10 @@ import json
 import os
 import selectors
 import signal
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -24,6 +26,7 @@ from .provider_contracts import ContractRegistry
 from .accounts import AccountService
 from .routing.admission import verify_proxy_model
 from .routing.service import RoutingService
+from .native_sandbox import wrap
 from .execution_context import (MCP_CAPABILITY_ENV, PRIVATE_EXECUTION_KEY,
                                 mcp_environment, verify)
 
@@ -37,6 +40,7 @@ def main():
     claimed=False
     account=None
     child=None
+    native_temp=None
     parser=None
     writer=None
     select=None
@@ -89,6 +93,7 @@ def main():
         env['PYTHONPATH']=os.path.dirname(os.path.dirname(__file__))
         from .proxy import session_home
         env['CODEX_HOME']=str(session_home(store.root,session['id']))
+        env['HOME']=env['CODEX_HOME']
         cmd=command(account,session,options)
         prompt=run['prompt']
         if session.get('context') and not session.get('native_id'):
@@ -102,7 +107,11 @@ def main():
                 'secret_names': [*secrets, *([MCP_CAPABILITY_ENV] if mcp_env else [])],
                 'context_package': execution['context_package'] if execution else None,
                 'mcp_enabled': bool(mcp_env)})
-        else:payload=prompt
+        else:
+            payload=prompt
+            native_temp=tempfile.mkdtemp(prefix='agentbridge-native-')
+            env['TMPDIR']=native_temp
+            cmd=wrap(cmd, workspace_write=options.sandbox != 'read-only')
         if run['stop_requested'] or stopped[0]:
             store.finish(run_id,'cancelled','user_stop');return
         try:
@@ -223,6 +232,8 @@ def main():
             for pipe in (child.stdin,child.stdout,child.stderr):
                 try:pipe.close()
                 except OSError:pass
+        if native_temp is not None and (child is None or child.poll() is not None):
+            shutil.rmtree(native_temp, ignore_errors=True)
 
 
 def parse(line, parser):

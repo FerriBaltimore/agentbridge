@@ -54,7 +54,7 @@ def test_provider_constraint_survives_replay_and_is_enforced_at_admission(tmp_pa
 
 
 def test_public_instance_creation_keeps_provider_filter(tmp_path, monkeypatch):
-    bridge = Bridge(tmp_path / 'state')
+    bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
     _accounts(bridge.store)
     register_verified_proxy_account(bridge.store, 'codex-exclusive', 8303,
                                     model='codex-only-model', provider='codex')
@@ -62,7 +62,7 @@ def test_public_instance_creation_keeps_provider_filter(tmp_path, monkeypatch):
                              'quota_unknown')
     selected = []
 
-    def select(model, *, provider=None, refresh=True):
+    def select(model, *, provider=None, refresh=True, excluded_account_refs=()):
         selected.append((model, provider))
         return decision
 

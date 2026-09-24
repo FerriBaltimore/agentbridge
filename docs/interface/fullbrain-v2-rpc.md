@@ -93,6 +93,9 @@ controls, not proof that a live model lacks those controls.
 `configured_unverified` and `proxy_observed` do not prove that a live turn will
 accept the model. The aggregate selector uses controls compatible across
 observed accounts; Fullbrain can inspect account capabilities for a pin.
+Pass `provider` to `models.list` to filter accounts before grouping and
+pagination. A page therefore contains only models served by that provider;
+`next_cursor` advances through the filtered catalog.
 
 ## Create and observe a conversation
 
@@ -110,6 +113,12 @@ For a pinned route, add `"account_ref":"team-codex-1"` to
 other instance fields; its initial account may change before a later turn.
 `messages.create` returns `turn_id`, `message_id`, `instance_id`, `state`,
 `replayed` and the account actually selected for that turn in `account_ref`.
+For an automatic route, `instances.create` and `messages.create` also accept
+`excluded_account_refs`, a list of up to 1000 distinct account names or IDs.
+The router omits those accounts when choosing the initial route and the turn
+route. A pinned route cannot use exclusions. Fullbrain pins the list in each
+turn snapshot so retries and recovery use the same fence while an account
+deletion is pending; it does not silently switch a pinned route.
 
 `instances.events` and `turns.events` return bare arrays of events with `seq`,
 `turn_id`, `instance_id`, `message_id`, `engine`, `kind`, `at`, `data` and
@@ -170,4 +179,11 @@ independent request:
 The result contains `account_ref`, `removed: true` and
 `upstream_credential_removed: false`. Historical conversations and evidence
 remain readable. This retires AgentBridge's local route; it does not revoke
-the upstream credential stored by CLIProxyAPI.
+the upstream credential stored by CLIProxyAPI. `accounts.delete` requires
+exactly one of `account_ref` or `account_id`. A reference that matches an
+account name and a different account ID is ambiguous; use the exact
+`account_id` for an explicit retry. AgentBridge fences new routes before
+stopping the sidecar. If stop confirmation is unknown, the call reports
+`unknown_outcome` and `accounts.status` exposes
+`retirement.local_proxy_stopped: false` without contacting the proxy. A
+confirmed stop can be retried safely after a lost response.

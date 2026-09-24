@@ -57,7 +57,8 @@ def _route_context(context, omissions, *, required):
 
 
 def _session_payload(account_id, cwd, model, native_id, parent_id, context,
-                     routing_mode, routing_provider=None, evaluation=False):
+                     routing_mode, routing_provider=None, evaluation=False,
+                     excluded_account_refs=()):
     payload = {"cwd": cwd, "model": model, "native_id": native_id,
                "parent_id": parent_id, "context": context}
     if routing_mode == "automatic":
@@ -65,6 +66,8 @@ def _session_payload(account_id, cwd, model, native_id, parent_id, context,
         payload["routing_mode"] = routing_mode
         if routing_provider is not None:
             payload["provider"] = routing_provider
+        if excluded_account_refs:
+            payload["excluded_account_refs"] = list(excluded_account_refs)
     else:
         # Keep the v3 pinned payload byte-for-byte stable across migration.
         payload = {"account_id": account_id, **payload}
@@ -74,6 +77,9 @@ def _session_payload(account_id, cwd, model, native_id, parent_id, context,
 
 
 def _verified_proxy_config(db, account_id, model, *, provider=None):
+    if db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
+                  (account_id,)).fetchone():
+        raise BridgeError('account_retired', 'The selected proxy account was retired.')
     row = db.execute("SELECT config FROM accounts WHERE id=?", (account_id,)).fetchone()
     if row is None:
         raise BridgeError("account_not_found", "The selected account does not exist.")
@@ -111,7 +117,7 @@ def _verified_proxy_config(db, account_id, model, *, provider=None):
 class RoutingStoreMixin:
     def add_session(self, id, account_id, cwd, model, native_id=None, parent_id=None,
                     context=None, request_key=None, routing_mode="pinned",
-                    routing_provider=None, evaluation=False):
+                    routing_provider=None, evaluation=False, excluded_account_refs=()):
         if type(evaluation) is not bool:
             raise BridgeError('invalid_request', 'evaluation must be a boolean.')
         if evaluation and (native_id is not None or parent_id is not None or context is not None):
@@ -127,7 +133,8 @@ class RoutingStoreMixin:
         elif routing_provider is not None:
             raise BridgeError("invalid_request", "Provider routing requires an automatic instance.")
         encoded = _session_payload(account_id, cwd, model, native_id, parent_id,
-                                   context, routing_mode, routing_provider, evaluation)
+                                   context, routing_mode, routing_provider, evaluation,
+                                   excluded_account_refs)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if request_key:
@@ -159,12 +166,13 @@ class RoutingStoreMixin:
                            (request_key, id, encoded, time.time()))
         return id, True
 
-    def replay_auto_session(self, request_key, cwd, model, *, provider=None, evaluation=False):
+    def replay_auto_session(self, request_key, cwd, model, *, provider=None, evaluation=False,
+                            excluded_account_refs=()):
         """Resolve a lost automatic-create response before routing side effects."""
         if not request_key:
             return None
         expected = _session_payload(None, cwd, model, None, None, None, "automatic", provider,
-                                    evaluation)
+                                    evaluation, excluded_account_refs)
         with self.connect() as db:
             row = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                              (request_key,)).fetchone()
@@ -234,7 +242,7 @@ class RoutingStoreMixin:
 
     def admit(self, id, session_id, prompt, options, key, message_id=None, *,
               account_id=None, route_decision=None, route_context=None, route_omissions=0,
-              route_event_seq=None):
+              route_event_seq=None, excluded_account_refs=()):
         message_id = message_id or id
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -245,6 +253,11 @@ class RoutingStoreMixin:
                     if (old["session_id"], old["prompt"], old_options) != (
                             session_id, prompt, _dumps(asdict(options))):
                         raise BridgeError("idempotency_conflict", "Request key already belongs to different input.")
+                    marker = db.execute('SELECT refs FROM run_route_exclusions WHERE run_id=?',
+                                        (old['id'],)).fetchone()
+                    if (marker['refs'] if marker else '[]') != _dumps(list(excluded_account_refs)):
+                        raise BridgeError('idempotency_conflict',
+                                          'Request key already belongs to different input.')
                     return old["id"], False
             session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
             if not session:
@@ -314,6 +327,9 @@ class RoutingStoreMixin:
                             _dumps(asdict(options)), key, now, now))
             except sqlite3.IntegrityError as error:
                 raise BusyError() from error
+            if excluded_account_refs:
+                db.execute('INSERT INTO run_route_exclusions(run_id,refs) VALUES (?,?)',
+                           (id, _dumps(list(excluded_account_refs))))
             if route_event is not None:
                 if route_event["portable_context_used"]:
                     db.execute("UPDATE sessions SET account_id=?,native_id=NULL,context=? WHERE id=?",

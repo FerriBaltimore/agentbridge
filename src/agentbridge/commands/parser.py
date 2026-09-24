@@ -23,7 +23,7 @@ def build_parser():
         formatter_class=PrettyHelpFormatter,
     )
     parser.add_argument('--version',action='version',version=__version__)
-    parser.add_argument('--root',default='.agentbridge',help='Private persistent state directory')
+    parser.add_argument('--root', help='Private persistent state directory (default: XDG state)')
     sub=parser.add_subparsers(dest='action')
     add_errors(sub)
     add_contracts(sub)
@@ -54,7 +54,8 @@ def build_parser():
     list_command=add_parser(account_sub, 'list',help='List configured accounts')
     list_command.add_argument('--json',action='store_true')
     delete=add_parser(account_sub, 'delete',help='Remove a local account route and retain history')
-    delete.add_argument('name',help='Account name or ID')
+    delete.add_argument('name', nargs='?', help='Account name or reference')
+    delete.add_argument('--account-id', help='Exact account ID for a retirement retry')
     delete.add_argument('--json',action='store_true')
     for name, help_text in (('status','Read configured and observed authentication state'),
                             ('usage','Read account quota and token-activity observations')):

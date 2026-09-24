@@ -20,8 +20,9 @@ AgentBridge database or public account projections. No account is created
 until the sidecar reports one verified upstream identity
 and a usable model catalogue.
 
-Install a compatible CLIProxyAPI executable on `PATH`, or set
-`AGENTBRIDGE_CLIPROXY_BIN` to its path in the AgentBridge process environment.
+Set `AGENTBRIDGE_CLIPROXY_BIN` to the absolute path of a compatible CLIProxyAPI
+executable outside every model-writable workspace. AgentBridge does not resolve
+the proxy binary from `PATH`.
 Provide a GrantBridge checkout with `--grantbridge-root` or
 `AGENTBRIDGE_GRANTBRIDGE_ROOT` when the adapter is not found beside the source
 checkout. Managed sidecars currently require Linux `memfd` support. Then run:
@@ -48,6 +49,8 @@ still needs controlled live acceptance. See the
 The CLI also provides `accounts list`, `accounts status`, `accounts usage`,
 `accounts check` and `accounts delete`. Delete retires the local route and
 preserves its history; it does not remove the upstream proxy credential.
+Use `accounts delete --account-id ID` for an exact retry after an uncertain
+stop or a reused account name.
 Public CLI text is English; account names are preserved as entered. There is
 no independent `accounts add` onboarding route.
 
@@ -56,11 +59,19 @@ no independent `accounts add` onboarding route.
 ```python
 from agentbridge import Bridge
 
-with Bridge(".agentbridge") as bridge:
+with Bridge() as bridge:
     instance = bridge.instance_create(model="your-model-id", workspace_path=".")
     accepted = bridge.message_create(instance["id"], "Inspect the tests.")
     print(bridge.run(accepted["turn_id"]).wait())
 ```
+
+The default state directory is `${XDG_STATE_HOME:-~/.local/state}/agentbridge`
+with private permissions. An explicit root must stay outside the workspace.
+If the project has `.agentbridge/bridge.sqlite3`, stop its active work and
+move that state deliberately before using the new default; AgentBridge raises
+`state_migration_required` rather than silently ignoring existing accounts.
+For a `workspace-write` turn, install the AgentBridge runtime and pin the
+CLIProxyAPI executable outside that writable workspace.
 
 `models.list` exposes exact configured model IDs and marks which accounts have
 fresh local proxy observations for each ID. When available, it also reports
@@ -91,7 +102,7 @@ From this repository, after installing AgentBridge into the current Python
 environment, run:
 
 ```bash
-python -m playground.server --root .agentbridge --workspace-path . --port 8765
+python -m playground.server --workspace-path . --port 8765
 ```
 
 Open `http://127.0.0.1:8765/`. The server binds only to loopback. Accounts
@@ -114,7 +125,7 @@ For a JSON-RPC caller:
 
 ```bash
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"capabilities","params":{}}' \
-  | agentbridge --root .agentbridge rpc
+  | agentbridge rpc
 ```
 
 Every repository text file is limited to 450 physical lines. During development:

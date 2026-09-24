@@ -33,14 +33,27 @@ class AccountService:
                               'The saved account configuration is incompatible.') from None
 
     def resolve(self, reference, *, include_retired=False):
-        """Resolve a human-facing unique name or an internal account ID."""
+        """Resolve only references that identify one eligible account."""
+        retired = self.store.retired_account_ids()
+        active_matches = {}
+        retired_matches = {}
+        try:
+            exact = self.get(reference)
+        except BridgeError as error:
+            if error.code not in ('invalid_id', 'not_found'):
+                raise
+        else:
+            if exact.id in retired:
+                if include_retired:
+                    retired_matches[exact.id] = exact
+            else:
+                active_matches[exact.id] = exact
         if isinstance(reference, str):
             wanted_name = account_name_key(reference)
             for account in self.list():
                 if account.name and account_name_key(account.name) == wanted_name:
-                    return account
+                    active_matches[account.id] = account
             if include_retired:
-                retired = self.store.retired_account_ids()
                 for row in self.store.list('accounts'):
                     if row['id'] not in retired:
                         continue
@@ -49,13 +62,25 @@ class AccountService:
                     except (BridgeError, TypeError, ValueError):
                         continue
                     if account.name and account_name_key(account.name) == wanted_name:
-                        return account
-        try:
-            return self.get(reference)
-        except BridgeError as error:
-            if error.code in ('invalid_id', 'not_found'):
-                raise BridgeError('account_not_found', 'No account matches that name.') from None
-            raise
+                        retired_matches[account.id] = account
+        if len(active_matches) > 1:
+            raise BridgeError('invalid_request',
+                              'Account reference is ambiguous; use an internal account ID.')
+        if active_matches:
+            account = next(iter(active_matches.values()))
+            # A reused human name identifies the active account. If only the
+            # active ID matches a retired name, an untyped ref is ambiguous.
+            if include_retired and retired_matches and (not account.name or
+                    account_name_key(account.name) != account_name_key(reference)):
+                raise BridgeError('invalid_request',
+                                  'Account reference is ambiguous; use an internal account ID.')
+            return account
+        if include_retired and len(retired_matches) > 1:
+            raise BridgeError('invalid_request',
+                              'Account reference is ambiguous; use an internal account ID.')
+        if retired_matches:
+            return next(iter(retired_matches.values()))
+        raise BridgeError('account_not_found', 'No account matches that reference.')
 
     def list(self, *, engine=None, authentication=None, limit=None, cursor=0):
         limit, cursor = page_values(limit, cursor, allow_none=True)

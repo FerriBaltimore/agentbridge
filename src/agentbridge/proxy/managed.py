@@ -20,6 +20,7 @@ import time
 from ..errors import BridgeError
 from ..models import identifier
 from .route import ProxyRoute
+from .supervisor_auth import read_auth, same_user_pid
 
 
 _MAX_MESSAGE = 16 * 1024
@@ -121,10 +122,12 @@ class ManagedProxyClient:
         if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
             raise BridgeError("unsupported_platform", "Managed proxies require Linux memfd support.")
         identifier(account_id)
-        request = {"action": action, "account_id": account_id, **fields}
-        payload = json.dumps(request, separators=(",", ":")).encode() + b"\n"
         for attempt in range(2):
             try:
+                token = self._auth_token()
+                request = {"action": action, "account_id": account_id,
+                           "auth": token, **fields}
+                payload = json.dumps(request, separators=(",", ":")).encode() + b"\n"
                 with _socket_address(self.directory) as address:
                     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
                         connection.settimeout(40)
@@ -152,6 +155,25 @@ class ManagedProxyClient:
             except (UnicodeError, ValueError):
                 raise BridgeError("managed_proxy_protocol_error", "The managed proxy returned an invalid response.") from None
         raise BridgeError("managed_proxy_unavailable", "The managed proxy supervisor is unavailable.")
+
+    def _auth_token(self):
+        with _socket_address(self.directory) as address:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(5)
+                connection.connect(address)
+                pid = same_user_pid(connection)
+                connection.sendall(b'{"action":"auth_info"}\n')
+                with connection.makefile('rb') as stream:
+                    line = stream.readline(_MAX_MESSAGE + 1)
+        try:
+            if not line or len(line) > _MAX_MESSAGE or not line.endswith(b'\n'):
+                raise ValueError('invalid auth info')
+            response = json.loads(line)
+            descriptor = response['result']['auth_fd'] if response.get('ok') is True else None
+        except (UnicodeError, ValueError, TypeError, KeyError, AttributeError):
+            raise BridgeError('managed_proxy_protocol_error',
+                              'The local supervisor returned invalid auth information.') from None
+        return read_auth(pid, descriptor)
 
     def _start_supervisor(self):
         if self.socket_path.exists():

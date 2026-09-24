@@ -8,9 +8,9 @@ from fixtures.test_proxy_worker_fixture import MODEL, bridge_with_proxy, managem
 
 
 def test_worker_runs_fake_codex_and_persists_events(tmp_path, monkeypatch):
-    fake = tmp_path / 'fake-codex'
+    fake = tmp_path.parent / f'{tmp_path.name}-fake-codex'
     fake.write_text(textwrap.dedent('''\
-        #!/usr/bin/env python3
+        #!/usr/bin/python3
         import json
         print(json.dumps({"type":"thread.started","thread_id":"native-1"}), flush=True)
         print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":"hello"}}), flush=True)

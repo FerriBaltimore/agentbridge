@@ -22,6 +22,9 @@ not call GrantBridge or a provider CLI directly.
    `accounts.list` to show safe account labels and observed status.
 4. Call `instances.create` with the selected model and an idempotency key.
    Supply `account_ref` only when the user explicitly pins a configured account.
+   For automatic routes, send the pending deletion account references as
+   `excluded_account_refs` on creation and every `messages.create` call. Pin
+   that list in the admitted turn so a retry uses the same route exclusions.
 
 Persist `instance_id` and `routing_mode`. An automatic instance reports its
 current `account_ref`; it may change between turns. Each accepted turn records
@@ -54,8 +57,9 @@ show that state and require an explicit recovery decision.
 
 Call `accounts.login.start` with `provider` and `name`. AgentBridge prepares an
 empty, dedicated local CLIProxyAPI sidecar; the deployment must provide a
-compatible CLIProxyAPI executable on `PATH` or via
-`AGENTBRIDGE_CLIPROXY_BIN` on a Linux host with `memfd` support. Set
+compatible CLIProxyAPI executable with an absolute
+`AGENTBRIDGE_CLIPROXY_BIN` path outside model-writable workspaces on a Linux
+host with `memfd` support. Set
 `AGENTBRIDGE_GRANTBRIDGE_ROOT` when the GrantBridge adapter is not discoverable
 beside the source checkout. Persist the returned `attempt_id` and `owner_ref`;
 show the authorization URL or user code. GrantBridge coordinates the browser

@@ -34,6 +34,9 @@ def create(bridge, workspace, *, evaluation=True, key=None):
     if evaluation:
         workspace = workspace / 'empty-evaluation-workspace'
         workspace.mkdir(exist_ok=True)
+    else:
+        workspace = workspace / 'ordinary-workspace'
+        workspace.mkdir(exist_ok=True)
     return bridge.instance_create(account_ref='test', model='fixture-model',
                                   workspace_path=str(workspace), evaluation=evaluation,
                                   idempotency_key=key)

@@ -84,11 +84,16 @@ def _fake_codex(path):
 def test_model_first_routing_switches_account_and_preserves_context(tmp_path, monkeypatch):
     fixture = tmp_path / "codex-fixture"
     _fake_codex(fixture)
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state-home'))
     alpha, beta = {"used": 60, "identity": "fixture-alpha"}, {"used": 10, "identity": "fixture-beta"}
     with ExitStack() as stack:
         alpha_url = stack.enter_context(management_server(alpha))
         beta_url = stack.enter_context(management_server(beta))
-        bridge = Bridge(tmp_path / "state")
+        bridge = Bridge()
+        assert bridge.root == tmp_path / 'state-home/agentbridge'
         for name, endpoint in (("alpha", alpha_url), ("beta", beta_url)):
             key_env = f"LAB_PROXY_{name.upper()}"
             management_env = f"LAB_MANAGEMENT_{name.upper()}"
@@ -102,7 +107,7 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
 
         catalog = bridge.models()
         assert catalog["models"][0]["id"] == "lab-model"
-        instance = bridge.instance_create(model="lab-model", workspace_path=tmp_path)
+        instance = bridge.instance_create(model="lab-model", workspace_path=workspace)
         assert instance["routing_mode"] == "automatic"
         assert instance["account_ref"] == "Beta"
 
@@ -135,7 +140,7 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
         def admit_with_competing_turn(*args, **kwargs):
             if not contested["occurred"] and kwargs.get("account_id") == "alpha":
                 contested["occurred"] = True
-                bridge.store.add_session("blocking-instance", "alpha", str(tmp_path), "lab-model")
+                bridge.store.add_session("blocking-instance", "alpha", str(workspace), "lab-model")
                 original_admit("blocking-turn", "blocking-instance", "other work",
                                RunOptions(model="lab-model"), None)
             return original_admit(*args, **kwargs)
@@ -149,7 +154,7 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
         bridge.store.finish("blocking-turn", "cancelled")
 
         pinned = bridge.instance_create(model="lab-model", account_ref="Alpha",
-                                        workspace_path=tmp_path)
+                                        workspace_path=workspace)
         pinned_first = bridge.message_create(pinned["id"], "pinned first")
         assert bridge.run(pinned_first["turn_id"]).wait(10)["state"] == "completed"
         alpha["identity"] = "replacement-alpha"
@@ -157,6 +162,44 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
             bridge.message_create(pinned["id"], "pinned second")
         assert error.value.code == "proxy_binding_unverified"
         assert bridge.store.session_run_count(pinned["id"]) == 1
+        bridge.close()
+
+
+def test_excluded_account_cannot_win_initial_or_turn_route(tmp_path, monkeypatch):
+    fixture = tmp_path / 'codex-fixture'
+    _fake_codex(fixture)
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    alpha = {'used': 1, 'identity': 'fixture-alpha'}
+    beta = {'used': 80, 'identity': 'fixture-beta'}
+    with ExitStack() as stack:
+        endpoints = (stack.enter_context(management_server(alpha)),
+                     stack.enter_context(management_server(beta)))
+        bridge = Bridge(tmp_path / 'state')
+        for name, endpoint in zip(('alpha', 'beta'), endpoints):
+            key_env = f'LAB_PROXY_{name.upper()}'
+            management_env = f'LAB_MANAGEMENT_{name.upper()}'
+            monkeypatch.setenv(key_env, f'local-fixture-{name}')
+            monkeypatch.setenv(management_env, f'local-management-{name}')
+            seed_authenticated_proxy_account(bridge.store, Account(
+                name, 'codex', name=' Alpha ' if name == 'alpha' else 'Beta', key_env=key_env,
+                management_key_env=management_env, proxy_base_url=endpoint,
+                provider='codex', supported_models=('lab-model',), command=(str(fixture),)),
+                observe_local=True)
+
+        new = bridge.instance_create(model='lab-model', workspace_path=workspace,
+                                     excluded_account_refs=[' Alpha '])
+        assert new['account_ref'] == 'Beta'
+        existing = bridge.instance_create(model='lab-model', workspace_path=workspace)
+        assert existing['account_ref'] == ' Alpha '
+        turn = bridge.message_create(existing['id'], 'route around deletion',
+                                     excluded_account_refs=[' Alpha '])
+        assert turn['account_ref'] == 'Beta'
+        assert bridge.run(turn['turn_id']).wait(10)['state'] == 'completed'
+        with pytest.raises(BridgeError) as error:
+            bridge.message_create(existing['id'], 'no remaining route',
+                                  excluded_account_refs=[' Alpha ', 'Beta'])
+        assert error.value.code == 'model_unavailable'
         bridge.close()
 
 

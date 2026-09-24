@@ -2,17 +2,22 @@
 import json
 import os
 import select
+import shutil
 import subprocess
-import sys
 import time
 
 from .errors import BridgeError
+from .native_sandbox import wrap
 
 
 class ProviderChannel:
-    def __init__(self, command, *, cwd, env, inputs_only=False):
-        if inputs_only:
-            command = [sys.executable, '-P', '-m', 'agentbridge.native_sandbox', *command]
+    def __init__(self, command, *, cwd, env, inputs_only=False,
+                 workspace_write=False, mcp_enabled=False):
+        if not command or shutil.which(command[0], path=env.get('PATH', os.defpath)) is None:
+            raise BridgeError('provider_unavailable', 'The native provider could not be started.',
+                              phase='launch', outcome='not_started')
+        command = wrap(command, inputs_only=inputs_only,
+                       workspace_write=workspace_write, mcp_enabled=mcp_enabled)
         try:
             self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)

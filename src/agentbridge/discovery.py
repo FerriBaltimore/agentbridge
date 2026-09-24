@@ -33,14 +33,16 @@ class DiscoveryMixin:
                 raise BridgeError('invalid_proxy_account', 'This historical account cannot execute.')
         return proxy_payload(include_parameters=include_parameters)
 
-    def models(self, engine=None, *, account_ref=None, refresh=False, include_hidden=False,
+    def models(self, engine=None, *, account_ref=None, provider=None, refresh=False, include_hidden=False,
                include_deprecated=False, limit=None, cursor=0):
         if engine is not None:
             raise BridgeError('unsupported_parameter', 'Models are selected across proxy accounts.')
         if any(type(flag) is not bool for flag in (refresh, include_hidden, include_deprecated)):
             raise BridgeError('invalid_input', 'Catalog query flags must be booleans.')
         limit, cursor = page_values(limit, cursor, allow_none=True)
-        result = self.routes.models(account_ref=account_ref, refresh=refresh)
+        if provider is not None and provider not in {'codex', 'claude', 'grok'}:
+            raise BridgeError('invalid_provider', 'Choose a supported proxy provider.')
+        result = self.routes.models(account_ref=account_ref, provider=provider, refresh=refresh)
         items = result['models']
         page = items[cursor:] if limit is None else items[cursor:cursor + limit]
         result['items'] = page

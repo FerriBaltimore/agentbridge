@@ -79,8 +79,8 @@ cannot migrate the application.
 ## Worker and authentication deployment
 
 Install the reviewed AgentBridge wheel in Fullbrain's **own** isolated worker
-environment. Make the compatible CLIProxyAPI executable available on `PATH` or
-set `AGENTBRIDGE_CLIPROXY_BIN`. Supply the GrantBridge adapter through the
+environment. Set `AGENTBRIDGE_CLIPROXY_BIN` to the absolute path of the
+reviewed CLIProxyAPI executable outside model-writable workspaces. Supply the GrantBridge adapter through the
 reviewed installation; set `AGENTBRIDGE_GRANTBRIDGE_ROOT` only if discovery
 cannot find it. AgentBridge's managed sidecars require Linux `memfd` and a
 dedicated loopback endpoint and auth directory for each account. Their keys

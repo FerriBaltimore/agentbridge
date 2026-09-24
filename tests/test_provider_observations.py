@@ -1,8 +1,8 @@
 """Proxy evidence and permission decisions remain explicit when data is missing."""
 
 import os
+from pathlib import Path
 import secrets
-import sys
 
 import pytest
 
@@ -76,9 +76,17 @@ def test_expired_permission_is_denied_and_cannot_be_revived(tmp_path):
 def test_native_channel_timeout_is_bounded_for_an_incomplete_line(tmp_path):
     from agentbridge.provider_channel import ProviderChannel
 
+    workspace = tmp_path / 'workspace'
+    home = tmp_path / 'state/codex-runtime/instance'
+    temporary = tmp_path / 'native-tmp'
+    for path in (workspace, home, temporary):
+        path.mkdir(parents=True)
+    environment = {**os.environ, 'CODEX_HOME': str(home), 'HOME': str(home),
+                   'TMPDIR': str(temporary),
+                   'PYTHONPATH': str(Path(__file__).resolve().parents[1] / 'src')}
     with ProviderChannel(
-        [sys.executable, "-c", 'import sys,time;sys.stdout.write("{");sys.stdout.flush();time.sleep(20)'],
-        cwd=str(tmp_path), env=os.environ.copy(),
+        ['/usr/bin/python3', "-c", 'import sys,time;sys.stdout.write("{");sys.stdout.flush();time.sleep(20)'],
+        cwd=str(workspace), env=environment,
     ) as channel:
         with pytest.raises(BridgeError) as error:
             channel.receive(.1)

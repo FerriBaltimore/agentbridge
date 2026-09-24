@@ -57,15 +57,14 @@ def dispatch(bridge,method,params):
     if method=='capabilities.get':return bridge.capabilities(**params)
     if method=='accounts.list':
         accounts = bridge.accounts(**params)
-        return [public_account(account, bridge.account_status(account.id)) for account in accounts]
+        return [public_account(account, bridge.account_status(account_id=account.id))
+                for account in accounts]
     if method=='accounts.register':
         raise BridgeError('authentication_required', 'Create accounts through the proxy login flow.')
     if method=='accounts.delete':
         return bridge.account_delete(**params)
     if method=='accounts.status':
-        value = dict(params)
-        value['account_id'] = value.pop('account_ref', value.pop('account_id', None))
-        return bridge.account_status(**value)
+        return bridge.account_status(**params)
     if method=='accounts.usage':
         value = dict(params)
         value['account_id'] = value.pop('account_ref', value.pop('account_id', None))

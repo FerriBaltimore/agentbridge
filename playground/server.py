@@ -252,7 +252,7 @@ for _method in ('GET', 'POST', 'DELETE', 'OPTIONS'):
             getattr(PlaygroundHandler, 'handle_' + _method.lower()))
 
 
-def create_server(root='.agentbridge', *, port=8765, bridge=None, static_root=STATIC_ROOT,
+def create_server(root=None, *, port=8765, bridge=None, static_root=STATIC_ROOT,
                   workspace_path=None):
     return PlaygroundServer(('127.0.0.1', port), bridge or Bridge(root),
                             static_root=static_root, workspace_path=workspace_path)
@@ -260,7 +260,7 @@ def create_server(root='.agentbridge', *, port=8765, bridge=None, static_root=ST
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Local AgentBridge playground')
-    parser.add_argument('--root', default='.agentbridge', help='AgentBridge state directory')
+    parser.add_argument('--root', help='AgentBridge state directory (default: XDG state)')
     parser.add_argument('--port', type=int, default=8765, help='Local HTTP port')
     parser.add_argument('--workspace-path', default='.', help='Default workspace directory')
     options = parser.parse_args(argv)

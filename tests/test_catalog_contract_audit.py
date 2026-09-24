@@ -86,6 +86,9 @@ def test_pagination_and_account_filter_use_proxy_route_catalog(tmp_path):
         selected = bridge.models(account_ref='claude-b')
         assert [item['id'] for item in selected['items']] == ['model-b']
         assert selected['items'][0]['providers'] == ['claude']
+        filtered = bridge.models(provider='claude', limit=1)
+        assert [item['id'] for item in filtered['items']] == ['model-b']
+        assert filtered['next_cursor'] is None and not filtered['has_more']
 
 
 def test_retired_direct_catalog_adapters_cannot_open_provider_credentials(tmp_path, monkeypatch):

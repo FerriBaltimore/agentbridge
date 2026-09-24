@@ -25,12 +25,16 @@ from .routing.service import RoutingService
 from .proxy.managed import ManagedProxyClient
 from .execution_context import verify
 from .evaluation.service import EvaluationMixin
+from .state_path import default_root
+from .workspace_policy import validate_execution_workspace, validate_workspace
+from .account_retirement import AccountRetirementMixin
 
 
-class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMixin, ErrorManagementMixin):
-    def __init__(self, root='.agentbridge'):
+class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
+             TransferMixin, ErrorManagementMixin):
+    def __init__(self, root=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
-        self.store=Store(root)
+        self.store=Store(default_root() if root is None else root)
         self.account_service=AccountService(self.store)
         self.managed_proxy=ManagedProxyClient(self.store.root)
         self.routes=RoutingService(self.store, self.account_service, self.managed_proxy)
@@ -55,20 +59,19 @@ class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMi
     def resolve_account(self, reference):
         return self.account_service.resolve(reference)
 
-    def account_delete(self, account_ref):
-        account = self.account_service.resolve(account_ref, include_retired=True)
-        result = self.store.retire_account(account.id)
-        if self.managed_proxy.is_managed(account.to_dict(), account.id):
-            try:
-                self.managed_proxy.retire(account.id)
-            except BridgeError:
-                pass
-        return result
-
-    def account_status(self, account_id=None, *, account_ref=None, refresh=False):
-        account = self.account(self._account_id(account_id, account_ref))
-        if account.id in self.store.retired_account_ids():
-            return self.account_service.status(account.id, refresh=False)
+    def account_status(self, reference=None, *, account_id=None, account_ref=None,
+                       refresh=False):
+        if account_id is not None:
+            if reference is not None or account_ref is not None:
+                raise BridgeError('invalid_request', 'Provide one account_ref or account_id.')
+            account = self.account_service.get(account_id)
+        else:
+            account = self.account(self._account_id(reference, account_ref))
+        retirement = self.store.retirement_status(account.id)
+        if retirement['retired']:
+            return {**self.account_service.status(account.id, refresh=False),
+                    'retirement': {**retirement, 'managed_proxy':
+                                   self.managed_proxy.is_managed(account.to_dict(), account.id)}}
         if account.proxy_base_url:
             if refresh or self.managed_proxy.is_managed(account.to_dict(), account.id):
                 self.routes.observation(account, refresh=refresh)
@@ -157,8 +160,7 @@ class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMi
 
     def session(self, account_id, cwd, *, model=None, request_key=None, evaluation=False):
         account=self.account(account_id)
-        cwd=str(Path(cwd).expanduser().resolve())
-        if not Path(cwd).is_dir():raise BridgeError('invalid_workspace','Workspace must be an existing directory.')
+        cwd = str(validate_workspace(cwd, self.store.root))
         replayed = self.store.replay_pinned_session(request_key, account.id, cwd, model,
                                                     evaluation=evaluation)
         if replayed:
@@ -178,7 +180,10 @@ class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMi
                         effort=None, context_window=None, permission_mode='dontAsk',
                         sandbox_mode='read-only', allowed_tools=(), metadata=None,
                         provider_options=None, continuity_mode=None, idempotency_key=None,
-                        evaluation=False):
+                        evaluation=False, excluded_account_refs=()):
+        from .routing.admission import normalized_exclusions
+
+        excluded_account_refs = normalized_exclusions(excluded_account_refs)
         if type(evaluation) is not bool:
             raise BridgeError('invalid_request', 'evaluation must be a boolean.')
         if provider_options or metadata or continuity_mode:
@@ -190,11 +195,14 @@ class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMi
         if account_ref is not None and provider is not None:
             raise BridgeError('unsupported_parameter',
                               'provider filters automatic routing only.')
+        if account_ref is not None and excluded_account_refs:
+            raise BridgeError('invalid_request', 'Pinned accounts cannot use route exclusions.')
         if account_ref is None:
             from .routing.admission import create_automatic_instance
             return create_automatic_instance(self, workspace_path=workspace_path, model=model,
                                              idempotency_key=idempotency_key,
-                                             provider=provider, evaluation=evaluation)
+                                             provider=provider, evaluation=evaluation,
+                                             excluded_account_refs=excluded_account_refs)
         account = self.resolve_account(account_ref)
         result = self.session(account.id, workspace_path or '.', model=model,
                               request_key=idempotency_key, evaluation=evaluation)
@@ -349,16 +357,23 @@ class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMi
         self.store.get('runs',identifier(id))
         return Run(self,id)
 
-    def submit(self, session_id, prompt, *, options=None, request_key=None, message_id=None, execution=None):
+    def submit(self, session_id, prompt, *, options=None, request_key=None, message_id=None,
+               execution=None, excluded_account_refs=()):
+        from .routing.admission import normalized_exclusions
+
+        excluded_account_refs = normalized_exclusions(excluded_account_refs)
         options=options or RunOptions()
         if execution is not None or options.context_package_digest or options.mcp_binding_digest: verify(options, execution)
         if not isinstance(prompt,str) or not prompt.strip():raise BridgeError('empty_prompt','A nonempty prompt is required.')
-        previous = self.store.replay(session_id, prompt, options, request_key)
+        previous = self.store.replay(session_id, prompt, options, request_key,
+                                     excluded_account_refs=excluded_account_refs)
         if previous:
             run = Run(self, previous)
             run.replayed = True
             return run
         session=self.get_session(session_id)
+        validate_execution_workspace(session['cwd'], self.store.root,
+                                     workspace_write=options.sandbox != 'read-only')
         if session.get('evaluation') and (execution is None or
                 not isinstance(execution.get('context_package'), dict) or
                 execution['context_package'].get('execution_mode') != 'evaluation_inputs_only'):
@@ -367,7 +382,8 @@ class Bridge(EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin, TransferMi
         if session.get('state') == 'archived':
             raise BridgeError('instance_archived', 'Archived instances cannot accept new messages.')
         from .routing.execution import admit_turn
-        id,created,receipt,secrets = admit_turn(self, session, prompt, options, request_key, message_id)
+        id,created,receipt,secrets = admit_turn(
+            self, session, prompt, options, request_key, message_id, excluded_account_refs)
         if not created:
             run = Run(self, id)
             run.replayed = True

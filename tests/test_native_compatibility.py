@@ -121,7 +121,7 @@ def test_newest_unknown_index_schema_does_not_fall_back_to_an_old_database(tmp_p
 
 
 def test_native_transfer_validation_is_unavailable_for_proxy_accounts(tmp_path):
-    bridge = Bridge(tmp_path / 'store')
+    bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-store')
     register_verified_proxy_account(bridge.store, 'source', 19501)
     register_verified_proxy_account(bridge.store, 'target', 19502)
     bridge.store.add_session('source-session', 'source', str(tmp_path), 'fixture-model')
@@ -133,7 +133,7 @@ def test_native_transfer_validation_is_unavailable_for_proxy_accounts(tmp_path):
 
 
 def test_portable_transfer_validation_requires_observed_target(tmp_path, monkeypatch):
-    bridge = Bridge(tmp_path / 'store')
+    bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-store')
     register_verified_proxy_account(bridge.store, 'source', 19504)
     register_verified_proxy_account(bridge.store, 'target', 19505)
     bridge.store.add_session('source-session', 'source', str(tmp_path), 'fixture-model')
@@ -157,7 +157,7 @@ def test_auto_transfer_uses_portable_evidence_between_proxy_accounts(tmp_path, m
             200, {'models': [{'id': 'fixture-model'}]}, {}),
     }
     with local_management(responses) as (port, _):
-        bridge = Bridge(tmp_path / 'store')
+        bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-store')
         register_verified_proxy_account(bridge.store, 'source', 19503)
         seed_authenticated_proxy_account(bridge.store, Account('target', 'codex', provider='codex',
             supported_models=('fixture-model',), proxy_base_url=f'http://127.0.0.1:{port}/v1',

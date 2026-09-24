@@ -1,10 +1,10 @@
 """Conversation transfer policy kept outside the core bridge facade."""
 import time
-from pathlib import Path
 from uuid import uuid4
 
 from .errors import BridgeError, BusyError, UnsupportedError
 from .store import dumps
+from .workspace_policy import validate_workspace
 
 
 class TransferMixin:
@@ -21,9 +21,8 @@ class TransferMixin:
         target = self.resolve_account(account_id)
         from .transports import require_proxy_account
         require_proxy_account(target)
-        target_workspace = Path(target_workspace_path).expanduser().resolve() if target_workspace_path else Path(source['cwd'])
-        if not target_workspace.is_dir():
-            raise BridgeError('invalid_workspace', 'Workspace must be an existing directory.')
+        target_workspace = validate_workspace(
+            target_workspace_path or source['cwd'], self.store.root)
         if target.id == old.id:
             raise BridgeError('same_account', 'Continue the existing session on the same account.')
         if mode == 'native':

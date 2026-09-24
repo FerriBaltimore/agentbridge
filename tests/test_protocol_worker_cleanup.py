@@ -37,10 +37,11 @@ print(json.dumps({'type':'turn.completed'}), flush=True)
 ''')
     with management_server() as port:
         bridge = bridge_with_proxy(tmp_path, monkeypatch, port,
-            command=(sys.executable, str(script), str(pid_file),
+            command=('/usr/bin/python3', str(script), str(pid_file),
                      'inherit' if inherit_pipe else 'closed'))
         session = bridge.session('fixture', tmp_path, model=MODEL)
-        run = bridge.submit(session['id'], 'fixture', options=RunOptions(timeout=20))
+        run = bridge.submit(session['id'], 'fixture',
+                            options=RunOptions(timeout=20, sandbox='workspace-write'))
         try:
             result = run.wait(8)
             assert result['state'] == 'completed'

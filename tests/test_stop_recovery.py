@@ -8,9 +8,9 @@ from fixtures.test_proxy_worker_fixture import MODEL, bridge_with_proxy, managem
 
 
 def test_stop_is_cancelled_and_does_not_retry(tmp_path, monkeypatch):
-    fake = tmp_path / 'slow-codex'
+    fake = tmp_path.parent / f'{tmp_path.name}-slow-codex'
     fake.write_text(textwrap.dedent('''\
-        #!/usr/bin/env python3
+        #!/usr/bin/python3
         import json,time
         print(json.dumps({"type":"thread.started","thread_id":"native-slow"}),flush=True)
         time.sleep(30)

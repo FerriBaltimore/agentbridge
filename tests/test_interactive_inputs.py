@@ -70,13 +70,13 @@ def setup_proxy(tmp_path, monkeypatch):
     monkeypatch.setenv('FIXTURE_PROXY_KEY', 'fixture-client-key')
     monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'fixture-management-key')
     with management_server() as port:
-        bridge = Bridge(tmp_path / 'state')
+        bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
 
         def create(*, native_args=(), evaluation=False, workspace_path=None,
                    native_command=None):
             account = replace(proxy_account('test', port, provider='codex'),
                               command=native_command or
-                              (sys.executable, str(FIXTURE), *native_args))
+                              ('/usr/bin/python3', '-c', FIXTURE.read_text(), *native_args))
             account = seed_authenticated_proxy_account(bridge.store, account,
                                                        observe_local=True)
             assert bridge.routes.observe(account)['status'] == 'active'

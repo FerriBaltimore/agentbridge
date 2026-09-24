@@ -64,9 +64,9 @@ def add_proxy_account(bridge, account_id, port, *, name, command):
 
 @pytest.fixture
 def bridge_for_interface(tmp_path, monkeypatch):
-    provider = tmp_path / 'fake-provider'
+    provider = tmp_path.parent / f'{tmp_path.name}-fake-provider'
     provider.write_text(textwrap.dedent('''\
-        #!/usr/bin/env python3
+        #!/usr/bin/python3
         import json
         print(json.dumps({"type": "thread.started", "thread_id": "native-test"}), flush=True)
         print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}}), flush=True)
@@ -76,7 +76,7 @@ def bridge_for_interface(tmp_path, monkeypatch):
     monkeypatch.setenv('FIXTURE_PROXY_KEY', 'local-fixture-client-key')
     monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'local-fixture-management-key')
     with management_server('test') as port:
-        bridge = Bridge(tmp_path / 'state')
+        bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
         add_proxy_account(bridge, 'test', port, name='Test', command=provider)
         yield bridge
         bridge.close(cancel=True)

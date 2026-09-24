@@ -28,7 +28,7 @@ def admitted(tmp_path, monkeypatch, local_proxy,
     native = tmp_path / 'provider.py'
     native.write_text(script)
     bridge = bridge_with_proxy(tmp_path, monkeypatch, local_proxy,
-                               command=(sys.executable, str(native)))
+                               command=('/usr/bin/python3', str(native)))
     session = bridge.session('fixture', tmp_path, model=MODEL)
     run_id, _ = bridge.store.admit('fixture-run', session['id'], 'fixture', RunOptions(timeout=2), None)
     return bridge, bridge.run(run_id)

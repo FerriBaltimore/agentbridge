@@ -20,7 +20,7 @@ def provider(tmp_path, monkeypatch, events, *, stderr='', exit_code=0, delay=0):
                       f'sys.exit({exit_code!r})\n')
     with management_server() as port:
         bridge = bridge_with_proxy(tmp_path, monkeypatch, port,
-                                   command=(sys.executable, str(native)))
+                                   command=('/usr/bin/python3', str(native)))
         session = bridge.session('fixture', tmp_path, model=MODEL)
         yield bridge, session
 

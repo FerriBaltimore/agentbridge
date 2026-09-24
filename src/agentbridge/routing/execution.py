@@ -12,14 +12,16 @@ from ..transports import command
 from .admission import prepare_turn
 
 
-def admit_turn(bridge, session, prompt, options, request_key, message_id):
+def admit_turn(bridge, session, prompt, options, request_key, message_id,
+               excluded_account_refs=()):
     """Retry a pre-execution account collision against another eligible route."""
     model = options.model or session['model']
     candidates = sum(1 for item in bridge.accounts()
                      if item.proxy_base_url and model in item.supported_models)
     attempts = min(8, max(1, candidates))
     for attempt in range(attempts):
-        account, decision, context, omissions, event_seq = prepare_turn(bridge, session, options)
+        account, decision, context, omissions, event_seq = prepare_turn(
+            bridge, session, options, excluded_account_refs=excluded_account_refs)
         if account.proxy_base_url and model not in account.supported_models:
             raise BridgeError('model_unavailable', 'The selected account does not declare this model.')
         command(account, session, options)
@@ -41,7 +43,8 @@ def admit_turn(bridge, session, prompt, options, request_key, message_id):
                 message_id=message_id or uuid4().hex,
                 account_id=account.id if decision else None,
                 route_decision=decision, route_context=context,
-                route_omissions=omissions, route_event_seq=event_seq)
+                route_omissions=omissions, route_event_seq=event_seq,
+                excluded_account_refs=excluded_account_refs)
             return run_id, created, receipt, secrets
         except BusyError:
             if decision is None or attempt + 1 == attempts:

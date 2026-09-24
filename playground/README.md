@@ -10,19 +10,25 @@ Install AgentBridge into the current Python environment, then run from the
 repository root:
 
 ```bash
-python -m playground.server --root .agentbridge --workspace-path . --port 8765
+python -m playground.server --workspace-path . --port 8765
 ```
 
 Open `http://127.0.0.1:8765/`. The server binds to loopback and requires a
 same-origin mutation header. Install the `cliproxy` CLIProxyAPI executable
-and the GrantBridge adapter on the local machine. AgentBridge finds `cliproxy`
-on `PATH` or beside the active Python executable; set
-`AGENTBRIDGE_CLIPROXY_BIN` for a different location. Set
+and the GrantBridge adapter on the local machine. Set
+`AGENTBRIDGE_CLIPROXY_BIN` to the executable's absolute path outside the
+workspace. Set
 `AGENTBRIDGE_GRANTBRIDGE_ROOT` if GrantBridge is outside its standard
 location. Account sign-in asks only for a provider and display name.
 AgentBridge creates an isolated local proxy connection for each account and
 uses GrantBridge to coordinate browser authorization. Its generated keys and
 local endpoint are never entered in the browser form.
+
+The default state is `${XDG_STATE_HOME:-~/.local/state}/agentbridge`, outside
+the project workspace. An explicit `--root` must also be outside the workspace.
+If this project already has `.agentbridge/bridge.sqlite3`, stop active turns and
+sidecars, then move that directory to the new state location before using the
+default. AgentBridge does not silently import or discard the old accounts.
 
 ## What to inspect
 

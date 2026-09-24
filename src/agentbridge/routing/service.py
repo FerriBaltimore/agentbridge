@@ -100,10 +100,12 @@ class RoutingService:
                 and data.get('binding_verified') is True
                 and isinstance(data.get('models'), list))
 
-    def candidates(self, model, *, provider=None, refresh=False):
+    def candidates(self, model, *, provider=None, refresh=False, excluded_account_refs=()):
+        excluded = set(excluded_account_refs)
         accounts = [account for account in self.accounts.list()
                     if account.proxy_base_url and model in account.supported_models
-                    and (provider is None or account.provider == provider)]
+                    and (provider is None or account.provider == provider)
+                    and account.id not in excluded and account.name not in excluded]
         loads = self.store.route_load([account.id for account in accounts])
         result = []
         for account in accounts:
@@ -126,15 +128,21 @@ class RoutingService:
                 in_flight=load['in_flight'], assigned_turns=load['assigned_turns']))
         return result
 
-    def select(self, model, *, provider=None, refresh=True):
-        return select_route(model, self.candidates(model, provider=provider, refresh=refresh))
+    def select(self, model, *, provider=None, refresh=True, excluded_account_refs=()):
+        from .admission import normalized_exclusions
 
-    def models(self, *, account_ref=None, refresh=False):
+        excluded = normalized_exclusions(excluded_account_refs)
+        return select_route(model, self.candidates(
+            model, provider=provider, refresh=refresh, excluded_account_refs=excluded))
+
+    def models(self, *, account_ref=None, provider=None, refresh=False):
         """Return a configured catalog, marking proxy observations separately."""
         accounts = [account for account in self.accounts.list() if account.proxy_base_url]
         if account_ref is not None:
             selected = self.accounts.resolve(account_ref)
             accounts = [account for account in accounts if account.id == selected.id]
+        if provider is not None:
+            accounts = [account for account in accounts if account.provider == provider]
         grouped = {}
         for account in accounts:
             saved = self.observation(account, refresh=refresh, include_catalog=True)

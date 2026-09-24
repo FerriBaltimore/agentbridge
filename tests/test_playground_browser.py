@@ -50,10 +50,28 @@ def _proxy_responses(provider, model, *, used=None, credential=True):
     }
 
 
-def _fake_codex(path, capture):
-    path.write_text(textwrap.dedent(f'''\
-        #!/usr/bin/env python3
+class NativeCapture:
+    """Read simulated native calls from their isolated Codex session homes."""
+
+    def __init__(self, state_root):
+        self.root = state_root / 'codex-runtime'
+
+    def _files(self):
+        return sorted(self.root.glob('*/fixture-calls.jsonl'),
+                      key=lambda path: path.stat().st_mtime_ns)
+
+    def exists(self):
+        return bool(self._files())
+
+    def read_text(self):
+        return ''.join(path.read_text() for path in self._files())
+
+
+def _fake_codex(path):
+    path.write_text(textwrap.dedent('''\
+        #!/usr/bin/python3
         import json
+        import os
         from pathlib import Path
         import sys
 
@@ -61,13 +79,14 @@ def _fake_codex(path, capture):
             print('codex-cli 0.0.0')
             sys.exit(0)
         prompt = sys.stdin.read()
-        with Path({str(capture)!r}).open('a') as stream:
-            stream.write(json.dumps({{'argv': sys.argv[1:], 'prompt': prompt}}) + '\\n')
-        print(json.dumps({{'type': 'thread.started', 'thread_id': 'fixture-native-session'}}), flush=True)
-        print(json.dumps({{'type': 'item.completed', 'item': {{'type': 'agent_message',
-            'text': 'Browser fixture answer'}}}}), flush=True)
-        print(json.dumps({{'type': 'turn.completed', 'usage': {{'input_tokens': 12,
-            'output_tokens': 4}}}}), flush=True)
+        capture = Path(os.environ['CODEX_HOME']) / 'fixture-calls.jsonl'
+        with capture.open('a') as stream:
+            stream.write(json.dumps({'argv': sys.argv[1:], 'prompt': prompt}) + '\\n')
+        print(json.dumps({'type': 'thread.started', 'thread_id': 'fixture-native-session'}), flush=True)
+        print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message',
+            'text': 'Browser fixture answer'}}), flush=True)
+        print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 12,
+            'output_tokens': 4}}), flush=True)
     '''))
     path.chmod(0o700)
 
@@ -143,6 +162,7 @@ class FixtureManagedProxy:
     def retire(self, account_id):
         assert account_id in self.account_ids
         self.retired.append(account_id)
+        return {'retired': True, 'upstream_credential_removed': False}
 
 
 def configure_fixture_login(bridge, monkeypatch, port):
@@ -156,8 +176,10 @@ def configure_fixture_login(bridge, monkeypatch, port):
 @pytest.fixture
 def local_playground(tmp_path, monkeypatch):
     fake_codex = tmp_path / 'fixture-codex'
-    capture = tmp_path / 'codex-calls.jsonl'
-    _fake_codex(fake_codex, capture)
+    capture = NativeCapture(tmp_path / 'state')
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    _fake_codex(fake_codex)
     monkeypatch.setenv('LAB_OPENAI_CLIENT_KEY', 'fixture-openai-client')
     monkeypatch.setenv('LAB_OPENAI_MANAGEMENT_KEY', 'fixture-openai-management')
     monkeypatch.setenv('LAB_CLAUDE_CLIENT_KEY', 'fixture-claude-client')
@@ -191,7 +213,7 @@ def local_playground(tmp_path, monkeypatch):
                             lambda *args, **kwargs: fake_grantbridge)
         managed = configure_fixture_login(bridge, monkeypatch, grok_port)
         server = create_server(tmp_path / 'state', port=0, bridge=bridge,
-                               workspace_path=tmp_path)
+                               workspace_path=workspace)
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:

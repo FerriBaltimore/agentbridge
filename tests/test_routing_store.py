@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import stat
 
 import pytest
 
@@ -16,6 +17,13 @@ from fixtures.test_proxy_account_fixture import proxy_account, register_verified
 MODEL = "fixture-model"
 
 
+def test_existing_state_directory_is_private(tmp_path):
+    root = tmp_path / 'state'
+    root.mkdir(mode=0o755)
+    Store(root)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+
+
 def prepared(tmp_path):
     store = Store(tmp_path / "state")
     register_verified_proxy_account(store, "a", 8301, model=MODEL)
@@ -27,11 +35,13 @@ def decision(account_id, *, used=20):
     return RouteDecision(account_id, MODEL, "known", used, "healthy", 0, "least_used")
 
 
-def admit(store, run_id, session_id, account_id, *, key=None, context=None, omissions=0):
+def admit(store, run_id, session_id, account_id, *, key=None, context=None, omissions=0,
+          excluded_account_refs=()):
     return store.admit(run_id, session_id, "fixture prompt", RunOptions(model=MODEL), key,
                        account_id=account_id, route_decision=decision(account_id),
                        route_context=context, route_omissions=omissions,
-                       route_event_seq=store.last_route_event_seq(session_id) if context else None)
+                       route_event_seq=store.last_route_event_seq(session_id) if context else None,
+                       excluded_account_refs=excluded_account_refs)
 
 
 def test_automatic_admission_persists_route_and_native_completion(tmp_path):
@@ -200,6 +210,59 @@ def test_automatic_create_replay_ignores_newly_selected_account(tmp_path):
     assert caught.value.code == "idempotency_conflict"
 
 
+def test_automatic_create_replay_preserves_exclusions_and_historical_payload(tmp_path):
+    store = prepared(tmp_path)
+    assert store.add_session("first", "b", str(tmp_path), MODEL,
+        request_key="fenced", routing_mode="automatic",
+        excluded_account_refs=("a",)) == ("first", True)
+    assert store.replay_auto_session("fenced", str(tmp_path), MODEL,
+        excluded_account_refs=("a",)) == "first"
+    with pytest.raises(BridgeError) as caught:
+        store.replay_auto_session("fenced", str(tmp_path), MODEL)
+    assert caught.value.code == "idempotency_conflict"
+    with pytest.raises(BridgeError) as caught:
+        store.add_session("second", "a", str(tmp_path), MODEL,
+            request_key="fenced", routing_mode="automatic")
+    assert caught.value.code == "idempotency_conflict"
+    assert store.add_session("historical", "a", str(tmp_path), MODEL,
+        request_key="old", routing_mode="automatic") == ("historical", True)
+    assert store.replay_auto_session("old", str(tmp_path), MODEL) == "historical"
+    with pytest.raises(BridgeError) as caught:
+        store.replay_auto_session("old", str(tmp_path), MODEL,
+            excluded_account_refs=("a",))
+    assert caught.value.code == "idempotency_conflict"
+
+
+def test_turn_replay_preserves_exclusions_without_exposing_them_in_events(tmp_path):
+    store = prepared(tmp_path)
+    store.add_session("instance", "b", str(tmp_path), MODEL, routing_mode="automatic")
+    assert admit(store, "first", "instance", "b", key="same",
+                 excluded_account_refs=("a",)) == ("first", True)
+    assert store.replay("instance", "fixture prompt", RunOptions(model=MODEL), "same",
+                        excluded_account_refs=("a",)) == "first"
+    assert admit(store, "second", "instance", "a", key="same",
+                 excluded_account_refs=("a",)) == ("first", False)
+    for replay in (
+        lambda: store.replay("instance", "fixture prompt", RunOptions(model=MODEL), "same"),
+        lambda: admit(store, "third", "instance", "a", key="same"),
+    ):
+        with pytest.raises(BridgeError) as caught:
+            replay()
+        assert caught.value.code == "idempotency_conflict"
+    assert all('excluded_account_refs' not in event.data
+               for event in store.events(run_id="first"))
+
+
+def test_retirement_between_route_selection_and_admission_is_fenced(tmp_path):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    store.retire_account("a")
+    with pytest.raises(BridgeError) as caught:
+        admit(store, "after-retire", "instance", "a")
+    assert caught.value.code == "account_retired"
+    assert store.session_run_count("instance") == 0
+
+
 def test_pinned_sessions_preserve_existing_admission_semantics(tmp_path):
     store = prepared(tmp_path)
     store.add_session("pinned", "a", str(tmp_path), MODEL)
@@ -220,7 +283,7 @@ def test_v3_migration_preserves_pinned_proxy_session_and_replay(tmp_path):
         db.execute("UPDATE metadata SET version=3")
     upgraded = Store(tmp_path / "state")
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 6
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 7
     assert upgraded.routing("legacy") == {"mode": "pinned",
                                           "last_completed_account_id": "a",
                                           "last_native_id": "native-a", "provider": None}

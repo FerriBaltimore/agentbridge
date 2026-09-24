@@ -130,7 +130,7 @@ class AuthenticationService:
     def status(self, attempt_id, *, owner_ref=None, account_ref=None,
                grantbridge_root=None, data_dir=None):
         row = self._owned(attempt_id, owner_ref, account_ref)
-        if row['status'] in TERMINAL | {'verified', 'bound'}:
+        if row['status'] in TERMINAL | {'verified', 'bound', 'usable'}:
             return self._public(row)
         if not row['grantbridge_id']:
             raise BridgeError('authentication_attempt_not_ready', 'Authentication has not started.')
@@ -381,6 +381,8 @@ class AuthenticationService:
         result = {'attempt_id': row['id'], 'owner_ref': row['owner'],
                   'account_ref': row['name'], 'provider': row['engine'],
                   'status': row['status']}
+        if row['status'] in {'bound', 'usable'}:
+            result['account_id'] = row['account_id']
         for source, target in (('authorizationUrl', 'authorization_url'),
                                ('userCode', 'user_code'), ('createdAt', 'created_at'),
                                ('updatedAt', 'updated_at'), ('expiresAt', 'expires_at')):

@@ -8,6 +8,8 @@ import pytest
 from agentbridge import Bridge, RunOptions
 from agentbridge.auth_proxy_binding import bind_proxy_account
 from agentbridge.errors import BridgeError
+from agentbridge.commands.account_actions import account_command
+from agentbridge.commands.parser import build_parser
 from agentbridge.rpc import dispatch
 from fixtures.test_proxy_account_fixture import (
     proxy_account, register_verified_proxy_account, seed_authenticated_proxy_account)
@@ -21,7 +23,7 @@ def test_removal_preserves_old_records_and_blocks_new_work(tmp_path):
     bridge.store.finish(run_id, 'completed')
 
     result = bridge.account_delete('first')
-    assert result == {'account_ref': 'first', 'removed': True,
+    assert result == {'account_ref': 'first', 'account_id': 'first', 'removed': True,
                       'upstream_credential_removed': False}
     assert bridge.accounts() == []
     assert bridge.get_session(session)['account_id'] == 'first'
@@ -30,10 +32,10 @@ def test_removal_preserves_old_records_and_blocks_new_work(tmp_path):
     assert bridge.account_usage('first')['reason'] == 'account_removed'
     with pytest.raises(BridgeError) as error:
         bridge.store.add_session('new-session', 'first', str(tmp_path), 'fixture-model')
-    assert error.value.code == 'proxy_binding_unverified'
+    assert error.value.code == 'account_retired'
     with pytest.raises(BridgeError) as error:
         bridge.store.admit('new-turn', session, 'again', RunOptions(), None)
-    assert error.value.code == 'proxy_binding_unverified'
+    assert error.value.code == 'account_retired'
     assert bridge.account_delete('first') == result
     assert bridge.store.proxy_binding('first') is None
     with pytest.raises(BridgeError) as error:
@@ -106,7 +108,7 @@ def test_delete_is_declared_and_uses_the_same_sdk_method_over_rpc(tmp_path):
     assert capability['support'] == 'adapter'
     assert 'upstream_credential_remains' in capability['limitations']
     result = dispatch(bridge, 'accounts.delete', {'account_ref': 'first'})
-    assert result == {'account_ref': 'first', 'removed': True,
+    assert result == {'account_ref': 'first', 'account_id': 'first', 'removed': True,
                       'upstream_credential_removed': False}
     assert dispatch(bridge, 'accounts.list', {}) == []
 
@@ -119,3 +121,22 @@ def test_retired_name_still_resolves_for_historical_status_and_usage(tmp_path):
     assert bridge.account_status(account_ref='Personal')['authentication']['status'] == 'retired'
     assert bridge.account_usage(account_ref='Personal')['reason'] == 'account_removed'
     assert bridge.account_usage_history('Personal') == []
+
+
+def test_cli_delete_has_an_exact_account_id_retry_path():
+    class BridgeStub:
+        def account_delete(self, account_ref=None, *, account_id=None):
+            return {'account_ref': account_ref, 'account_id': account_id}
+
+    parser, _ = build_parser()
+    by_id = parser.parse_args(['accounts', 'delete', '--account-id', 'retired-id'])
+    assert account_command(BridgeStub(), by_id) == {
+        'account_ref': None, 'account_id': 'retired-id'}
+    by_name = parser.parse_args(['accounts', 'delete', 'Personal'])
+    assert account_command(BridgeStub(), by_name) == {
+        'account_ref': 'Personal', 'account_id': None}
+    for arguments in (['accounts', 'delete'],
+                      ['accounts', 'delete', 'Personal', '--account-id', 'retired-id']):
+        with pytest.raises(BridgeError) as error:
+            account_command(BridgeStub(), parser.parse_args(arguments))
+        assert error.value.code == 'invalid_request'

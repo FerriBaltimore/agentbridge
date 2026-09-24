@@ -12,8 +12,8 @@ second execution engine.
    CLIProxyAPI sidecar with its own loopback port and auth directory. It creates
    transient client and management keys inside the local supervisor. Preparing
    the sidecar does not register an AgentBridge account. A compatible
-   CLIProxyAPI executable must be installed or selected with
-   `AGENTBRIDGE_CLIPROXY_BIN`.
+   CLIProxyAPI executable must be selected with an absolute
+   `AGENTBRIDGE_CLIPROXY_BIN` path outside model-writable workspaces.
 2. Advanced callers may supply `proxy_base_url`, `key_env` and
    `management_key_env` together for an existing, isolated sidecar. The URL
    must be local and the two key arguments are environment variable names,

@@ -10,7 +10,7 @@ class MessageSubmissionMixin:
                        permission_mode='dontAsk', sandbox_mode='read-only', allowed_tools=(),
                        max_turns=None, max_budget=None, timeout_ms=None, attachments=None,
                        provider_options=None, metadata=None, idempotency_key=None,
-                       context_package=None, mcp=None):
+                       context_package=None, mcp=None, excluded_account_refs=()):
         prompt = self._message_text(content)
         if provider_options or metadata:
             raise UnsupportedError('Provider-specific options and metadata require an adapter contract.')
@@ -24,7 +24,8 @@ class MessageSubmissionMixin:
             context_package_digest=package_digest, mcp_binding_digest=binding_digest,
         )
         run = self.submit(instance_id, prompt, options=options, request_key=idempotency_key,
-                          execution=execution if package_digest or binding_digest else None)
+                          execution=execution if package_digest or binding_digest else None,
+                          excluded_account_refs=excluded_account_refs)
         message_id = run.snapshot.get('message_id', run.id)
         return {'turn_id': run.id, 'message_id': message_id, 'instance_id': instance_id,
                 'state': run.status, 'replayed': bool(getattr(run, 'replayed', False)),

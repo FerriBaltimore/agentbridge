@@ -49,14 +49,15 @@ def main():
                 mcp_enabled=payload.get('mcp_enabled') is True,
                 execution_mode=package.get('execution_mode', 'normal') if package else 'normal',
                 selected_context=package is not None)
-            temporary = TemporaryDirectory(prefix='agentbridge-inputs-') if inputs_only else nullcontext(None)
+            temporary = TemporaryDirectory(prefix='agentbridge-native-')
             with temporary as temp_dir:
                 native_env = os.environ.copy()
-                if inputs_only:
-                    native_env['TMPDIR'] = temp_dir
-                    native_env['HOME'] = native_env['CODEX_HOME']
+                native_env['TMPDIR'] = temp_dir
+                native_env['HOME'] = native_env['CODEX_HOME']
                 with ProviderChannel(payload['command'], cwd=payload['cwd'], env=native_env,
-                                     inputs_only=inputs_only) as channel:
+                                     inputs_only=inputs_only,
+                                     workspace_write=payload['options']['sandbox'] != 'read-only',
+                                     mcp_enabled=payload.get('mcp_enabled') is True) as channel:
                     CodexControl(channel, payload, emit, approve).execute()
     except BridgeError as error:
         emit({'type': 'bridge_error', 'error': error.safe_data(),

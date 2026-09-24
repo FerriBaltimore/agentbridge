@@ -4,9 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
-import sys
 from threading import Thread
-import textwrap
 import time
 
 import pytest
@@ -14,6 +12,7 @@ import pytest
 from agentbridge import Account, Bridge
 from fixtures.test_proxy_account_fixture import seed_authenticated_proxy_account
 from playground.server import create_server
+from test_playground_browser import NativeCapture
 from test_proxy_management import EMPTY_CONFIG, local_management
 
 
@@ -46,49 +45,41 @@ def _responses():
     }
 
 
-def _fake_command(path, capture, mode):
+def _fake_command(path, mode):
+    bootstrap = (
+        '#!/usr/bin/python3\n'
+        'import json\n'
+        'import os\n'
+        'from pathlib import Path\n'
+        'import sys\n'
+        "if '--version' in sys.argv:\n"
+        "    print('codex-cli 0.0.0')\n"
+        '    sys.exit(0)\n'
+        "capture = Path(os.environ['CODEX_HOME']) / 'fixture-calls.jsonl'\n"
+        "with capture.open('a') as output:\n"
+        "    output.write(json.dumps({'argv': sys.argv[1:]}) + '\\n')\n"
+    )
     if mode == 'slow':
-        source = f'''\
-            #!/usr/bin/env python3
-            import json
-            from pathlib import Path
-            import sys
-            import time
-
-            if '--version' in sys.argv:
-                print('codex-cli 0.0.0')
-                sys.exit(0)
-            with Path({str(capture)!r}).open('a') as output:
-                output.write(json.dumps({{'argv': sys.argv[1:]}}) + '\\n')
-            print(json.dumps({{'type': 'thread.started',
-                               'thread_id': 'fixture-slow-native'}}), flush=True)
-            time.sleep(30)
-        '''
+        script = bootstrap + (
+            'import time\n'
+            "print(json.dumps({'type': 'thread.started',\n"
+            "                  'thread_id': 'fixture-slow-native'}), flush=True)\n"
+            'time.sleep(30)\n'
+        )
     else:
-        source = f'''\
-            #!/usr/bin/env python3
-            import json
-            import os
-            from pathlib import Path
-            import sys
-
-            if '--version' in sys.argv:
-                print('codex-cli 0.0.0')
-                sys.exit(0)
-            with Path({str(capture)!r}).open('a') as output:
-                output.write(json.dumps({{'argv': sys.argv[1:]}}) + '\\n')
-            os.execv(sys.executable, [sys.executable, {str(NATIVE_FIXTURE)!r}])
-        '''
-    path.write_text(textwrap.dedent(source))
+        # The sandbox grants this executable, not a second fixture source file.
+        script = bootstrap + NATIVE_FIXTURE.read_text()
+    path.write_text(script)
     path.chmod(0o700)
-
 
 @pytest.fixture
 def local_playground(tmp_path, monkeypatch, request):
     mode = request.param
     command = tmp_path / 'fixture-codex'
-    capture = tmp_path / 'native-launches.jsonl'
-    _fake_command(command, capture, mode)
+    capture = NativeCapture(tmp_path / 'state')
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    _fake_command(command, mode)
     monkeypatch.setenv('FIXTURE_TURNS_CLIENT_KEY', 'fixture-client-key')
     monkeypatch.setenv('FIXTURE_TURNS_MANAGEMENT_KEY', 'fixture-management-key')
     with local_management(_responses()) as (port, _):
@@ -102,7 +93,7 @@ def local_playground(tmp_path, monkeypatch, request):
                 command=(str(command),)), observe_local=True)
             assert bridge.models(refresh=True)['models'][0]['id'] == MODEL
             server = create_server(tmp_path / 'state', port=0, bridge=bridge,
-                                   workspace_path=tmp_path)
+                                   workspace_path=workspace)
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:

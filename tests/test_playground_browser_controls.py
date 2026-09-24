@@ -50,6 +50,8 @@ class ControllableGrantBridge:
 
 @pytest.fixture
 def controlled_playground(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
     monkeypatch.setenv('LAB_GROK_CLIENT_KEY', 'fixture-client')
     monkeypatch.setenv('LAB_GROK_MANAGEMENT_KEY', 'fixture-management')
     responses = _proxy_responses('grok', 'fixture/grok-model', credential=False)
@@ -61,7 +63,7 @@ def controlled_playground(tmp_path, monkeypatch):
                             lambda *args, **kwargs: grantbridge)
         managed = configure_fixture_login(bridge, monkeypatch, port)
         server = create_server(tmp_path / 'state', port=0, bridge=bridge,
-                               workspace_path=tmp_path)
+                               workspace_path=workspace)
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -283,9 +285,10 @@ def test_send_failure_keeps_message_for_safe_retry(local_playground):
 def test_stop_button_cancels_one_running_turn_without_rerouting(local_playground):
     executable = Path(local_playground['bridge'].accounts()[0].command[0])
     capture = local_playground['capture']
-    executable.write_text(textwrap.dedent(f'''\
-        #!/usr/bin/env python3
+    executable.write_text(textwrap.dedent('''\
+        #!/usr/bin/python3
         import json
+        import os
         from pathlib import Path
         import sys
         import time
@@ -294,9 +297,10 @@ def test_stop_button_cancels_one_running_turn_without_rerouting(local_playground
             print('codex-cli 0.0.0')
             sys.exit(0)
         prompt = sys.stdin.read()
-        with Path({str(capture)!r}).open('a') as stream:
-            stream.write(json.dumps({{'argv': sys.argv[1:], 'prompt': prompt}}) + '\\n')
-        print(json.dumps({{'type': 'thread.started', 'thread_id': 'fixture-slow'}}),
+        capture = Path(os.environ['CODEX_HOME']) / 'fixture-calls.jsonl'
+        with capture.open('a') as stream:
+            stream.write(json.dumps({'argv': sys.argv[1:], 'prompt': prompt}) + '\\n')
+        print(json.dumps({'type': 'thread.started', 'thread_id': 'fixture-slow'}),
               flush=True)
         time.sleep(30)
     '''))

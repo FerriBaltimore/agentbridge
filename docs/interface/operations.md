@@ -8,8 +8,8 @@ where the implementation declares support.
 
     capabilities.get(account_ref?, refresh?, include_parameters?)
     accounts.list(authentication?, limit?, cursor?)
-    accounts.status(account_ref, refresh?)
-    accounts.delete(account_ref)
+    accounts.status(account_ref?, account_id?, refresh?)
+    accounts.delete(account_ref?, account_id?)
     accounts.login.start(provider, name, request_key?, owner_ref?, email?,
                          mode?, browser?, proxy_base_url?, key_env?,
                          management_key_env?)
@@ -27,8 +27,8 @@ where the implementation declares support.
 The login methods are one asynchronous onboarding flow. `login.start` returns
 an opaque `attempt_id` and `owner_ref`; the attempt remains queryable after an
 AgentBridge restart. AgentBridge launches an empty, dedicated local CLIProxyAPI
-sidecar by default; an installed binary or `AGENTBRIDGE_CLIPROXY_BIN` is
-required. Advanced callers may supply all three existing proxy route
+sidecar by default; an absolute `AGENTBRIDGE_CLIPROXY_BIN` path outside
+model-writable workspaces is required. Advanced callers may supply all three existing proxy route
 references together. GrantBridge coordinates provider OAuth using that
 sidecar's Management API. CLIProxyAPI owns and refreshes the upstream
 credential in its isolated auth directory. `login.check` verifies one active
@@ -45,15 +45,40 @@ it transiently through GrantBridge to CLIProxyAPI. Then call `status`,
 proxy. The callback URL contains an OAuth code and must never be stored or
 logged by the host. This browser relay has deterministic fixture coverage;
 live provider acceptance remains pending.
+
+After binding, `accounts.login.status` and the `attempt` object returned by
+`accounts.login.complete` include the stable, non-secret `account_id` from that
+login attempt. This ID remains tied to the original account if its human name
+is reused later.
+
 Neither API-key values nor OAuth tokens enter public account configuration or the AgentBridge
 database. The supervisor generates client and management key values and
 delivers them over private local channels during login and execution.
 
-`accounts.delete` retires the local route. Historical instances, turns and
-observations remain readable; active turns and pending login attempts block
-retirement. The operation returns `upstream_credential_removed: false` because
-AgentBridge does not revoke the CLIProxyAPI OAuth credential. A new login can
-reuse the account name and endpoint with an empty replacement sidecar.
+`accounts.delete` requires exactly one of `account_ref` or `account_id`.
+`account_ref` selects a unique active account by its human name, including
+when a retired account had the same name or internal ID. A reference matching
+different active accounts by name and internal ID is ambiguous and rejected.
+`account_id` selects the exact account for an explicit retry of a retired
+account. The delete acknowledgement includes that stable `account_id`.
+`accounts.status(account_id=...)` observes that exact account; a name shared by
+multiple retired generations stays ambiguous. Positional SDK status calls
+retain legacy reference resolution. Retirement fences new routes. For a managed
+sidecar, success requires
+durable confirmation that the local proxy stopped. If that stop is unknown,
+the route stays fenced and `accounts.status` reports
+`retirement.local_proxy_stopped: false` without contacting the proxy.
+`retirement.managed_proxy` identifies a sidecar owned by AgentBridge. Deleting
+an externally managed proxy account retires its AgentBridge route but does not
+stop that external process; status reports `managed_proxy: false` and
+`local_proxy_stopped: false`.
+
+Historical instances, turns and observations remain readable; active turns and
+pending login attempts block retirement. The operation returns
+`upstream_credential_removed: false` because AgentBridge does not revoke the
+CLIProxyAPI OAuth credential. A new login can reuse the account name. Its
+managed sidecar uses a separate account directory and a dynamically assigned
+local port.
 
 `models.list` aggregates exact model IDs from proxy accounts. Its
 `candidate_account_refs` are account declarations; `observed_account_refs`

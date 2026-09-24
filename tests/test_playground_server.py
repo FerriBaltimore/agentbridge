@@ -151,6 +151,27 @@ def request(server, method, path, *, body=None, headers=None, csrf=True):
         connection.close()
 
 
+def test_default_playground_uses_private_state_and_serves_sdk_routes(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state-home'))
+    server = create_server(port=0)
+    worker = Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01},
+                    daemon=True)
+    worker.start()
+    try:
+        assert server.bridge.root == tmp_path / 'state-home/agentbridge'
+        assert request(server, 'GET', '/api/meta') == (
+            200, {'result': {'workspace_path': str(workspace)}})
+        assert request(server, 'GET', '/api/accounts') == (200, {'result': []})
+    finally:
+        server.shutdown()
+        worker.join(timeout=3)
+        server.server_close()
+        server.bridge.close()
+
+
 def test_read_routes_expose_safe_account_projection_and_polling(local_server, tmp_path):
     server, bridge = local_server
     assert request(server, 'GET', '/')[1] == '<h1>Playground</h1>'

@@ -11,11 +11,8 @@ import json
 import os
 from pathlib import Path
 import secrets
-import shutil
-import signal
 import socket
 import stat
-import struct
 import subprocess
 import sys
 import threading
@@ -24,7 +21,11 @@ import time
 from ..errors import BridgeError
 from ..models import identifier
 from .managed import _managed_root, _names, _socket_address
+from .process_lifecycle import _pid_start, _same_process, _stop_record
 from .route import ProxyRoute
+from .stop_marker import (clear_stop_marker, read_stop_marker, sync_directory,
+                          write_stop_marker)
+from .supervisor_auth import authorized, create_auth, same_user_pid
 
 
 MAX_REQUEST = 4096
@@ -33,67 +34,21 @@ READY_SECONDS = 15
 
 
 def _binary():
-    configured = os.environ.get("AGENTBRIDGE_CLIPROXY_BIN")
-    candidates = ([configured] if configured else []) + [
-        str(Path(sys.executable).with_name("cliproxy")),
-        shutil.which("cliproxy"), shutil.which("cli-proxy-api")]
-    for candidate in candidates:
-        if candidate:
-            path = Path(candidate).expanduser().resolve()
-            if path.is_file() and os.access(path, os.X_OK):
-                return path
-    raise BridgeError("proxy_binary_unavailable",
-                      "Install CLIProxyAPI or set AGENTBRIDGE_CLIPROXY_BIN for this local AgentBridge environment.")
+    configured = os.environ.get('AGENTBRIDGE_CLIPROXY_BIN')
+    if not configured or not Path(configured).is_absolute():
+        raise BridgeError('proxy_binary_unavailable',
+                          'Set AGENTBRIDGE_CLIPROXY_BIN to an absolute CLIProxyAPI executable path.')
+    path = Path(configured).resolve()
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise BridgeError('proxy_binary_unavailable',
+                          'The configured CLIProxyAPI executable is unavailable.')
+    return path
 
 
 def _port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
-
-
-def _pid_start(pid):
-    try:
-        value = Path(f"/proc/{pid}/stat").read_text()
-        return value[value.rfind(")") + 2:].split()[19]
-    except (OSError, IndexError):
-        return None
-
-
-def _same_process(record, account_dir):
-    pid = record.get("pid")
-    if not isinstance(pid, int) or pid <= 1 or _pid_start(pid) != record.get("start"):
-        return False
-    try:
-        process = Path(f"/proc/{pid}")
-        if process.stat().st_uid != os.getuid() or (process / "cwd").resolve() != account_dir:
-            return False
-        arguments = (process / "cmdline").read_bytes().split(b"\0")
-        binary = Path(record["binary"]).resolve()
-        return any(Path(os.fsdecode(arg)).resolve() == binary for arg in arguments[:2] if arg)
-    except (OSError, KeyError, ValueError):
-        return False
-
-
-def _stop_record(record, account_dir):
-    if not _same_process(record, account_dir):
-        return
-    pid = record["pid"]
-    try:
-        if os.getpgid(pid) != pid:
-            return
-        os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    for _ in range(30):
-        if not _same_process(record, account_dir):
-            return
-        time.sleep(0.1)
-    if _same_process(record, account_dir):
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
 
 def _account_dir(directory, account_id):
@@ -227,6 +182,7 @@ def _proxy_environment():
 
 
 def _launch(binary, account_dir, account_id, port):
+    clear_stop_marker(account_dir)
     client_key = secrets.token_urlsafe(48)
     management_key = secrets.token_urlsafe(48)
     content = json.dumps(_proxy_config(port, account_dir / "auth", client_key,
@@ -260,7 +216,11 @@ def _launch(binary, account_dir, account_id, port):
     record = {"version": 1, "port": port, "pid": process.pid,
               "start": _pid_start(process.pid), "binary": str(binary),
               "lease_fd": lease_fd}
-    _write_record(account_dir, record)
+    try:
+        _write_record(account_dir, record)
+    except BaseException:
+        _stop_record(record, account_dir)
+        raise
     if not _ready(port, management_key, process):
         _stop_record(record, account_dir)
         raise BridgeError("managed_proxy_unavailable", "CLIProxyAPI did not become ready.")
@@ -273,6 +233,7 @@ class Supervisor:
         self.directory = _managed_root(Path(directory).parent)
         if self.directory != Path(directory).resolve():
             raise BridgeError("unsafe_store", "The managed proxy directory is invalid.")
+        self.auth_fd, self.auth_token = create_auth()
         self.lock = threading.RLock()
         self.running = {}
         self.stopping = threading.Event()
@@ -292,14 +253,23 @@ class Supervisor:
             account_dir = _account_dir(self.directory, account_id)
             record = _read_record(account_dir)
             if action == "retire":
-                active = self.running.pop(account_id, None)
+                active = self.running.get(account_id)
+                if active is None and record is None:
+                    if not read_stop_marker(account_dir, account_id):
+                        raise BridgeError('managed_proxy_stop_unverified',
+                                          'The managed proxy route is unavailable for stop verification.')
+                    return {"retired": True, "upstream_credential_removed": False}
                 if active:
                     _stop_record(active["record"], account_dir)
                     if active["process"] is not None:
                         active["process"].poll()
                 elif record:
                     _stop_record(record, account_dir)
+                write_stop_marker(account_dir, account_id,
+                                  active['record'] if active else record)
+                self.running.pop(account_id, None)
                 (account_dir / "route.json").unlink(missing_ok=True)
+                sync_directory(account_dir)
                 return {"retired": True, "upstream_credential_removed": False}
             if action not in {"provision", "ensure"}:
                 raise BridgeError("invalid_request", "Unknown managed proxy operation.")
@@ -337,23 +307,26 @@ class Supervisor:
 def _serve_connection(connection, supervisor):
     with connection:
         try:
-            credentials = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
-            _, peer_uid, _ = struct.unpack("3i", credentials)
-            if peer_uid != os.getuid():
-                return
+            same_user_pid(connection)
             connection.settimeout(45)
             with connection.makefile("rb") as stream:
                 line = stream.readline(MAX_REQUEST + 1)
             if not line or len(line) > MAX_REQUEST or not line.endswith(b"\n"):
                 raise BridgeError("invalid_request", "The managed proxy request is invalid.")
             request = json.loads(line)
-            if (not isinstance(request, dict) or
-                    set(request) not in ({"action", "account_id"},
-                                         {"action", "account_id", "base_url"})):
+            if request == {"action": "auth_info"}:
+                response = {"ok": True, "result": {"auth_fd": supervisor.auth_fd}}
+            elif (not isinstance(request, dict) or
+                    set(request) not in ({"action", "account_id", "auth"},
+                                         {"action", "account_id", "base_url", "auth"})):
                 raise BridgeError("invalid_request", "The managed proxy request is invalid.")
-            result = supervisor.route(request["action"], request["account_id"],
-                                      request.get("base_url"))
-            response = {"ok": True, "result": result}
+            else:
+                if not authorized(request['auth'], supervisor.auth_token):
+                    raise BridgeError('managed_proxy_auth_required',
+                                      'The local supervisor authority is unavailable.')
+                result = supervisor.route(request["action"], request["account_id"],
+                                          request.get("base_url"))
+                response = {"ok": True, "result": result}
         except BridgeError as error:
             response = {"ok": False, "error": {"code": error.code, "message": str(error)}}
         except (OSError, TypeError, ValueError, KeyError):
@@ -408,6 +381,7 @@ def main(argv=None):
                     path.unlink(missing_ok=True)
     finally:
         os.close(descriptor)
+        os.close(supervisor.auth_fd)
 
 
 if __name__ == "__main__":

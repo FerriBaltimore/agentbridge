@@ -100,18 +100,55 @@ def test_native_sandbox_requires_landlock_and_private_paths(monkeypatch, tmp_pat
 def test_inputs_only_rejects_an_ambient_workspace(tmp_path):
     from agentbridge.native_sandbox import restrict
 
-    home, temporary, cwd = (tmp_path / name for name in ('home', 'tmp', 'cwd'))
+    home = tmp_path / 'state/codex-runtime/instance'
+    temporary, cwd = (tmp_path / name for name in ('tmp', 'cwd'))
     for path in (home, temporary, cwd):
-        path.mkdir()
+        path.mkdir(parents=True)
     (cwd / 'another-input').write_text('not selected')
     with pytest.raises(ValueError, match='must be empty'):
         restrict(cwd=cwd, home=home, temporary=temporary,
                  executable=str(Path(shutil.which('python3')).resolve()))
 
 
+@pytest.mark.skipif(not available(), reason='Landlock unavailable')
+def test_native_sandbox_rejects_a_workspace_inside_private_state(tmp_path):
+    from agentbridge.native_sandbox import restrict
+
+    home = tmp_path / 'state/codex-runtime/instance'
+    temporary = tmp_path / 'native-tmp'
+    private_workspace = tmp_path / 'state/managed-proxies'
+    for path in (home, temporary, private_workspace):
+        path.mkdir(parents=True)
+    with pytest.raises(ValueError, match='private worker state'):
+        restrict(cwd=private_workspace, home=home, temporary=temporary,
+                 executable=str(Path('/usr/bin/python3').resolve()), inputs_only=False)
+
+
+@pytest.mark.skipif(not available(), reason='Landlock unavailable')
+def test_native_launcher_rejects_codex_executable_inside_workspace(tmp_path):
+    workspace = tmp_path / 'workspace'
+    home = tmp_path / 'state/codex-runtime/instance'
+    temporary = tmp_path / 'native-tmp'
+    for path in (workspace, home, temporary):
+        path.mkdir(parents=True)
+    fake = workspace / 'codex'
+    fake.write_text('#!/bin/sh\necho workspace-executable-ran\n')
+    fake.chmod(0o700)
+    environment = {**os.environ, 'PATH': f'{workspace}:/usr/bin',
+                   'CODEX_HOME': str(home), 'HOME': str(home),
+                   'TMPDIR': str(temporary), 'PYTHONPATH': str(ROOT / 'src')}
+    result = subprocess.run(
+        ['/usr/bin/python3', '-P', '-m', 'agentbridge.native_sandbox',
+         '--normal', '--', 'codex'], cwd=workspace, env=environment,
+        capture_output=True, text=True, timeout=5)
+    assert result.returncode == 1
+    assert 'workspace-executable-ran' not in result.stdout
+
+
+@pytest.mark.parametrize('inputs_only', (True, False))
 @pytest.mark.skipif(not available() or not Path('/usr/bin/bwrap').exists(),
                     reason='The production Linux isolation profile is unavailable')
-def test_real_codex_starts_in_isolation_without_credentials(tmp_path):
+def test_real_codex_starts_in_isolation_without_credentials(tmp_path, inputs_only):
     """Optional offline acceptance: set a reviewed standalone Codex executable path."""
     selected = os.environ.get('AGENTBRIDGE_CODEX_ACCEPTANCE_BIN')
     if not selected:
@@ -121,10 +158,13 @@ def test_real_codex_starts_in_isolation_without_credentials(tmp_path):
     tmp_path.chmod(0o755)
     for path in ('state/codex-runtime/evaluation', 'home', 'tmp/private', 'cwd'):
         _directory(tmp_path / path)
+    if not inputs_only:
+        (tmp_path / 'cwd' / 'selected.txt').write_text('selected input')
+    mode = ['--inputs-only' if inputs_only else '--normal', '--']
     args = _bwrap_args(tmp_path) + [
         '--ro-bind', str(binary), '/opt/provider/codex',
         '--chdir', '/workspace/isolated', '--', '/usr/bin/python3', '-P', '-m',
-        'agentbridge.native_sandbox', '/opt/provider/codex', 'app-server', '--stdio',
+        'agentbridge.native_sandbox', *mode, '/opt/provider/codex', 'app-server', '--stdio',
     ]
     requests = [
         {'id': 1, 'method': 'initialize', 'params': {
@@ -136,7 +176,7 @@ def test_real_codex_starts_in_isolation_without_credentials(tmp_path):
             'cwd': '/workspace/isolated', 'approvalPolicy': 'never',
             'sandbox': 'read-only', 'ephemeral': True,
             'config': codex_config(selected_context=True,
-                                   execution_mode='evaluation_inputs_only')}},
+                execution_mode='evaluation_inputs_only' if inputs_only else 'normal')}},
     ]
     process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, env={})

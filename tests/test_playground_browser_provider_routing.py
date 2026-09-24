@@ -20,8 +20,9 @@ MODEL = 'fixture/shared-model'
 @pytest.fixture
 def shared_model_playground(tmp_path, monkeypatch):
     command = tmp_path / 'fixture-codex'
-    capture = tmp_path / 'calls.jsonl'
-    _fake_codex(command, capture)
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    _fake_codex(command)
     descriptions = (
         ('codex', 'OpenAI Route', 131072, 'high', 'LAB_SHARED_OPENAI'),
         ('claude', 'Claude Route', 65536, 'low', 'LAB_SHARED_CLAUDE'),
@@ -49,7 +50,7 @@ def shared_model_playground(tmp_path, monkeypatch):
             seed_authenticated_proxy_account(bridge.store, account, observe_local=True)
         assert len(bridge.models(refresh=True)['models']) == 1
         server = create_server(tmp_path / 'state', port=0, bridge=bridge,
-                               workspace_path=tmp_path)
+                               workspace_path=workspace)
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:

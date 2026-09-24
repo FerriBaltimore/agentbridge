@@ -15,16 +15,19 @@ from .routing.binding import ProxyBindingStoreMixin
 from .routing.schema import migrate_v4, migrate_v5
 from .evaluation.schema import migrate_v6
 from .evaluation.persistence import EvaluationStoreMixin
+from .account_retirement import AccountRetirementStoreMixin, migrate_v7
 
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-class Store(EvaluationStoreMixin, ProxyBindingStoreMixin, RoutingStoreMixin, AuthStoreMixin):
+class Store(AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
+            RoutingStoreMixin, AuthStoreMixin):
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.root, 0o700)
         self.path = self.root / "bridge.sqlite3"
         if self.path.is_symlink():
             raise BridgeError("unsafe_store", "Database cannot be a symbolic link.")
@@ -58,6 +61,8 @@ class Store(EvaluationStoreMixin, ProxyBindingStoreMixin, RoutingStoreMixin, Aut
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL,
                     at REAL NOT NULL, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS run_route_exclusions(
+                    run_id TEXT PRIMARY KEY, refs TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS event_run ON events(run_id,seq);
                 CREATE INDEX IF NOT EXISTS event_session ON events(session_id,seq);
                 CREATE TABLE IF NOT EXISTS account_observations(
@@ -135,7 +140,8 @@ class Store(EvaluationStoreMixin, ProxyBindingStoreMixin, RoutingStoreMixin, Aut
             version = migrate_v4(db, version)
             version = migrate_v5(db, version)
             version = migrate_v6(db, version)
-            if version != 6:
+            version = migrate_v7(db, version)
+            if version != 7:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)
@@ -243,40 +249,6 @@ class Store(EvaluationStoreMixin, ProxyBindingStoreMixin, RoutingStoreMixin, Aut
         """Native-home promotion is historical and cannot create a v2 route."""
         raise BridgeError('authentication_required', 'Reauthenticate through the proxy login flow.')
 
-    def retired_account_ids(self):
-        with self.connect() as db:
-            return {row['account_id'] for row in db.execute('SELECT account_id FROM retired_accounts')}
-
-    def retire_account(self, account_id):
-        """Retire one local route while preserving all historical run evidence."""
-        with self.connect() as db:
-            db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT config FROM accounts WHERE id=?', (account_id,)).fetchone()
-            if row is None:
-                raise BridgeError('account_not_found', 'No account matches that reference.')
-            account = json.loads(row['config'])
-            reference = account.get('name') or account_id
-            existing = db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
-                                  (account_id,)).fetchone()
-            if existing is None:
-                active = db.execute("SELECT 1 FROM runs WHERE account_id=? AND state IN "
-                                    "('starting','running','stopping')", (account_id,)).fetchone()
-                if active:
-                    raise BusyError()
-                pending = db.execute("SELECT 1 FROM auth_attempts WHERE account_id=? AND status NOT IN "
-                    "('failed','cancelled','expired','revoked','replaced','bound','usable')",
-                    (account_id,)).fetchone()
-                if pending:
-                    raise BridgeError('authentication_in_progress',
-                                      'Cancel or complete the pending login before removing this account.')
-                db.execute('INSERT INTO retired_accounts(account_id,retired_at) VALUES (?,?)',
-                           (account_id, time.time()))
-                db.execute('DELETE FROM proxy_bindings WHERE account_id=?', (account_id,))
-                db.execute('DELETE FROM auth_proxy_routes WHERE attempt_id IN '
-                           '(SELECT id FROM auth_attempts WHERE account_id=?)', (account_id,))
-        return {'account_ref': reference, 'removed': True,
-                'upstream_credential_removed': False}
-
     def update_session(self, id, *, expected_version=None, **values):
         allowed = {'model', 'native_id', 'context', 'state'}
         if not values or not values.keys() <= allowed:
@@ -327,12 +299,18 @@ class Store(EvaluationStoreMixin, ProxyBindingStoreMixin, RoutingStoreMixin, Aut
         with self.connect() as db:
             return db.execute('SELECT count(*) FROM runs WHERE session_id=?', (session_id,)).fetchone()[0]
 
-    def replay(self, session_id, prompt, options, key):
+    def replay(self, session_id, prompt, options, key, *, excluded_account_refs=()):
         """Return an exact prior request without requiring credentials again."""
         if not key:
             return None
         with self.connect() as db:
             row = db.execute('SELECT * FROM runs WHERE request_key=?', (key,)).fetchone()
+            if row is not None:
+                marker = db.execute('SELECT refs FROM run_route_exclusions WHERE run_id=?',
+                                    (row['id'],)).fetchone()
+                if (marker['refs'] if marker else '[]') != dumps(list(excluded_account_refs)):
+                    raise BridgeError('idempotency_conflict',
+                                      'Request key already belongs to different input.')
         if row and (row['session_id'], row['prompt'], dumps(asdict(RunOptions(**json.loads(row['options']))))) == (session_id, prompt, dumps(asdict(options))):
             return row['id']
         return None  # Admission still validates mismatches after secret redaction.

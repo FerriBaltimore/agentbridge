@@ -13,7 +13,11 @@ def account_command(bridge, args):
     if command == "list":
         return [account_dict(account) for account in bridge.accounts()]
     if command == "delete":
-        return bridge.account_delete(args.name)
+        if (args.name is None) == (args.account_id is None):
+            raise BridgeError('invalid_request',
+                              'Provide either an account reference or --account-id.')
+        return (bridge.account_delete(account_id=args.account_id) if args.account_id
+                else bridge.account_delete(args.name))
     if command in {"status", "usage", "history", "check"}:
         account = bridge.resolve_account(args.name)
         args.account_name, args.id = account.name, account.id

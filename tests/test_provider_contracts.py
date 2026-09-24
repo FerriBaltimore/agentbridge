@@ -17,7 +17,7 @@ from test_proxy_binding import management
 
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
-    bridge = Bridge(tmp_path / 'state')
+    bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
     register_verified_proxy_account(bridge.store, 'a', 8317, provider='codex')
     monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.153.0')
     return ContractRegistry(bridge.store), bridge
@@ -197,7 +197,7 @@ def test_project_cannot_shadow_internal_worker_import(tmp_path, monkeypatch):
     monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'fixture-only-management-key')
     with management('fixture-private-account', 'fixture-private-index') as (port, _):
         bridge = Bridge(tmp_path / 'state')
-        seed_authenticated_proxy_account(bridge.store, Account('fixture', 'codex', command=(sys.executable, str(fixture)),
+        seed_authenticated_proxy_account(bridge.store, Account('fixture', 'codex', command=('/usr/bin/python3', '-c', fixture.read_text()),
             provider='codex', supported_models=('gpt-5',),
             proxy_base_url=f'http://127.0.0.1:{port}/v1', key_env='FIXTURE_PROXY_KEY',
             management_key_env='FIXTURE_MANAGEMENT_KEY'), observe_local=True)

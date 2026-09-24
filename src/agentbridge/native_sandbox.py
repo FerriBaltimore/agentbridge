@@ -13,6 +13,9 @@ import shutil
 import struct
 import sys
 
+from .native_process_guard import restrict_process_inspection
+from .workspace_policy import overlaps_private_state, writable_runtime_in_workspace
+
 
 _CREATE_RULESET = 444
 _ADD_RULE = 445
@@ -78,21 +81,30 @@ def _rule(libc, ruleset_fd, path, access):
         os.close(path_fd)
 
 
-def restrict(*, cwd, home, temporary, executable):
-    """Apply a read allowlist and private writable homes before native exec."""
+def restrict(*, cwd, home, temporary, executable, inputs_only=True,
+             workspace_write=False, mcp_enabled=False):
+    """Allow only selected native paths and deny worker process inspection."""
     if not available():
         raise OSError('Required Landlock filesystem isolation is unavailable')
     cwd = _canonical(cwd)
     home = _canonical(home)
     temporary = _canonical(temporary)
     executable = _canonical(executable, directory=False)
-    if temporary == Path('/tmp') or home == Path('/state'):
-        raise ValueError('Inputs-only paths must be private')
-    if not home.is_relative_to(Path('/state/codex-runtime')) and Path('/state').exists():
+    if home.parent.name != 'codex-runtime' or home.name in ('', '.', '..'):
         raise ValueError('Codex state must be scoped to one instance')
-    if cwd in (Path('/'), Path('/state'), Path('/home'), Path('/tmp')):
-        raise ValueError('Inputs-only workspace is too broad')
-    if any(cwd.iterdir()):
+    state_root = home.parent.parent
+    if any(executable.is_relative_to(path)
+           for path in (cwd, state_root, temporary, home)):
+        raise ValueError('Native executable must be outside writable runtime paths')
+    if temporary == Path('/tmp'):
+        raise ValueError('Native temporary path must be private')
+    if overlaps_private_state(cwd, state_root):
+        raise ValueError('Workspace includes private worker state')
+    if workspace_write and writable_runtime_in_workspace(cwd):
+        raise ValueError('Writable workspace includes the AgentBridge runtime')
+    if inputs_only and workspace_write:
+        raise ValueError('Inputs-only workspace cannot be writable')
+    if inputs_only and any(cwd.iterdir()):
         raise ValueError('Inputs-only workspace must be empty')
     libc = _libc()
     attr = ctypes.create_string_buffer(struct.pack('=QQQ', _HANDLED, 0, 0))
@@ -105,34 +117,70 @@ def restrict(*, cwd, home, temporary, executable):
                 _rule(libc, ruleset_fd, system, _READ)
         for path in ('/etc/ssl/certs', '/etc/hosts', '/etc/resolv.conf',
                      '/etc/nsswitch.conf', '/etc/passwd', '/etc/group',
-                     '/dev/null', '/dev/urandom', '/dev/zero'):
+                     '/dev/urandom', '/dev/zero'):
             if Path(path).exists():
                 _rule(libc, ruleset_fd, path, _READ_FILE)
-        _rule(libc, ruleset_fd, cwd, _READ)
+        if Path('/dev/null').exists():
+            _rule(libc, ruleset_fd, '/dev/null', _READ_FILE | _WRITE_FILE)
+        _rule(libc, ruleset_fd, cwd, _READ | (_WRITE if workspace_write else 0))
         _rule(libc, ruleset_fd, executable, _EXECUTE | _READ_FILE)
         _rule(libc, ruleset_fd, home, _DATA | _WRITE)
         _rule(libc, ruleset_fd, temporary, _DATA | _WRITE)
+        if mcp_enabled:
+            source = _canonical(Path(__file__).resolve().parents[1])
+            if state_root.is_relative_to(source):
+                raise ValueError('MCP source includes private worker state')
+            _rule(libc, ruleset_fd, source, _READ)
         if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
             raise OSError(ctypes.get_errno(), 'No-new-privileges setup failed')
         if libc.syscall(_RESTRICT_SELF, ruleset_fd, 0) != 0:
             raise OSError(ctypes.get_errno(), 'Landlock enforcement failed')
+        restrict_process_inspection()
     finally:
         os.close(ruleset_fd)
 
 
+def wrap(command, *, inputs_only=False, workspace_write=False, mcp_enabled=False):
+    """Run Codex through this policy before either native transport starts."""
+    flags = ['--inputs-only' if inputs_only else '--normal']
+    if workspace_write:
+        flags.append('--write-workspace')
+    if mcp_enabled:
+        flags.append('--mcp')
+    return [sys.executable, '-P', '-m', 'agentbridge.native_sandbox',
+            *flags, '--', *command]
+
+
 def main():
-    if len(sys.argv) < 2:
+    arguments = sys.argv[1:]
+    if not arguments:
         raise SystemExit(2)
-    command = sys.argv[1:]
+    inputs_only = True
+    workspace_write = mcp_enabled = False
+    if arguments[0] in {'--inputs-only', '--normal'}:
+        inputs_only = arguments.pop(0) == '--inputs-only'
+        while arguments and arguments[0] != '--':
+            flag = arguments.pop(0)
+            if flag == '--write-workspace':
+                workspace_write = True
+            elif flag == '--mcp':
+                mcp_enabled = True
+            else:
+                raise SystemExit(2)
+        if not arguments or arguments.pop(0) != '--' or not arguments:
+            raise SystemExit(2)
+    command = arguments
     selected = shutil.which(command[0])
     if selected is None:
         raise SystemExit(1)
     executable = str(Path(selected).resolve(strict=True))
     try:
         restrict(cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
-                 temporary=os.environ['TMPDIR'], executable=executable)
+                 temporary=os.environ['TMPDIR'], executable=executable,
+                 inputs_only=inputs_only, workspace_write=workspace_write,
+                 mcp_enabled=mcp_enabled)
         os.execvpe(executable, command, os.environ)
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, RuntimeError):
         # Stderr belongs to the private native channel and is never persisted.
         raise SystemExit(1) from None
 

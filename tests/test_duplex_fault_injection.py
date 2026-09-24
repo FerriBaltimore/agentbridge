@@ -2,6 +2,7 @@
 import io
 import json
 import os
+from pathlib import Path
 import sqlite3
 import sys
 
@@ -14,6 +15,18 @@ from agentbridge.protocols import Parser
 from agentbridge.execution_outcome import finish
 
 
+def native_environment(tmp_path):
+    workspace = tmp_path / 'workspace'
+    home = tmp_path / 'state/codex-runtime/instance'
+    temporary = tmp_path / 'native-tmp'
+    for path in (workspace, home, temporary):
+        path.mkdir(parents=True)
+    environment = {**os.environ, 'CODEX_HOME': str(home), 'HOME': str(home),
+                   'TMPDIR': str(temporary),
+                   'PYTHONPATH': str(Path(__file__).resolve().parents[1] / 'src')}
+    return workspace, environment
+
+
 @pytest.mark.parametrize(('body', 'code'), [
     ('', 'provider_connection_lost'),
     ('{"type":"PRIVATE TRUNCATED BODY"', 'provider_protocol_error'),
@@ -22,7 +35,9 @@ from agentbridge.execution_outcome import finish
 ])
 def test_eof_and_corrupt_frames_are_unknown_execution(tmp_path, body, code):
     script = f'import sys; sys.stdout.write({body!r}); sys.stdout.flush()'
-    with ProviderChannel([sys.executable, '-c', script], cwd=tmp_path, env=os.environ.copy()) as channel:
+    workspace, environment = native_environment(tmp_path)
+    with ProviderChannel(['/usr/bin/python3', '-c', script],
+                         cwd=workspace, env=environment) as channel:
         with pytest.raises(BridgeError) as failure:
             channel.receive(2)
     assert failure.value.code == code
@@ -34,8 +49,9 @@ def test_eof_and_corrupt_frames_are_unknown_execution(tmp_path, body, code):
 
 
 def test_native_receive_timeout_is_not_an_admission_failure(tmp_path):
-    with ProviderChannel([sys.executable, '-c', 'import time; time.sleep(30)'],
-                         cwd=tmp_path, env=os.environ.copy()) as channel:
+    workspace, environment = native_environment(tmp_path)
+    with ProviderChannel(['/usr/bin/python3', '-c', 'import time; time.sleep(30)'],
+                         cwd=workspace, env=environment) as channel:
         with pytest.raises(BridgeError) as failure:
             channel.receive(.02)
     assert failure.value.code == 'provider_timeout'
@@ -81,8 +97,10 @@ def test_permission_persistence_failure_closes_codex_channel_and_reports_unknown
     closed = []
     payload = {'root': str(tmp_path), 'secret_names': [], 'command': ['fixture'],
                'cwd': str(tmp_path), 'engine': 'codex', 'turn_id': 'fixture-turn',
-               'options': {'permission_mode': 'default', 'timeout': 1}}
+               'options': {'permission_mode': 'default', 'timeout': 1,
+                           'sandbox': 'read-only'}}
     monkeypatch.setattr(sys, 'stdin', io.StringIO(json.dumps(payload)))
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'state/codex-runtime/instance'))
     class Channel:
         def __init__(self, *_, **kwargs): pass
         def __enter__(self): return self

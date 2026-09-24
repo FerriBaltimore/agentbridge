@@ -68,7 +68,7 @@ def test_worker_learns_reviewed_cause_without_repeating_execution(tmp_path, monk
     native.write_text('import json\nprint(json.dumps(' + repr(event) + '),flush=True)\n')
     with management_server() as port:
         bridge = bridge_with_proxy(tmp_path, monkeypatch, port,
-                                   command=(sys.executable, str(native)))
+                                   command=('/usr/bin/python3', str(native)))
         session = bridge.session('fixture', tmp_path, model=MODEL)
         first = bridge.submit(session['id'], 'fixture', options=RunOptions(timeout=5))
         assert first.wait(10)['state'] == 'interrupted'
