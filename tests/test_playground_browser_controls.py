@@ -83,6 +83,50 @@ def _fill_login(page, *, name='Grok Lab'):
     page.get_by_test_id('login-name').fill(name)
 
 
+def test_codex_catalog_models_shape_exposes_chat_effort_and_context(local_playground):
+    """The browser consumes controls observed from CLIProxyAPI's Codex payload."""
+    local_playground['openai']['/v1/models?client_version=pi'] = (200, {'models': [
+        {'slug': 'fixture/openai-model', 'context_window': 131072,
+         'max_context_window': 262144,
+         'supported_reasoning_levels': [{'effort': 'low'}, {'effort': 'high'}],
+         'default_reasoning_level': 'high'},
+    ]}, {})
+    catalog = local_playground['bridge'].models(account_ref='OpenAI Personal', refresh=True)
+    assert catalog['items'][0]['reasoning_efforts'] == ['low', 'high']
+    assert catalog['items'][0]['context_windows'] == [262144]
+    assert catalog['items'][0]['account_capabilities'][0]['metadata_source'] == 'cliproxy_client_models'
+
+    with playwright_api.sync_playwright() as playwright:
+        browser = _launch_browser(playwright)
+        try:
+            page, errors = _page(browser, local_playground['url'])
+            page.get_by_test_id('nav-chat').click()
+            page.get_by_test_id('chat-provider').select_option('codex')
+            page.get_by_test_id('chat-model').select_option('fixture/openai-model')
+            effort = page.get_by_test_id('chat-effort')
+            effort.wait_for(state='visible')
+            assert effort.locator('option').all_text_contents() == ['Default', 'low', 'high']
+            effort.select_option('high')
+            context = page.get_by_test_id('chat-context')
+            context.wait_for(state='visible')
+            assert context.get_attribute('max') == '262144'
+            page.get_by_test_id('chat-input').fill('Test observed Codex controls')
+            context.fill('262145')
+            playwright_api.expect(page.get_by_test_id('chat-send')).to_be_disabled()
+            context.fill('262144')
+            playwright_api.expect(page.get_by_test_id('chat-send')).to_be_enabled()
+            page.get_by_test_id('chat-send').click()
+            page.get_by_test_id('chat-messages').get_by_text('Browser fixture answer').wait_for(
+                timeout=15000)
+            calls = [json.loads(line) for line in local_playground['capture'].read_text().splitlines()]
+            assert len(calls) == 1
+            assert 'model_context_window=262144' in calls[0]['argv']
+            assert 'model_reasoning_effort="high"' in calls[0]['argv']
+            assert errors == []
+        finally:
+            browser.close()
+
+
 def test_oauth_validation_pending_reopen_and_confirmed_cancel(controlled_playground):
     with playwright_api.sync_playwright() as playwright:
         browser = _launch_browser(playwright)
@@ -176,6 +220,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
             assert page.locator('#view-chat h1').inner_text() == 'Chat'
             page.get_by_test_id('chat-provider').select_option('codex')
             page.get_by_test_id('chat-model').select_option('fixture/openai-model')
+            page.locator('#route-settings summary').click()
             route = page.get_by_test_id('chat-account')
             assert route.locator('option').count() == 2
             route.select_option('OpenAI Personal')
@@ -194,7 +239,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
             assert page.get_by_test_id('activity-list').locator('.event-item').count() > 0
             page.locator('#activity-refresh').click()
             page.get_by_test_id('nav-accounts').click()
-            row = page.get_by_test_id('accounts-list').locator('.account-card').filter(
+            row = page.get_by_test_id('accounts-list').get_by_test_id('account-row').filter(
                 has_text='Claude Research')
             row.get_by_test_id('remove-account').click()
             page.locator('#remove-cancel').click()
@@ -211,6 +256,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
             assert 'fixture/openai-model' not in page.get_by_test_id('chat-model').locator(
                 'option').all_text_contents()
             page.get_by_test_id('chat-model').select_option('fixture/claude-model')
+            page.locator('#route-settings summary').click()
             route.select_option('Claude Research')
             page.get_by_test_id('chat-input').fill('Pinned Claude request')
             page.get_by_test_id('chat-send').click()

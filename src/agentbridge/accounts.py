@@ -35,6 +35,18 @@ class AccountService:
     def resolve(self, reference, *, include_retired=False):
         """Resolve only references that identify one eligible account."""
         retired = self.store.retired_account_ids()
+        if isinstance(reference, str) and reference.startswith('id:'):
+            try:
+                account = self.get(reference[3:])
+            except BridgeError as error:
+                if error.code in ('invalid_id', 'not_found'):
+                    raise BridgeError('account_not_found',
+                                      'No account matches that reference.') from None
+                raise
+            else:
+                if account.id not in retired or include_retired:
+                    return account
+                raise BridgeError('account_not_found', 'No account matches that reference.')
         active_matches = {}
         retired_matches = {}
         try:
@@ -81,6 +93,21 @@ class AccountService:
         if retired_matches:
             return next(iter(retired_matches.values()))
         raise BridgeError('account_not_found', 'No account matches that reference.')
+
+    def reference(self, account_id):
+        """Give colliding names a stable, explicitly typed account reference."""
+        account = self.get(account_id)
+        candidate = account.name or account.id
+        if candidate.startswith('id:'):
+            return f'id:{account.id}'
+        key = account_name_key(candidate)
+        for other in self.list():
+            if other.id == account.id:
+                continue
+            if (other.id == candidate or other.name
+                    and account_name_key(other.name) == key):
+                return f'id:{account.id}'
+        return candidate
 
     def list(self, *, engine=None, authentication=None, limit=None, cursor=0):
         limit, cursor = page_values(limit, cursor, allow_none=True)

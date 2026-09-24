@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import secrets
+import socket
 import sys
 
 import pytest
@@ -15,6 +16,8 @@ ADAPTER = Path(__file__).parent / 'fixtures' / 'test_grantbridge_adapter.py'
 
 
 def test_proxy_oauth_transport_reconnects_without_persisting_management_key(tmp_path, monkeypatch):
+    monkeypatch.setattr('agentbridge.grantbridge.ensure_callback_port_available',
+                        lambda provider: None)
     secret = secrets.token_hex(24)
     monkeypatch.setenv('LAB_MANAGEMENT_KEY', secret)
     data_dir = tmp_path / 'adapter'
@@ -44,3 +47,19 @@ def test_proxy_transport_rejects_missing_management_key_before_launch(tmp_path, 
         assert client.process is None
     assert error.value.code == 'credential_unavailable'
     assert not data_dir.exists()
+
+
+def test_busy_callback_port_rejects_start_before_adapter_launch(tmp_path, monkeypatch):
+    monkeypatch.setenv('LAB_MANAGEMENT_KEY', secrets.token_hex(24))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(('127.0.0.1', 0))
+        port = listener.getsockname()[1]
+        monkeypatch.setattr('agentbridge.auth_callback._DESTINATIONS',
+                            {'codex': (port, '/auth/callback')})
+        with GrantBridgeClient(adapter=ADAPTER, node=sys.executable,
+                               data_dir=tmp_path / 'adapter') as client:
+            with pytest.raises(BridgeError) as error:
+                client.proxy_start('codex', 'http://127.0.0.1:8317/v1', 'LAB_MANAGEMENT_KEY')
+            assert error.value.code == 'oauth_callback_port_busy'
+            assert client.process is None
+    assert not (tmp_path / 'adapter').exists()

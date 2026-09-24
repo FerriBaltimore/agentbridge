@@ -1,0 +1,39 @@
+/* Keep dashboard controls in view while bounded content changes pages. */
+#view-accounts, #view-activity { display: flex; flex-direction: column; }
+#view-accounts .view-actions { flex: none; margin-bottom: 9px; }
+#accounts-summary { flex: none; margin-bottom: 9px; }
+#accounts-list { --account-header-height: 44px; --account-row-height: 92px; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+#accounts-removal-note { flex: none; margin-top: 9px; padding: 9px 12px; }
+.list-pager { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 7px; min-height: 35px; color: #75839a; font-size: 10px; font-weight: 700; }
+.list-pager span { margin-right: 3px; }
+.list-pager .button { min-height: 27px; padding: 5px 9px; border-radius: 7px; font-size: 10px; }
+#view-activity .activity-surface { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+#view-activity .section-heading { flex: none; margin-bottom: 12px; }
+#view-activity .event-list-large { flex: 1; min-height: 0; overflow: auto; }
+
+@media (max-width: 700px) {
+  #accounts-list { --account-header-height: 16px; --account-row-height: 151px; overflow-x: hidden; }
+  .account-table { width: 100%; min-width: 0; display: block; }
+  .account-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .account-table tbody { display: grid; gap: 7px; padding: 7px; }
+  .account-table-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 6px 8px; min-height: 136px; padding: 9px; border: 1px solid #e7ecf3; border-radius: 10px; }
+  .account-table-row > th, .account-table-row > td { display: block; min-width: 0; width: auto; padding: 0; border: 0; }
+  .account-table-identity { grid-column: 1; grid-row: 1; }
+  .account-table-status { grid-column: 2; grid-row: 1; align-self: start; }
+  .account-table-usage-cell { grid-column: 1; grid-row: 2; }
+  .account-table-usage .usage-track { margin: 4px 0 2px; }
+  .account-table-usage .usage-detail { display: none; }
+  .account-table-models { grid-column: 2; grid-row: 2; align-self: center; }
+  .account-table-provider { grid-column: 1; grid-row: 3; align-self: center; font-size: 10px; }
+  .account-table-actions { grid-column: 2; grid-row: 3; }
+  .account-models-button { min-height: 27px; padding: 5px 7px; }
+  .account-avatar { width: 29px; height: 29px; font-size: 12px; }
+  .account-name { font-size: 11px; }
+  .account-email { font-size: 9px; }
+  #accounts-summary { font-size: 10px; line-height: 1.3; }
+  #accounts-removal-note { padding: 7px 10px; }
+  #accounts-removal-note p { font-size: 9px; line-height: 1.3; }
+  #view-activity .activity-surface { padding: 13px; }
+  #view-activity .section-heading h2 { font-size: 15px; }
+  #view-activity .section-heading p { font-size: 10px; }
+}

@@ -31,7 +31,10 @@ Authentication orchestration also uses `authentication_attempt_not_found`,
 `authentication_owner_required`, `authentication_attempt_not_ready`,
 `authentication_not_verified`, `authentication_in_progress`,
 `authentication_outcome_unknown`, `activation_unsupported` and
-`login_timeout`. Proxy onboarding and routing additionally use
+`login_timeout`. A browser OAuth start may return
+`oauth_callback_port_busy` or `oauth_callback_unavailable` before dispatch
+when the local callback listener cannot be opened. Proxy onboarding and
+routing additionally use
 `account_migration_required`, `proxy_binding_unverified`,
 `proxy_binding_changed`, `proxy_endpoint_shared`, `model_required` and
 `context_stale`. Account retirement may return

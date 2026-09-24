@@ -10,6 +10,7 @@ where the implementation declares support.
     accounts.list(authentication?, limit?, cursor?)
     accounts.status(account_ref?, account_id?, refresh?)
     accounts.delete(account_ref?, account_id?)
+    accounts.login.list(provider?, limit?, cursor?)
     accounts.login.start(provider, name, request_key?, owner_ref?, email?,
                          mode?, browser?, proxy_base_url?, key_env?,
                          management_key_env?)
@@ -46,6 +47,16 @@ proxy. The callback URL contains an OAuth code and must never be stored or
 logged by the host. This browser relay has deterministic fixture coverage;
 live provider acceptance remains pending.
 
+`accounts.login.list` returns at most 100 interrupted attempts from the same
+private local state, newest first. Each sanitized row contains the provider,
+account name, status, creation time, safe error code, `attempt_id` and
+`owner_ref`. This lets a trusted local host recover an attempt whose start
+response was lost. The host must show it to the user and request an explicit
+`accounts.login.cancel` to abandon it; listing never cancels or retries OAuth.
+The method does not return authorization URLs, credentials or provider error
+bodies. An uncertain start error also carries its attempt ownership references
+in `error.data.details` when the response reaches the host.
+
 After binding, `accounts.login.status` and the `attempt` object returned by
 `accounts.login.complete` include the stable, non-secret `account_id` from that
 login attempt. This ID remains tied to the original account if its human name
@@ -56,9 +67,17 @@ database. The supervisor generates client and management key values and
 delivers them over private local channels during login and execution.
 
 `accounts.delete` requires exactly one of `account_ref` or `account_id`.
-`account_ref` selects a unique active account by its human name, including
-when a retired account had the same name or internal ID. A reference matching
-different active accounts by name and internal ID is ambiguous and rejected.
+Account names are unique within each provider after trimming and case folding.
+Codex and Claude accounts may share the same human name. Login start and
+completion enforce that provider-scoped claim in database transactions; a
+login for the same saved account can reauthenticate it. `account_ref` selects a
+unique active account by its human name, including when a retired account had
+the same name or internal ID. When active accounts share a name, public account,
+model and turn results use a stable `id:<account_id>` reference for each one.
+An unqualified shared name, or a name matching another active account's ID, is
+ambiguous and rejected. The typed reference resolves that exact account.
+Python callers can obtain the same reference with
+`Bridge.account_reference(account_id)`.
 `account_id` selects the exact account for an explicit retry of a retired
 account. The delete acknowledgement includes that stable `account_id`.
 `accounts.status(account_id=...)` observes that exact account; a name shared by

@@ -153,6 +153,7 @@ def test_reopen_running_turn_then_stop_without_retry_or_account_change(local_pla
             page.get_by_test_id('nav-chat').click()
             page.get_by_test_id('chat-provider').select_option('codex')
             page.get_by_test_id('chat-model').select_option(MODEL)
+            page.locator('#route-settings summary').click()
             page.get_by_test_id('chat-account').select_option('Fixture Primary')
             page.get_by_test_id('chat-input').fill('Wait so I can stop this turn')
             page.get_by_test_id('chat-send').click()
@@ -190,6 +191,7 @@ def test_browser_permission_response_reaches_sdk(local_playground, decision, exp
             page.get_by_test_id('nav-chat').click()
             page.get_by_test_id('chat-provider').select_option('codex')
             page.get_by_test_id('chat-model').select_option(MODEL)
+            page.locator('#route-settings summary').click()
             page.get_by_test_id('chat-account').select_option('Fixture Primary')
             permission = page.get_by_test_id('chat-permission')
             assert permission.locator('option').evaluate_all(

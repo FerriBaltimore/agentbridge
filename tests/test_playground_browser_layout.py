@@ -1,6 +1,7 @@
 """Check playground layout and uncertain data states in a real browser."""
 
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from threading import Thread
 
 import pytest
@@ -115,7 +116,7 @@ def test_responsive_views_dialogs_and_keyboard_navigation(local_playground):
             for width, height in [(1440, 1000), (390, 844), (320, 700)]:
                 page.set_viewport_size({'width': width, 'height': height})
                 page.get_by_test_id('nav-overview').click()
-                page.get_by_role('heading', name='Available models').wait_for()
+                page.get_by_role('heading', name='Available routes').wait_for()
                 _assert_compact_view(page, 'overview', '.metric-grid')
                 assert page.get_by_test_id('add-account').is_hidden()
                 _assert_layout_fits(page)
@@ -155,7 +156,7 @@ def test_responsive_views_dialogs_and_keyboard_navigation(local_playground):
                 page.keyboard.press('Escape')
                 dialog.wait_for(state='hidden')
 
-                row = page.get_by_test_id('accounts-list').locator('.account-card').filter(
+                row = page.get_by_test_id('accounts-list').get_by_test_id('account-row').filter(
                     has_text='OpenAI Personal')
                 row.get_by_test_id('remove-account').click()
                 removal = page.get_by_test_id('remove-dialog')
@@ -180,9 +181,9 @@ def test_empty_workspace_has_honest_states_and_no_overflow(empty_playground):
         try:
             page, errors = _observed_page(browser, empty_playground)
             page.locator('#metric-accounts').get_by_text('0').wait_for()
-            page.locator('#overview-models').get_by_text('No models yet').wait_for()
-            page.locator('#overview-usage').get_by_text('No account observations').wait_for()
-            assert page.locator('#overview-models').get_by_role('button').count() == 0
+            page.locator('#overview-capacity-list').get_by_text('No account capacity yet').wait_for()
+            page.locator('#metric-ready').get_by_text('0').wait_for()
+            page.locator('#metric-fresh').get_by_text('0').wait_for()
             assert page.locator('#overview-open-chat').is_hidden()
             assert page.locator('#overview-manage-accounts').inner_text() == 'Connect an account'
             page.locator('#overview-manage-accounts').click()
@@ -219,15 +220,18 @@ def test_unknown_usage_and_missing_model_metadata_stay_unknown(unknown_playgroun
         try:
             page, errors = _observed_page(browser, unknown_playground)
             page.get_by_test_id('nav-overview').click()
-            page.locator('#overview-usage').get_by_text('Unknown usage').wait_for()
+            page.locator('#overview-capacity-list').get_by_text('Unknown usage').wait_for()
             page.get_by_test_id('nav-accounts').click()
-            card = page.get_by_test_id('accounts-list').locator('.account-card')
-            card.get_by_text('Unknown Signals').wait_for()
-            card.get_by_text('Unknown usage').wait_for()
-            card.locator('summary').click()
-            card.get_by_text('Usage unknown').wait_for()
-            assert card.get_by_text('Effort:', exact=False).count() == 0
-            assert card.get_by_text('Context:', exact=False).count() == 0
+            row = page.get_by_test_id('accounts-list').get_by_test_id('account-row')
+            row.get_by_text('Unknown Signals').wait_for()
+            row.get_by_text('Unknown usage').wait_for()
+            row.get_by_test_id('account-models-open').click()
+            dialog = page.get_by_test_id('account-models-dialog')
+            dialog.get_by_text('Usage unknown').wait_for()
+            assert dialog.get_by_text('Effort:', exact=False).count() == 0
+            assert dialog.get_by_text('Context:', exact=False).count() == 0
+            page.keyboard.press('Escape')
+            dialog.wait_for(state='hidden')
 
             page.get_by_test_id('nav-chat').click()
             page.get_by_test_id('chat-model').select_option('fixture/unknown-metadata')
@@ -237,6 +241,65 @@ def test_unknown_usage_and_missing_model_metadata_stay_unknown(unknown_playgroun
             assert page.locator('#chat-context').input_value() == ''
             page.set_viewport_size({'width': 320, 'height': 700})
             _assert_layout_fits(page)
+            assert errors == []
+        finally:
+            browser.close()
+
+
+def test_overview_capacity_paginates_to_available_height(local_playground):
+    with playwright_api.sync_playwright() as playwright:
+        browser = _launch_browser(playwright)
+        try:
+            page, errors = _observed_page(browser, local_playground['url'])
+            page.get_by_test_id('nav-overview').click()
+            page.set_viewport_size({'width': 1440, 'height': 900})
+            page.evaluate('''async () => {
+              const { renderOverview } = await import('/static/overview.js');
+              const accounts = Array.from({ length: 16 }, (_, index) => ({
+                account_ref: `fixture-capacity-${index + 1}`,
+                name: `Capacity ${String(index + 1).padStart(2, '0')}`,
+                provider: 'codex',
+              }));
+              renderOverview({ accounts, models: { items: [] }, instances: [],
+                statuses: new Map(), usage: new Map() });
+            }''')
+            rows = page.get_by_test_id('overview-capacity-row')
+            playwright_api.expect(rows.first).to_be_visible()
+            desktop_count = rows.count()
+            assert 1 < desktop_count < 16
+            pager = page.locator('#overview-page-controls')
+            assert pager.is_visible()
+            assert page.locator('#overview-page-status').inner_text().endswith('of 16 accounts')
+            page.locator('#overview-next-page').click()
+            assert rows.first.get_by_text('Capacity 01').count() == 0
+
+            page.set_viewport_size({'width': 320, 'height': 700})
+            page.wait_for_function('''desktopCount =>
+              document.querySelectorAll('[data-testid="overview-capacity-row"]').length < desktopCount''',
+                                   arg=desktop_count)
+            assert rows.count() < desktop_count
+            assert page.evaluate('document.documentElement.scrollHeight - innerHeight') <= 1
+            _assert_layout_fits(page)
+            assert errors == []
+        finally:
+            browser.close()
+
+
+def test_overview_does_not_count_stale_quota_as_fresh(local_playground):
+    entry = local_playground['openai']['/v0/management/auth-files'][1]['files'][0]
+    entry['quota']['observed_at'] = (
+        datetime.now(timezone.utc) - timedelta(hours=2)
+    ).isoformat().replace('+00:00', 'Z')
+    with playwright_api.sync_playwright() as playwright:
+        browser = _launch_browser(playwright)
+        try:
+            page, errors = _observed_page(browser, local_playground['url'])
+            page.get_by_test_id('nav-overview').click()
+            row = page.get_by_test_id('overview-capacity-row').filter(
+                has_text='OpenAI Personal')
+            row.get_by_text('Stale usage').wait_for()
+            assert row.get_by_text('58% used').count() == 0
+            page.locator('#metric-fresh').get_by_text('0').wait_for()
             assert errors == []
         finally:
             browser.close()

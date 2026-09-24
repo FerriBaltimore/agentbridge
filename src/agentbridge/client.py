@@ -60,6 +60,9 @@ class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, Di
     def resolve_account(self, reference):
         return self.account_service.resolve(reference)
 
+    def account_reference(self, account_id):
+        return self.account_service.reference(account_id)
+
     def account_status(self, reference=None, *, account_id=None, account_ref=None,
                        refresh=False):
         if account_id is not None:
@@ -131,6 +134,7 @@ class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, Di
         raise UnsupportedError('The local proxy does not expose Codex earned reset redemption.')
 
     def account_login(self, **options):return self.authentication.login(**options)
+    def account_login_attempts(self, **options):return self.authentication.attempts(**options)
     def account_login_start(self, **options):return self.authentication.start(**options)
     def account_login_check(self, attempt_id=None, **options):return self.authentication.check(attempt_id or options.pop('attempt_id'), **options)
     def account_login_complete(self, attempt_id=None, **options):return self.authentication.complete(attempt_id or options.pop('attempt_id'), **options)
@@ -152,7 +156,7 @@ class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, Di
         result['routing_mode'] = routing['mode']
         result['routing_provider'] = routing.get('provider') if routing['mode'] == 'automatic' else None
         account = self.account(result['account_id'])
-        result['account_ref'] = account.name or result['account_id']
+        result['account_ref'] = self.account_reference(account.id)
         result['workspace_path'] = result['cwd']
         result['native_session_id'] = result.get('native_id')
         result['created_at'] = result['created']
@@ -265,7 +269,7 @@ class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, Di
         value['message_id'] = value.get('message_id', value['id'])
         value['created_at'] = value['created']
         value['updated_at'] = value['updated']
-        value['account_ref'] = self.account(value['account_id']).name or value['account_id']
+        value['account_ref'] = self.account_reference(value['account_id'])
         from .turn_outcome import detail
         with self.store.connect() as db:
             issue = detail(db, turn_id, value['state'], value.get('error'))

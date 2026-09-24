@@ -1,6 +1,8 @@
 """Validate an OAuth redirect before transient GrantBridge delivery."""
 
+import errno
 from hmac import compare_digest
+import socket
 from urllib.parse import parse_qs, urlsplit
 
 from .errors import BridgeError
@@ -8,6 +10,28 @@ from .errors import BridgeError
 
 _DESTINATIONS = {'codex': (1455, '/auth/callback'),
                  'claude': (54545, '/callback')}
+
+
+def ensure_callback_port_available(provider):
+    """Catch a known local bind conflict before dispatching proxy OAuth."""
+    destination = _DESTINATIONS.get(provider)
+    if destination is None:
+        return
+    port = destination[0]
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            # CLIProxyAPI's browser forwarder binds 0.0.0.0 on this port.
+            listener.bind(('0.0.0.0', port))
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            raise BridgeError(
+                'oauth_callback_port_busy',
+                f'Local OAuth callback port {port} is in use. Close the application using it and start a new login.',
+            ) from None
+        raise BridgeError(
+            'oauth_callback_unavailable',
+            f'Local OAuth callback port {port} is unavailable. Check local networking before starting a new login.',
+        ) from None
 
 
 def validate_callback(provider, state, redirect_url):

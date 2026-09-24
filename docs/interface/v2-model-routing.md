@@ -23,7 +23,11 @@ second execution engine.
    sidecar's Management API. CLIProxyAPI stores and renews the upstream OAuth
    credential. AgentBridge keeps durable attempt state; GrantBridge returns
    sanitized authorization evidence without an OAuth token or provider error
-   body.
+   body. Codex and Claude browser login need local callback ports 1455 and
+   54545 respectively. AgentBridge checks that the port can bind before
+   dispatch; an occupied port returns `oauth_callback_port_busy` so the user
+   can free it and start a new login. A later bind race remains an unknown
+   outcome because the proxy may already have registered the OAuth session.
 4. `accounts.login.status` reports the attempt. `accounts.login.check` verifies
    one active upstream credential, its identity and the sidecar model catalogue.
    `accounts.login.complete` repeats the required checks and atomically creates
@@ -33,6 +37,9 @@ second execution engine.
    inspect the sidecar for a credential it may have saved, explicitly abandon
    the local attempt, and use a fresh dedicated sidecar endpoint for a retry.
    Local abandonment does not claim that remote OAuth was cancelled.
+   `accounts.login.list` exposes bounded, sanitized interrupted attempts in
+   the trusted local state so a host can offer explicit abandonment even when
+   the original start response was lost. The list does not retry OAuth.
 
 The CLI's blocking `accounts login` uses this same flow. The restart-safe form
 uses `accounts login-start`, then `login-status`, `login-check` and
@@ -59,12 +66,18 @@ Each item distinguishes configured candidate accounts from accounts freshly
 observed at the sidecar. A listed model is local route evidence, not proof of
 live provider entitlement. Missing metadata stays unknown.
 
-When the proxy client model API reports reasoning levels or a context-window
-maximum, `models.list` projects those controls per account. It intersects
-reasoning levels across observed accounts for automatic routing and uses the
-smallest reported context maximum. The playground derives its selectors from
-these SDK fields. A per-turn numeric context override becomes Codex's
-`model_context_window` setting; upstream acceptance still requires a live turn.
+AgentBridge reads each sidecar's `/v1/models?client_version=pi` client catalog.
+It accepts the Codex-style `models` array and a compatibility `data` array, then
+matches exact model IDs to the separately verified account inventory. Only
+allowlisted, bounded `supported_reasoning_levels` values become reasoning
+choices. For a context override, `max_context_window` is the reported ceiling;
+`context_window` is used when no valid maximum is reported. Missing or invalid
+fields stay unknown. `models.list` projects these controls per account,
+intersects efforts across observed accounts for automatic routing, and uses
+the smallest reported context ceiling. The playground derives its controls
+from those SDK fields. A per-turn numeric context override becomes Codex's
+`model_context_window` setting. This path is covered by proxy and browser
+fixtures; live provider acceptance of each effort or override remains unverified.
 
 `instances.create(model, workspace_path?, account_ref?, provider?, idempotency_key?)`
 selects an eligible proxy account when `account_ref` is omitted. `provider`

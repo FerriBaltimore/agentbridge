@@ -18,6 +18,7 @@ ERROR_CODES = frozenset(('invalid_request', 'invalid_params', 'invalid_provider'
     'authentication_interrupted', 'authentication_worker_failed', 'provider_protocol_error',
     'grantbridge_failed', 'grantbridge_timeout', 'invalid_proxy_endpoint',
     'proxy_unavailable', 'proxy_rejected', 'proxy_invalid_response',
+    'oauth_callback_port_busy', 'oauth_callback_unavailable',
     'authentication_outcome_unknown'))
 
 

@@ -159,8 +159,9 @@ class Parser:
                     # Completion of a spawn call does not prove completion of the spawned agent.
                     self.task(id,status or 'unknown',parent_id=item.get('sender_thread_id'),tool=item.get('tool'))
                 if not ids:self.event('gap',{'reason':'subagent_identity_unavailable'})
-            elif typ in {'context_compaction','contextCompaction'} and done:
-                self.event('compaction',{'observed':True})
+            elif typ in {'context_compaction','contextCompaction'}:
+                self.event('compaction' if done else 'compaction_started',
+                           {'observed': True})
             elif typ not in {'reasoning','agent_message'} and done:
                 self.event('gap',{'reason':'unsupported_item','native_type':typ})
         elif t=='error':

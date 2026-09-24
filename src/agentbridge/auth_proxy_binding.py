@@ -63,8 +63,11 @@ def bind_proxy_account(store, attempt, route_config, observation):
         for row in db.execute('''SELECT id,config FROM accounts WHERE id<>?
             AND id NOT IN (SELECT account_id FROM retired_accounts)''', (account.id,)):
             other = json.loads(row['config'])
-            if (other.get('name') and account_name_key(other['name']) == account_name_key(account.name)):
-                raise BridgeError('account_name_in_use', 'Account names must be unique.')
+            if ((other.get('provider') or other.get('engine')) == account.provider
+                    and other.get('name')
+                    and account_name_key(other['name']) == account_name_key(account.name)):
+                raise BridgeError('account_name_in_use',
+                                  'Account names must be unique within each provider.')
             if other.get('proxy_base_url') == account.proxy_base_url:
                 raise BridgeError('proxy_endpoint_shared', 'The proxy endpoint belongs to another account.')
         old_binding = db.execute('SELECT identity_fingerprint FROM proxy_bindings WHERE account_id=?',

@@ -4,6 +4,30 @@ import { renderChatHeader, renderConversations, renderEvents, renderMessages } f
 import { byId, describeError, toast } from './ui.js';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted', 'incomplete']);
+const LAST_INSTANCE_KEY = 'agentbridge.playground.last_instance_id';
+
+function lastViewedInstance() {
+  try { return localStorage.getItem(LAST_INSTANCE_KEY); } catch { return null; }
+}
+
+function rememberInstance(id) {
+  try { localStorage.setItem(LAST_INSTANCE_KEY, id); } catch { /* Storage is optional. */ }
+}
+
+function instanceTime(instance) {
+  const value = instance.updated_at || instance.updated || instance.created_at || instance.created;
+  if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
+  return Date.parse(value) || 0;
+}
+
+function retainTimelineEvents(rows) {
+  const latestDelta = new Map();
+  for (const event of rows) {
+    if (event.kind === 'message.delta') latestDelta.set(event.turn_id, event.seq);
+  }
+  return rows.filter((event) => event.kind !== 'message.delta'
+    || latestDelta.get(event.turn_id) === event.seq).slice(-2000);
+}
 
 function instanceId(instance) {
   return instance?.instance_id || instance?.id || null;
@@ -19,7 +43,18 @@ export function setupChat({ onDataChanged }) {
   const sendButton = byId('chat-send');
   const stopButton = byId('stop-turn');
   const newButton = byId('new-conversation');
+  const routeSettings = byId('route-settings');
   const catalog = setupChatCatalog(updateControls);
+  document.addEventListener('pointerdown', (event) => {
+    if (routeSettings.open && !routeSettings.contains(event.target)) routeSettings.open = false;
+  });
+  routeSettings.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && routeSettings.open) {
+      routeSettings.open = false;
+      routeSettings.querySelector('summary').focus();
+      event.stopPropagation();
+    }
+  });
   let instances = [];
   let current = null;
   let messages = [];
@@ -30,6 +65,7 @@ export function setupChat({ onDataChanged }) {
   let timer = null;
   let busy = false;
   let refreshPromise = null;
+  let restorePending = true;
 
   function stopPolling() {
     if (timer) clearTimeout(timer);
@@ -47,7 +83,7 @@ export function setupChat({ onDataChanged }) {
 
   function render() {
     renderConversations(instances, instanceId(current), activeTurn, selectConversation);
-    renderMessages(messages, activeTurn);
+    renderMessages(messages, events, activeTurn, answerPermission);
     renderEvents(events, current, answerPermission);
     updateControls();
   }
@@ -57,20 +93,25 @@ export function setupChat({ onDataChanged }) {
     if (refreshPromise) return refreshPromise;
     const id = instanceId(current);
     refreshPromise = (async () => {
-      const [messageRows, newEvents] = await Promise.all([
+      const [messageRows, firstEvents] = await Promise.all([
         api.messages(id), api.instanceEvents(id, eventCursor),
       ]);
       if (instanceId(current) !== id) return;
       messages = Array.isArray(messageRows) ? messageRows : [];
-      if (Array.isArray(newEvents)) {
+      let newEvents = firstEvents;
+      for (let page = 0; page < 10 && Array.isArray(newEvents); page += 1) {
+        let advanced = false;
         for (const event of newEvents) {
-          if (typeof event.seq === 'number' && event.seq > eventCursor) {
-            events.push(event);
-            eventCursor = event.seq;
-          }
+          if (typeof event.seq !== 'number' || event.seq <= eventCursor) continue;
+          events.push(event);
+          eventCursor = event.seq;
+          advanced = true;
         }
-        if (events.length > 2000) events = events.slice(-2000);
+        if (instanceId(current) !== id || !advanced || newEvents.length < 200) break;
+        newEvents = await api.instanceEvents(id, eventCursor);
       }
+      if (instanceId(current) !== id) return;
+      events = retainTimelineEvents(events);
       render();
     })();
     try { await refreshPromise; } finally { refreshPromise = null; }
@@ -85,16 +126,17 @@ export function setupChat({ onDataChanged }) {
       if (TERMINAL.has(turn.state)) {
         activeTurn = null;
         stopPolling();
+        await refreshConversation().catch((error) => toast(describeError(error), true));
         render();
         if (turn.state === 'completed') toast('Turn completed.');
         else toast(`Turn ended: ${turn.state}${turn.error ? ` (${turn.error})` : ''}.`, true);
         await onDataChanged();
       } else {
-        timer = setTimeout(pollTurn, 1500);
+        timer = setTimeout(pollTurn, 500);
       }
     } catch (error) {
       toast(describeError(error), true);
-      timer = setTimeout(pollTurn, 4000);
+      if (activeTurn) timer = setTimeout(pollTurn, 4000);
     }
   }
 
@@ -104,6 +146,8 @@ export function setupChat({ onDataChanged }) {
     updateControls();
     try {
       current = await api.instance(id);
+      restorePending = false;
+      rememberInstance(id);
       const lastTurn = current.last_turn;
       activeTurn = lastTurn && !TERMINAL.has(lastTurn.state)
         ? lastTurn.turn_id : null;
@@ -143,6 +187,7 @@ export function setupChat({ onDataChanged }) {
 
   function newConversation() {
     if (activeTurn || busy) return;
+    restorePending = false;
     stopPolling();
     current = null;
     messages = [];
@@ -163,6 +208,7 @@ export function setupChat({ onDataChanged }) {
       toast('Choose an available route and a valid context window.', true);
       return;
     }
+    routeSettings.open = false;
     const choice = catalog.selected();
     const route = choice.account
       ? { account: choice.account, model: choice.model }
@@ -184,6 +230,8 @@ export function setupChat({ onDataChanged }) {
         if (choice.account) values.account_ref = choice.account;
         else if (choice.provider) values.provider = choice.provider;
         current = await api.createInstance(values);
+        restorePending = false;
+        rememberInstance(instanceId(current));
         catalog.lock(current);
         instances = [current, ...instances.filter((item) => instanceId(item) !== instanceId(current))];
       } else {
@@ -209,7 +257,7 @@ export function setupChat({ onDataChanged }) {
       input.value = '';
       render();
       stopPolling();
-      timer = setTimeout(pollTurn, 800);
+      timer = setTimeout(pollTurn, 300);
       try {
         await refreshConversation();
         await onDataChanged();
@@ -267,6 +315,13 @@ export function setupChat({ onDataChanged }) {
     updateData({ models, accounts, capabilities, workspacePath, instanceRows }) {
       instances = Array.isArray(instanceRows) ? instanceRows : [];
       catalog.update({ models, accountRows: accounts, capabilityData: capabilities, workspacePath });
+      if (restorePending && !current && !busy && instances.length) {
+        restorePending = false;
+        const preferred = lastViewedInstance();
+        const latest = [...instances].sort((a, b) => instanceTime(b) - instanceTime(a))[0];
+        const chosen = instances.find((instance) => instanceId(instance) === preferred) || latest;
+        void selectConversation(instanceId(chosen));
+      }
       render();
     },
     newConversation,

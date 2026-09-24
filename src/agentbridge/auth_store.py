@@ -11,6 +11,20 @@ def dumps(value):
 
 
 class AuthStoreMixin:
+    def interrupted_auth_attempts(self, provider=None, *, limit=100, cursor=0):
+        """Read bounded local recovery records without exposing remote evidence."""
+        query = '''SELECT id,owner,engine,name,data,created FROM auth_attempts
+            WHERE status='interrupted' '''
+        values = []
+        if provider is not None:
+            query += 'AND engine=? '
+            values.append(provider)
+        query += 'ORDER BY created DESC,id DESC LIMIT ? OFFSET ?'
+        values.extend((limit, cursor))
+        with self.connect() as db:
+            rows = db.execute(query, values).fetchall()
+        return [dict(row) for row in rows]
+
     def auth_attempt_for_request(self, owner, request_key):
         with self.connect() as db:
             row = db.execute('SELECT * FROM auth_attempts WHERE owner=? AND request_key=?',
@@ -45,6 +59,12 @@ class AuthStoreMixin:
                     WHERE id NOT IN (SELECT account_id FROM retired_accounts)'''):
                     existing = json.loads(row['config'])
                     if (row['id'] != attempt['account_id']
+                            and (existing.get('provider') or existing.get('engine')) == attempt['engine']
+                            and existing.get('name')
+                            and account_name_key(existing['name']) == account_name_key(attempt['name'])):
+                        raise BridgeError('account_name_in_use',
+                                          'Account name is already in use for this provider.')
+                    if (row['id'] != attempt['account_id']
                             and existing.get('proxy_base_url') == proxy_route['proxy_base_url']):
                         raise BridgeError('proxy_endpoint_shared',
                                           'The proxy endpoint belongs to another account.')
@@ -55,14 +75,15 @@ class AuthStoreMixin:
                     if json.loads(row['config'])['proxy_base_url'] == proxy_route['proxy_base_url']:
                         raise BridgeError('proxy_endpoint_retired',
                                           'An uncertain OAuth attempt requires a new dedicated local proxy endpoint.')
-                active = db.execute('''SELECT a.account_id,a.name,r.config
+                active = db.execute('''SELECT a.account_id,a.engine,a.name,r.config
                     FROM auth_attempts a JOIN auth_proxy_routes r ON r.attempt_id=a.id
                     WHERE a.status NOT IN ('failed','cancelled','abandoned','expired',
                                            'revoked','replaced','bound','usable')''')
                 for row in active:
                     other_route = json.loads(row['config'])
                     if (row['account_id'] == attempt['account_id']
-                            or account_name_key(row['name']) == account_name_key(attempt['name'])
+                            or (row['engine'] == attempt['engine']
+                                and account_name_key(row['name']) == account_name_key(attempt['name']))
                             or other_route['proxy_base_url'] == proxy_route['proxy_base_url']):
                         raise BusyError()
                 if attempt['engine'] in {'codex', 'claude'}:

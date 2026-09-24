@@ -16,9 +16,9 @@ MAX_PATH_BYTES = 4096
 STATIC_ROOT = Path(__file__).parent / 'static'
 
 
-def _account(value):
+def _account(value, bridge):
     data = asdict(value) if is_dataclass(value) else dict(value)
-    return {'account_ref': data.get('name') or data.get('id'),
+    return {'account_ref': bridge.account_reference(data['id']),
             'name': data.get('name'), 'email': data.get('email'),
             'provider': data.get('provider'),
             'supported_models': list(data.get('supported_models') or ())}
@@ -147,10 +147,15 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
         if parts == ['api', 'capabilities'] and method == 'GET':
             return bridge.capabilities()
         if parts == ['api', 'accounts'] and method == 'GET':
-            return [_account(item) for item in bridge.accounts()]
+            return [_account(item, bridge) for item in bridge.accounts()]
         if parts == ['api', 'accounts', 'login', 'start'] and method == 'POST':
             values = _fields(body, ('provider', 'name'))
             return bridge.account_login_start(**values)
+        if parts == ['api', 'accounts', 'login', 'attempts'] and method == 'GET':
+            return bridge.account_login_attempts(
+                provider=query.get('provider', [None])[-1],
+                limit=_query_number(query, 'limit', 3),
+                cursor=_query_number(query, 'cursor', 0))
         if len(parts) == 4 and parts[:3] == ['api', 'accounts', 'login'] and method == 'GET':
             return bridge.account_login_status(parts[3], owner_ref=query.get('owner_ref', [None])[-1])
         if len(parts) == 5 and parts[:3] == ['api', 'accounts', 'login'] and method == 'POST':
@@ -159,7 +164,7 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                 return bridge.account_login_check(parts[3], **values)
             if parts[4] == 'complete':
                 result = bridge.account_login_complete(parts[3], **values)
-                return {**result, 'account': _account(result['account'])}
+                return {**result, 'account': _account(result['account'], bridge)}
             if parts[4] == 'cancel':
                 return bridge.account_login_cancel(parts[3], **values)
         if len(parts) == 4 and parts[:2] == ['api', 'accounts'] and method == 'GET':

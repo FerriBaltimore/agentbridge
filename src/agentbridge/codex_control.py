@@ -132,7 +132,7 @@ class CodexControl:
 
     def execute(self):
         options = self.payload['options']
-        self.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.2.0'}})
+        self.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.3.0'}})
         self.channel.send({'method': 'initialized', 'params': {}})
         if self.payload.get('context_package') is not None:
             listing = self.rpc('skills/list', {'cwds': [self.payload['cwd']], 'forceReload': True})

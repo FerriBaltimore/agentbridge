@@ -12,6 +12,7 @@ EVENT_KINDS = {
     "usage": "usage.observed",
     "quota": "quota.observed",
     "error": "run.error",
+    "compaction_started": "context.compacting",
     "compaction": "context.compacted",
     "model_changed": "model.changed",
     "route_selected": "route.selected",

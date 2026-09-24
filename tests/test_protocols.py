@@ -1,3 +1,5 @@
+from agentbridge.event_contract import public_event
+from agentbridge.models import Event
 from agentbridge.protocols import Parser
 
 def collect(engine,events):
@@ -16,3 +18,14 @@ def test_unknown_tool_result_is_explicit():
     p,out=collect('claude',[{'type':'assistant','message':{'content':[{'type':'tool_use','id':'t-1','name':'Bash','input':{'command':'x'}}]}}])
     assert p.end()
     assert out[-1][0]=='tool_result' and out[-1][1]['outcome']=='unknown'
+
+
+def test_codex_compaction_has_start_and_completion_observations():
+    _, emitted = collect('codex', [
+        {'type': 'item.started', 'item': {'id': 'compact-1', 'type': 'context_compaction'}},
+        {'type': 'item.completed', 'item': {'id': 'compact-1', 'type': 'context_compaction'}},
+    ])
+    assert [kind for kind, _ in emitted] == ['compaction_started', 'compaction']
+    public = [public_event(Event(index, 'turn', 'instance', kind, 1.0, data), 'codex')
+              for index, (kind, data) in enumerate(emitted, 1)]
+    assert [event['kind'] for event in public] == ['context.compacting', 'context.compacted']

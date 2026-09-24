@@ -20,6 +20,9 @@ FIXTURE = Path(__file__).parent / 'fixtures' / 'test_grantbridge_adapter.py'
 
 @pytest.fixture
 def authentication(tmp_path, monkeypatch):
+    # This fixture adapter does not bind CLIProxyAPI's browser callback port.
+    monkeypatch.setattr('agentbridge.grantbridge.ensure_callback_port_available',
+                        lambda provider: None)
     management_key = secrets.token_hex(24)
     proxy_key = secrets.token_hex(24)
     monkeypatch.setenv('LAB_MANAGEMENT_KEY', management_key)

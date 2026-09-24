@@ -18,6 +18,8 @@ ACTION = {
     "authentication_attempt_not_ready": "wait",
     "authentication_not_verified": "check",
     "login_timeout": "login",
+    "oauth_callback_port_busy": "login",
+    "oauth_callback_unavailable": "login",
     "activation_unsupported": "change_account",
     "safety_blocked": "inspect",
     "billing_required": "inspect",
@@ -49,7 +51,9 @@ class BridgeError(Exception):
         category = "validation"
         if (self.code in {"authentication_required", "credential_unavailable", "authorization_denied"}
                 or self.code in {'credential_expired', 'identity_changed', 'identity_missing', 'activation_invalid'}
-                or self.code.startswith("authentication_") or self.code in {"activation_unsupported", "login_timeout"}):
+                or self.code.startswith("authentication_") or self.code in {
+                    "activation_unsupported", "login_timeout", "oauth_callback_port_busy",
+                    "oauth_callback_unavailable"}):
             category = "auth"
         elif self.code in {"quota_exhausted", "rate_limited"}:
             category = "quota"

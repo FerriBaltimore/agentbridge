@@ -1,10 +1,16 @@
 import { byId, clear, emptyState, formatClock, node } from './ui.js';
+import { appendTimeline } from './chat-timeline.js';
 
 const emptyConversation = byId('chat-messages')?.firstElementChild?.cloneNode(true);
 
 export function renderConversations(instances, selectedId, activeTurn, onSelect) {
   const rows = Array.isArray(instances) ? [...instances] : [];
-  rows.sort((a, b) => (b.created_at || b.created || 0) - (a.created_at || a.created || 0));
+  const time = (instance) => {
+    const value = instance.updated_at || instance.updated || instance.created_at || instance.created;
+    if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
+    return Date.parse(value) || 0;
+  };
+  rows.sort((a, b) => time(b) - time(a));
   byId('conversation-count').textContent = String(rows.length);
   const list = clear(byId('conversation-list'));
   if (!rows.length) {
@@ -21,39 +27,24 @@ export function renderConversations(instances, selectedId, activeTurn, onSelect)
     const route = instance.routing_mode === 'pinned'
       ? instance.account_ref : instance.routing_provider || 'All providers';
     button.append(node('strong', '', instance.model || 'Untitled conversation'),
-      node('small', '', `${route} · ${formatClock(instance.created_at || instance.created)}`));
+      node('small', '', `${route} · ${formatClock(instance.updated_at || instance.updated || instance.created_at || instance.created)}`));
     button.addEventListener('click', () => onSelect(id));
     list.append(button);
   }
 }
 
-export function renderMessages(messages, activeTurn) {
+export function renderMessages(messages, events, activeTurn, onPermission) {
   const list = byId('chat-messages');
+  const previousTop = list.scrollTop;
   const wasNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 90;
   clear(list);
-  const rows = Array.isArray(messages) ? messages : [];
-  if (!rows.length) {
+  const count = appendTimeline(list, messages, events, activeTurn, onPermission);
+  if (!count) {
     list.append(emptyConversation?.cloneNode(true) || emptyState('Start a conversation',
       'Choose an observed model and send a message.'));
     return;
   }
-  for (const message of rows) {
-    if (!['user', 'assistant'].includes(message.role)) continue;
-    const item = node('div', `message is-${message.role}${message.incomplete ? ' is-incomplete' : ''}`);
-    item.dataset.testid = 'chat-message';
-    item.dataset.role = message.role;
-    const label = message.role === 'user' ? 'You' : 'AgentBridge';
-    item.append(node('div', 'message-meta', `${label} · ${formatClock(message.created_at)}`),
-      node('div', 'message-bubble', message.content || ''));
-    list.append(item);
-  }
-  if (activeTurn && rows.at(-1)?.role === 'user') {
-    const waiting = node('div', 'message is-assistant is-incomplete');
-    waiting.append(node('div', 'message-meta', 'AgentBridge · working'),
-      node('div', 'message-bubble', 'Thinking'));
-    list.append(waiting);
-  }
-  if (wasNearBottom || activeTurn) list.scrollTop = list.scrollHeight;
+  list.scrollTop = wasNearBottom ? list.scrollHeight : previousTop;
 }
 
 function detail(event) {

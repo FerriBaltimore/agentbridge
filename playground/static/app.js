@@ -44,6 +44,7 @@ function render() {
     models: state.models,
     instances: state.instances,
     usage: state.usage,
+    statuses: state.statuses,
     onAccounts: () => navigate('accounts'),
     onChat: () => navigate('chat'),
   };
@@ -100,7 +101,9 @@ async function refreshAll() {
     if (accounts.status === 'fulfilled') await loadAccountObservations(state.accounts);
     const errors = reads.filter((result) => result.status === 'rejected');
     if (errors.length) setGlobalError(`Some local data is unavailable. ${describeError(errors[0].reason)}`);
-    byId('refresh-time').textContent = `Updated ${new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date())}`;
+    const refreshed = `Updated ${new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date())}`;
+    byId('refresh-time').textContent = refreshed;
+    button.title = `${refreshed} · Refresh data`;
     render();
   })();
   try { await refreshPromise; }

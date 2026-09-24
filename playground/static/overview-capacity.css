@@ -1,0 +1,64 @@
+#view-overview { display: flex; flex-direction: column; min-height: 0; height: 100%; overflow: hidden; }
+#view-overview .metric-grid { flex: none; gap: 12px; margin-bottom: 12px; }
+#view-overview .metric-card { min-height: 99px; padding: 15px 17px; }
+#view-overview .metric-card strong { margin: 6px 0 3px; font-size: 27px; }
+.capacity-surface { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 18px 20px; }
+.capacity-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 13px; }
+.capacity-header h2 { margin: 4px 0 4px; color: #263650; font-size: 18px; letter-spacing: -.04em; }
+.capacity-header p { max-width: 580px; margin: 0; color: #8b97a8; font-size: 10px; line-height: 1.45; }
+.capacity-actions { display: flex; flex: none; gap: 8px; }
+.capacity-actions .button { min-height: 34px; padding: 8px 11px; font-size: 10px; }
+.capacity-list { --capacity-row-height: 78px; display: flex; flex: 1; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+.capacity-list .empty-state { align-content: center; min-height: min(180px, 100%); }
+.capacity-row { display: grid; grid-template-columns: minmax(170px, 1.4fr) minmax(128px, .9fr) minmax(195px, 1fr); align-items: center; gap: 12px; height: var(--capacity-row-height); flex: none; min-width: 0; padding: 11px 13px; border: 1px solid #e7ecf3; border-radius: 11px; background: #fbfcff; }
+.capacity-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.capacity-avatar { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 10px; background: #eaf0ff; color: #536fdb; font-size: 14px; font-weight: 850; }
+.capacity-avatar.is-claude { background: #fff0e7; color: #c88453; }
+.capacity-avatar.is-grok { background: #e9eff1; color: #456573; }
+.capacity-names { min-width: 0; }
+.capacity-names strong, .capacity-names small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capacity-names strong { color: #2b3a55; font-size: 11px; }
+.capacity-names small { margin-top: 4px; color: #92a0b1; font-size: 9px; }
+.capacity-condition { display: grid; justify-items: start; gap: 5px; min-width: 0; }
+.capacity-condition small { overflow: hidden; max-width: 100%; color: #9aa6b5; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.capacity-quota { display: grid; align-content: center; gap: 4px; min-width: 0; }
+.capacity-quota strong { color: #293d5a; font-size: 11px; }
+.capacity-quota .capacity-unknown { color: #8b97a9; }
+.capacity-quota small { overflow: hidden; color: #9aa6b5; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.capacity-values { display: flex; justify-content: space-between; gap: 8px; }
+.capacity-values span { color: #538e73; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.capacity-track { overflow: hidden; height: 5px; border-radius: 8px; background: #e8edf5; }
+.capacity-fill { display: block; height: 100%; border-radius: inherit; background: #6a89ff; }
+.capacity-fill.is-high { background: #e8a15f; }
+.capacity-pager { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; padding-top: 9px; border-top: 1px solid #edf0f5; }
+.capacity-pager > span { color: #8794a8; font-size: 10px; }
+.capacity-pager > div { display: flex; gap: 7px; }
+.capacity-pager .button { min-height: 30px; padding: 6px 10px; font-size: 10px; }
+
+@media (max-width: 700px) {
+  #view-overview .metric-grid { gap: 8px; margin-bottom: 9px; }
+  #view-overview .metric-card { min-height: 75px; padding: 10px 11px; }
+  #view-overview .metric-head { font-size: 9px; }
+  #view-overview .metric-icon { width: 23px; height: 23px; }
+  #view-overview .metric-card strong { margin: 4px 0 2px; font-size: 22px; }
+  #view-overview .metric-card small { font-size: 9px; line-height: 1.2; }
+  .capacity-surface { padding: 12px; }
+  .capacity-header { align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+  .capacity-header h2 { font-size: 15px; }
+  .capacity-header p { display: none; }
+  .capacity-actions { gap: 5px; }
+  .capacity-actions .button { min-height: 29px; padding: 6px 7px; font-size: 9px; }
+  .capacity-list { --capacity-row-height: 105px; gap: 7px; }
+  .capacity-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 6px 9px; padding: 8px 9px; }
+  .capacity-condition { justify-items: end; }
+  .capacity-condition small { max-width: 100px; }
+  .capacity-quota { grid-column: 1 / -1; }
+  .capacity-pager { margin-top: 8px; padding-top: 7px; }
+}
+
+@media (max-width: 390px) {
+  .capacity-header { flex-wrap: wrap; }
+  .capacity-actions { width: 100%; }
+  .capacity-actions .button { flex: 1; }
+  .capacity-list { --capacity-row-height: 105px; }
+}

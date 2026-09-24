@@ -5,7 +5,7 @@ OPERATIONS = (
     "capabilities.get", "accounts.list", "accounts.status", "accounts.delete",
     "accounts.usage", "accounts.usage_history",
     "accounts.login",
-    "accounts.login.start", "accounts.login.status", "accounts.login.check",
+    "accounts.login.list", "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel", "accounts.login.callback",
     "models.list", "usage.get", "usage.history", "accounts.quota.reset",
     "instances.create", "instances.get",
@@ -28,7 +28,10 @@ def proxy_payload(*, include_parameters=True):
         item = {'support': 'adapter' if enabled else 'unsupported',
                 'maturity': 'fixture_tested' if enabled else 'unsupported',
                 'limitations': []}
-        if operation == 'accounts.login.callback':
+        if operation == 'accounts.login.list':
+            item['limitations'] = ['local_private_store_only',
+                                   'interrupted_attempts_only', 'bounded_to_100']
+        elif operation == 'accounts.login.callback':
             item['limitations'] = ['one_use_remote_browser_redirect',
                                    'codex_and_claude_only', 'live_oauth_acceptance_pending']
         elif operation.startswith('accounts.login'):

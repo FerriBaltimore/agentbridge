@@ -114,7 +114,10 @@ other instance fields; its initial account may change before a later turn.
 `messages.create` returns `turn_id`, `message_id`, `instance_id`, `state`,
 `replayed` and the account actually selected for that turn in `account_ref`.
 For an automatic route, `instances.create` and `messages.create` also accept
-`excluded_account_refs`, a list of up to 1000 distinct account names or IDs.
+`excluded_account_refs`, a list of up to 1000 distinct account references.
+Use the `account_ref` returned by `accounts.list` or `models.list`; accounts
+with the same name across providers have distinct `id:<account_id>` refs.
+An unqualified ambiguous name is rejected.
 The router omits those accounts when choosing the initial route and the turn
 route. A pinned route cannot use exclusions. Fullbrain pins the list in each
 turn snapshot so retries and recovery use the same fence while an account

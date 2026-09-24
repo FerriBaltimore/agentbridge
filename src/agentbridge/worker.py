@@ -27,6 +27,7 @@ from .accounts import AccountService
 from .routing.admission import verify_proxy_model
 from .routing.service import RoutingService
 from .native_sandbox import wrap
+from .workspace_policy import validate_execution_workspace
 from .execution_context import (MCP_CAPABILITY_ENV, PRIVATE_EXECUTION_KEY,
                                 mcp_environment, verify)
 
@@ -67,6 +68,11 @@ def main():
             secrets, execution = private, None
             if options.context_package_digest or options.mcp_binding_digest:
                 raise BridgeError('context_required', 'Fresh execution context is required for this turn.')
+        # Persisted sessions can predate admission checks or outlive a host
+        # upgrade. Consume private input, then reject an unsafe workspace
+        # before any native process starts.
+        validate_execution_workspace(session['cwd'], store.root,
+                                     workspace_write=options.sandbox != 'read-only')
         management_name=account.management_key_env
         management_key=secrets.pop(management_name, None)
         if not management_key:
@@ -210,7 +216,7 @@ def main():
         if isinstance(error,BridgeError) and code in {
                 'provider_contract_unverified','provider_contract_changed','provider_contract_invalid',
                 'invalid_proxy_account','proxy_binding_unverified','model_required','model_unavailable',
-                'credential_unavailable'}:
+                'credential_unavailable','invalid_workspace'}:
             issue={**error.safe_data(),'engine':account.engine if account else None,
                    'terminal':True,'provider_retrying':False}
         if claimed:

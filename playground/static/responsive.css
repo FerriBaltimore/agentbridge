@@ -6,44 +6,51 @@
 }
 
 @media (max-width: 950px) {
-  .app-shell { display: block; }
-  .sidebar { position: relative; z-index: 10; flex-direction: row; align-items: center; gap: 20px; min-height: 0; padding: 12px 22px; }
+  .app-shell { display: flex; flex-direction: column; }
+  .sidebar { position: relative; z-index: 10; flex: none; flex-direction: row; align-items: center; gap: 20px; min-height: 0; padding: 12px 22px; }
+  .workspace { flex: 1; }
   .brand { padding: 0; }
   .brand small, .sidebar-label, .sidebar-bottom { display: none; }
   .nav-list { display: flex; gap: 4px; min-width: 0; margin-left: auto; }
   .nav-link { width: auto; padding: 10px 12px; }
   .nav-link.is-active { box-shadow: inset 0 -3px #7d96ff; }
   .chat-layout { grid-template-columns: 175px minmax(0, 1fr); }
-  .route-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .route-primary-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 700px) {
-  .sidebar { display: block; padding: 13px 16px 9px; }
-  .brand { margin: 0 0 12px; }
+  .sidebar { display: block; flex: none; padding: 11px 16px 8px; }
+  .brand { margin: 0 0 8px; }
   .brand-mark { width: 29px; height: 29px; }
   .brand strong { font-size: 15px; }
   .nav-list { justify-content: space-between; overflow-x: auto; scrollbar-width: none; }
   .nav-list::-webkit-scrollbar { display: none; }
   .nav-link { flex: 1; justify-content: center; gap: 7px; min-width: 0; padding: 9px 7px; font-size: 10px; }
   .nav-link svg { width: 14px; height: 14px; }
-  .topbar { min-height: 42px; padding: 6px 18px 0; }
-  .topbar-actions { gap: 7px; }
-  main { padding: 18px 18px 45px; }
-  .global-error { margin: 12px 18px 0; }
+  main { padding: 10px 10px 14px; }
+  .global-error { margin: 12px 10px 0; }
   .metric-grid { gap: 10px; margin: 0 0 14px; }
   .metric-card { padding: 15px; }
   .metric-card strong { font-size: 25px; }
   .metric-head { font-size: 10px; }
   .metric-icon { width: 25px; height: 25px; }
-  .model-grid, .account-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .chat-layout { grid-template-columns: minmax(0, 1fr); }
-  .conversation-rail { min-height: 0; padding: 11px; }
-  .rail-heading { padding-bottom: 9px; }
-  .conversation-list { display: flex; overflow-x: auto; gap: 6px; }
-  .conversation-item { flex: 0 0 145px; }
-  .conversation-empty { padding: 7px; }
-  .chat-surface { min-height: 490px; }
-  .chat-messages { max-height: 56vh; }
+  .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chat-actions { margin-bottom: 8px; }
+  .chat-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: 70px minmax(0, 1fr); gap: 8px; }
+  .conversation-rail { padding: 7px 8px; }
+  .rail-heading { padding: 0 4px 5px; font-size: 10px; }
+  .conversation-list { display: flex; flex: 1; overflow-x: auto; overflow-y: hidden; gap: 6px; }
+  .conversation-item { flex: 0 0 140px; padding: 6px 8px; }
+  .conversation-empty { padding: 4px; }
+  .chat-column { gap: 7px; }
+  .route-primary-fields { gap: 7px; padding: 8px; }
+  .route-primary-fields label { gap: 4px; font-size: 9px; }
+  .route-primary-fields select, .route-primary-fields input { height: 31px; }
+  .chat-surface-head { min-height: 43px; padding: 8px 11px; }
+  .chat-messages { padding: 12px; }
+  .composer { padding: 8px; }
+  .composer textarea { height: 48px; }
+  .event-drawer summary { padding: 6px 10px; }
 }
 
 @media (max-width: 500px) {
@@ -51,16 +58,18 @@
   .view-actions .button { padding: 8px; min-height: 34px; font-size: 10px; }
   .view-actions .button svg { width: 12px; height: 12px; }
   .surface { padding: 18px; }
-  .model-grid, .account-list { grid-template-columns: minmax(0, 1fr); }
+  .model-grid { grid-template-columns: minmax(0, 1fr); }
   .section-heading { margin-bottom: 18px; }
   .section-heading h2 { font-size: 17px; }
   .section-heading p { font-size: 10px; }
   .text-button { font-size: 10px; }
   .route-fields { grid-template-columns: minmax(0, 1fr); }
-  .route-settings summary { align-items: flex-start; }
-  #route-summary { text-align: right; }
-  .chat-surface-head { padding: 12px; }
-  .chat-messages { padding: 16px 12px; }
+  .route-settings summary { min-height: 34px; padding: 7px 9px; font-size: 10px; }
+  #route-summary { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .chat-empty .empty-mark { width: 37px; height: 37px; margin-bottom: 7px; }
+  .chat-empty .empty-mark svg { width: 20px; height: 20px; }
+  .chat-empty h2 { font-size: 15px; }
+  .chat-empty p { max-width: 235px; font-size: 10px; }
   .message { max-width: 93%; }
   .composer-bottom span { max-width: 150px; line-height: 1.4; }
   .form-grid { grid-template-columns: minmax(0, 1fr); }

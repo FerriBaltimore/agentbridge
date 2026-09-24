@@ -24,6 +24,7 @@ invent a successful result.
     subagent.status
     usage.observed
     quota.observed
+    context.compacting
     context.compacted
     model.changed
     route.selected
@@ -42,6 +43,9 @@ use these normalized names. `route.selected` records the account decision
 before execution and may include `account_changed`, `portable_context_used`
 and `context_omitted_count`. Read `messages.create.account_ref` or
 `turns.get.account_ref` for the selected public account reference.
+`context.compacting` is emitted when Codex reports that compaction has started;
+`context.compacted` confirms its completion. Providers that report only a
+completion boundary cannot supply the starting observation.
 
 ## Terminal behavior
 

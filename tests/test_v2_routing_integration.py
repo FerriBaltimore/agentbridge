@@ -216,8 +216,9 @@ def test_model_controls_come_from_the_proxy_client_catalog(tmp_path, monkeypatch
         '/v0/management/config': (200, EMPTY_CONFIG, {}),
         '/v0/management/auth-files/models?name=one.json': (
             200, {'models': [{'id': 'fixture/model'}]}, {}),
-        '/v1/models?client_version=pi': (200, {'data': [
-            {'slug': 'fixture/model', 'context_window': 262144,
+        '/v1/models?client_version=pi': (200, {'models': [
+            {'slug': 'fixture/model', 'context_window': 131072,
+             'max_context_window': 262144,
              'supported_reasoning_levels': [{'effort': 'low'}, {'effort': 'high'},
                                             {'effort': 'private-level'}],
              'default_reasoning_level': 'high',

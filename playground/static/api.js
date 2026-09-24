@@ -1,11 +1,12 @@
 const MUTATION_HEADER = { 'X-AgentBridge-Playground': '1' };
 
 export class PlaygroundError extends Error {
-  constructor(code, message, status = 0) {
+  constructor(code, message, status = 0, data = {}) {
     super(message || 'The local API could not complete the request.');
     this.name = 'PlaygroundError';
     this.code = code || 'request_failed';
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -39,7 +40,7 @@ async function request(path, { method = 'GET', body, timeout = 30000 } = {}) {
   }
   if (!response.ok || payload?.error) {
     const error = payload?.error || {};
-    throw new PlaygroundError(error.code, error.message, response.status);
+    throw new PlaygroundError(error.code, error.message, response.status, error.data);
   }
   if (!payload || !Object.hasOwn(payload, 'result')) {
     throw new PlaygroundError('invalid_response', 'The local API response has no result.', response.status);
@@ -73,6 +74,8 @@ export const api = {
   turn: (id) => request(`/api/turns/${ref(id)}`),
   turnEvents: (id, afterSeq = 0) => request(`/api/turns/${ref(id)}/events${query({ after_seq: afterSeq })}`),
   loginStart: (values) => request('/api/accounts/login/start', { method: 'POST', body: values }),
+  loginAttempts: (limit = 3, cursor = 0) => request(
+    `/api/accounts/login/attempts${query({ limit, cursor })}`),
   loginStatus: (id, ownerRef) => request(`/api/accounts/login/${ref(id)}${query({ owner_ref: ownerRef })}`),
   loginCheck: (id, ownerRef) => request(`/api/accounts/login/${ref(id)}/check`, { method: 'POST', body: { owner_ref: ownerRef } }),
   loginComplete: (id, ownerRef) => request(`/api/accounts/login/${ref(id)}/complete`, { method: 'POST', body: { owner_ref: ownerRef } }),

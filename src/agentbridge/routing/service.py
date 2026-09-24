@@ -101,11 +101,11 @@ class RoutingService:
                 and isinstance(data.get('models'), list))
 
     def candidates(self, model, *, provider=None, refresh=False, excluded_account_refs=()):
-        excluded = set(excluded_account_refs)
+        excluded = {self.accounts.resolve(reference).id for reference in excluded_account_refs}
         accounts = [account for account in self.accounts.list()
                     if account.proxy_base_url and model in account.supported_models
                     and (provider is None or account.provider == provider)
-                    and account.id not in excluded and account.name not in excluded]
+                    and account.id not in excluded]
         loads = self.store.route_load([account.id for account in accounts])
         result = []
         for account in accounts:
@@ -155,7 +155,7 @@ class RoutingService:
                     'candidate_account_refs': [], 'observed_account_refs': [],
                     'providers': [], 'reasoning_efforts': [], 'context_windows': [],
                     'input_modalities': [], 'account_capabilities': []})
-                reference = account.name or account.id
+                reference = self.accounts.reference(account.id)
                 row['candidate_account_refs'].append(reference)
                 controls = metadata.get(model, {}) if model in seen else {}
                 row['account_capabilities'].append({

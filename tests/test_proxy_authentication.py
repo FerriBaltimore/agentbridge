@@ -362,6 +362,8 @@ def test_cancel_during_proxy_start_never_claims_remote_cancellation(tmp_path, mo
 
 
 def test_grantbridge_proxy_adapter_starts_and_polls_a_local_fixture(monkeypatch):
+    monkeypatch.setattr('agentbridge.grantbridge.ensure_callback_port_available',
+                        lambda provider: None)
     if not shutil.which('node'):
         pytest.skip('Node.js is required for the local GrantBridge adapter.')
     checkout = Path(__file__).resolve().parents[2] / 'grantbridge'

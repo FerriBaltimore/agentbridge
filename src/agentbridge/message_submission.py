@@ -29,7 +29,7 @@ class MessageSubmissionMixin:
         message_id = run.snapshot.get('message_id', run.id)
         return {'turn_id': run.id, 'message_id': message_id, 'instance_id': instance_id,
                 'state': run.status, 'replayed': bool(getattr(run, 'replayed', False)),
-                'account_ref': self.account(run.snapshot['account_id']).name or run.snapshot['account_id']}
+                'account_ref': self.account_reference(run.snapshot['account_id'])}
 
     @staticmethod
     def _message_text(content):

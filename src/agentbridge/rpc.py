@@ -10,10 +10,10 @@ def serial(value):
     raise TypeError(type(value).__name__)
 
 
-def public_account(account, status=None):
+def public_account(account, status=None, account_ref=None):
     value = asdict(account) if is_dataclass(account) else dict(account)
     result = {
-        'account_ref': value.get('name') or value.get('id') or value.get('account_ref'),
+        'account_ref': account_ref or value.get('name') or value.get('id') or value.get('account_ref'),
         'name': value.get('name'),
         'email': value.get('email'),
     }
@@ -29,10 +29,12 @@ def public_account(account, status=None):
     return result
 
 
-def public_login(result):
+def public_login(result, bridge=None):
     value = dict(result)
     if isinstance(value.get('account'), dict):
-        value['account'] = public_account(value['account'])
+        account = value['account']
+        reference = bridge.account_reference(account['id']) if bridge else None
+        value['account'] = public_account(account, account_ref=reference)
     value.pop('home', None)
     return value
 
@@ -57,7 +59,8 @@ def dispatch(bridge,method,params):
     if method=='capabilities.get':return bridge.capabilities(**params)
     if method=='accounts.list':
         accounts = bridge.accounts(**params)
-        return [public_account(account, bridge.account_status(account_id=account.id))
+        return [public_account(account, bridge.account_status(account_id=account.id),
+                               account_ref=bridge.account_reference(account.id))
                 for account in accounts]
     if method=='accounts.register':
         raise BridgeError('authentication_required', 'Create accounts through the proxy login flow.')
@@ -85,7 +88,9 @@ def dispatch(bridge,method,params):
             value['timeout'] = value.pop('timeout_ms') / 1000
         if 'poll_interval_ms' in value:
             value['poll_interval'] = value.pop('poll_interval_ms') / 1000
-        return public_login(bridge.account_login(**value))
+        return public_login(bridge.account_login(**value), bridge)
+    if method=='accounts.login.list':
+        return bridge.account_login_attempts(**params)
     if method in ('accounts.login.start', 'accounts.login_start'):
         return bridge.account_login_start(**params)
     if method in ('accounts.login.status', 'accounts.login_status'):
@@ -93,7 +98,7 @@ def dispatch(bridge,method,params):
     if method in ('accounts.login.check', 'accounts.login_check'):
         return bridge.account_login_check(**params)
     if method in ('accounts.login.complete', 'accounts.login_complete'):
-        return public_login(bridge.account_login_complete(**params))
+        return public_login(bridge.account_login_complete(**params), bridge)
     if method in ('accounts.login.cancel', 'accounts.login_cancel'):
         return bridge.account_login_cancel(**params)
     if method=='accounts.login.callback':

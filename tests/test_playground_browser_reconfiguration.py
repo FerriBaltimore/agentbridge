@@ -95,6 +95,7 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
 
             provider.select_option('codex')
             model.select_option(OPENAI_MODEL)
+            page.locator('#route-settings summary').click()
             account.select_option('OpenAI Personal')
             effort.select_option('high')
             assert context.get_attribute('max') == '131072'

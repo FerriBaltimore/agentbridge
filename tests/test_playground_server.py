@@ -28,6 +28,10 @@ class PublicBridgeStub:
                  'email': 'user@example.invalid', 'supported_models': ['fixture-model'],
                  'key_env': 'PRIVATE_ENV_REFERENCE', 'credential_ref': 'private'}]
 
+    def account_reference(self, account_id):
+        assert account_id == 'account-id'
+        return 'Personal'
+
     def account_status(self, *, account_ref, refresh):
         self._record('account_status', account_ref=account_ref, refresh=refresh)
         return {'account_id': 'account-id', 'authentication': {'status': 'active'}}
@@ -206,6 +210,20 @@ def test_read_routes_expose_safe_account_projection_and_polling(local_server, tm
         'result'][0]['seq'] == 10
     assert ('account_status', (), {'account_ref': 'Personal', 'refresh': True}) in bridge.calls
     assert ('models', (), {'refresh': True}) in bridge.calls
+
+
+def test_account_projection_uses_sdk_reference_after_name_collision(local_server,
+                                                                    monkeypatch):
+    server, bridge = local_server
+    monkeypatch.setattr(bridge, 'account_reference',
+                        lambda account_id: f'id:{account_id}')
+    account = request(server, 'GET', '/api/accounts')[1]['result'][0]
+    assert account['account_ref'] == 'id:account-id'
+    assert account['name'] == 'Personal'
+    completed = request(server, 'POST', '/api/accounts/login/login-1/complete',
+                        body={'owner_ref': 'owner-1'})[1]['result']
+    assert completed['account']['account_ref'] == 'id:account-id'
+    assert 'key_env' not in repr(account) + repr(completed['account'])
 
 
 def test_login_and_removal_only_call_public_sdk(local_server):

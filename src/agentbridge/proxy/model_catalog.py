@@ -14,7 +14,11 @@ def _positive_window(value):
 
 def catalog_metadata(payload):
     """Discard everything except typed, bounded controls for model IDs."""
-    entries = payload.get('data') if isinstance(payload, dict) else None
+    entries = None
+    if isinstance(payload, dict):
+        entries = payload.get('models')
+        if not isinstance(entries, list):
+            entries = payload.get('data')
     if not isinstance(entries, list) or len(entries) > 500:
         return {}
     result = {}
@@ -25,7 +29,10 @@ def catalog_metadata(payload):
             identifier = model_id(raw.get('slug') or raw.get('id'))
         except BridgeError:
             continue
-        window = _positive_window(raw.get('context_window'))
+        # Codex caps model_context_window at max_context_window when supplied.
+        # Without that bound, use the catalog's reported context_window.
+        window = (_positive_window(raw.get('max_context_window'))
+                  or _positive_window(raw.get('context_window')))
         levels = raw.get('supported_reasoning_levels')
         efforts = []
         if isinstance(levels, list) and len(levels) <= 20:

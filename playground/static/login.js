@@ -12,9 +12,67 @@ export function setupLogin({ providers, onComplete }) {
   const startButton = byId('login-start');
   const cancelButton = byId('login-cancel');
   const retryButton = byId('login-retry-check');
+  const recovery = byId('login-recovery');
+  const recoveryList = byId('login-recovery-list');
+  const recoveryPages = byId('login-recovery-pages');
+  const recoveryPrev = byId('login-recovery-prev');
+  const recoveryNext = byId('login-recovery-next');
   let attempt = null;
   let timer = null;
   let busy = false;
+  let recoveryCursor = 0;
+  let recoveryGeneration = 0;
+
+  async function refreshRecovery() {
+    const generation = ++recoveryGeneration;
+    try {
+      const rows = await api.loginAttempts(3, recoveryCursor);
+      if (generation !== recoveryGeneration || !dialog.open || attempt) return;
+      if (!rows.length && recoveryCursor > 0) {
+        recoveryCursor = Math.max(0, recoveryCursor - 2);
+        await refreshRecovery();
+        return;
+      }
+      recovery.hidden = !rows.length;
+      clear(recoveryList);
+      for (const row of rows.slice(0, 2)) {
+        const item = node('div', 'event-item');
+        const label = node('div');
+        label.append(node('strong', '', `${row.account_ref} · ${row.provider}`));
+        const abandon = node('button', 'button button-ghost', 'Abandon');
+        abandon.type = 'button';
+        abandon.setAttribute('aria-label', `Abandon ${row.account_ref} ${row.provider} sign-in`);
+        abandon.addEventListener('click', async () => {
+          if (busy) return;
+          busy = true;
+          abandon.disabled = true;
+          setFeedback(feedback, '');
+          try {
+            const result = await api.loginCancel(row.attempt_id, row.owner_ref);
+            if (result.status !== 'abandoned') {
+              throw new Error('The local attempt was not abandoned. Check its status before retrying.');
+            }
+            toast('Local sign-in attempt abandoned. Remote authorization was not confirmed cancelled.');
+            await refreshRecovery();
+          } catch (error) {
+            setFeedback(feedback, describeError(error));
+          } finally {
+            busy = false;
+            abandon.disabled = false;
+          }
+        });
+        item.append(node('span', 'event-dot'), label, abandon);
+        recoveryList.append(item);
+      }
+      recoveryPages.hidden = recoveryCursor === 0 && rows.length <= 2;
+      recoveryPrev.disabled = recoveryCursor === 0;
+      recoveryNext.disabled = rows.length <= 2;
+    } catch (error) {
+      if (generation === recoveryGeneration && dialog.open && !attempt) {
+        setFeedback(feedback, `Could not load unfinished sign-ins: ${describeError(error)}`);
+      }
+    }
+  }
 
   function stopPolling() {
     if (timer) clearTimeout(timer);
@@ -58,6 +116,8 @@ export function setupLogin({ providers, onComplete }) {
 
   function showAttempt(value) {
     attempt = { ...attempt, ...value };
+    recoveryGeneration += 1;
+    recovery.hidden = true;
     form.hidden = true;
     progress.hidden = false;
     const status = attempt.status || 'starting';
@@ -155,6 +215,13 @@ export function setupLogin({ providers, onComplete }) {
       if (PENDING.has(started.status)) timer = setTimeout(poll, 1000);
       else completeImmediately = started.status === 'authorized' || started.status === 'verified';
     } catch (error) {
+      const details = error?.data?.details;
+      if (error?.code === 'authentication_outcome_unknown'
+          && typeof details?.attempt_id === 'string'
+          && typeof details?.owner_ref === 'string') {
+        showAttempt({ attempt_id: details.attempt_id, owner_ref: details.owner_ref,
+          provider: values.provider, account_ref: values.name, status: 'interrupted' });
+      }
       setFeedback(feedback, describeError(error));
     } finally {
       busy = false;
@@ -183,7 +250,16 @@ export function setupLogin({ providers, onComplete }) {
   });
 
   retryButton.addEventListener('click', finishLogin);
+  recoveryPrev.addEventListener('click', () => {
+    recoveryCursor = Math.max(0, recoveryCursor - 2);
+    refreshRecovery();
+  });
+  recoveryNext.addEventListener('click', () => {
+    recoveryCursor += 2;
+    refreshRecovery();
+  });
   dialog.addEventListener('close', () => {
+    recoveryGeneration += 1;
     if (attempt && PENDING.has(attempt.status)) toast('OAuth continues in this tab. Open Add account to return to it.');
   });
 
@@ -194,8 +270,10 @@ export function setupLogin({ providers, onComplete }) {
       form.hidden = false;
       progress.hidden = true;
       step(1);
+      recoveryCursor = 0;
     } else showAttempt(attempt);
     dialog.showModal();
+    if (!attempt) refreshRecovery();
     (attempt ? cancelButton : byId('login-name')).focus();
   };
 }

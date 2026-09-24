@@ -158,6 +158,8 @@ def test_worker_never_launches_a_historical_direct_account(tmp_path, monkeypatch
 
 def test_management_key_reaches_verifier_but_not_codex_environment(tmp_path, monkeypatch):
     store = Store(tmp_path / "state")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     account = Account("proxy", "codex", provider="openai", supported_models=(MODEL,),
                       proxy_base_url="http://127.0.0.1:8317/v1", key_env="CLIENT_KEY",
                       management_key_env="MANAGEMENT_KEY")
@@ -165,7 +167,7 @@ def test_management_key_reaches_verifier_but_not_codex_environment(tmp_path, mon
     now = time.time()
     with store.connect() as db:
         db.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)",
-                   ("proxy-session", "proxy", str(tmp_path), MODEL, None, None, None, now))
+                   ("proxy-session", "proxy", str(workspace), MODEL, None, None, None, now))
         db.execute("INSERT INTO instance_metadata VALUES (?,?,?,?)",
                    ("proxy-session", "active", 1, now))
         db.execute("INSERT INTO session_routing"

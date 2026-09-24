@@ -16,6 +16,7 @@ import time
 
 from .errors import BridgeError
 from .auth_contract import response_result
+from .auth_callback import ensure_callback_port_available
 from .bundle import resolve_binary, resolve_grantbridge_adapter
 
 
@@ -118,8 +119,10 @@ class GrantBridgeClient:
 
     def proxy_start(self, provider, base_url, management_key_env):
         """Ask GrantBridge to start OAuth in a dedicated local proxy."""
+        management_key = self._proxy_key(management_key_env)
+        ensure_callback_port_available(provider)
         return self._request('auth.proxy_start', {'provider': provider, 'base_url': base_url,
-            'management_key': self._proxy_key(management_key_env)})
+            'management_key': management_key})
 
     def proxy_status(self, state, provider, base_url, management_key_env):
         return self._request('auth.proxy_status', {'state': state, 'provider': provider,

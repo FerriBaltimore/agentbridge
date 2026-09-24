@@ -76,6 +76,36 @@ def test_provider_spawn_failure_has_not_started_outcome(tmp_path, monkeypatch, l
     assert 'PRIVATE EXECUTABLE PATH' not in json.dumps(terminal)
 
 
+def test_legacy_workspace_containing_state_fails_before_native_launch(
+        tmp_path, monkeypatch, local_proxy):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    bridge = bridge_with_proxy(workspace / 'legacy', monkeypatch, local_proxy)
+    try:
+        bridge.store.add_session('legacy-session', 'fixture', str(workspace), MODEL)
+        run_id, _ = bridge.store.admit(
+            'legacy-run', 'legacy-session', 'fixture', RunOptions(timeout=2), None)
+        run = bridge.run(run_id)
+        in_process(monkeypatch, bridge, run)
+
+        def no_native_process(*args, **kwargs):
+            raise AssertionError('Unsafe workspace reached native launch')
+
+        monkeypatch.setattr(worker.subprocess, 'Popen', no_native_process)
+        with pytest.raises(SystemExit) as stopped:
+            worker.main()
+        assert stopped.value.code == 1
+        assert (run.status, run.snapshot['error']) == ('failed', 'invalid_workspace')
+        assert run.snapshot['child_pid'] is None
+        events = list(run.events())
+        assert not any(event.kind == 'run_started' for event in events)
+        issue = [event.data for event in events if event.kind == 'error'][-1]
+        assert issue['outcome'] == 'not_started'
+        assert issue['code'] == 'invalid_workspace'
+    finally:
+        bridge.close()
+
+
 @pytest.mark.parametrize('code', ['provider_contract_unverified', 'provider_contract_changed'])
 def test_contract_recheck_failure_preserves_safe_details_before_native_launch(tmp_path, monkeypatch, local_proxy, code):
     bridge, run = admitted(tmp_path, monkeypatch, local_proxy)

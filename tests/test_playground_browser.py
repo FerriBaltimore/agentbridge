@@ -254,25 +254,29 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
         try:
             page, errors = _page(browser, local_playground['url'])
             page.get_by_test_id('nav-overview').click()
-            page.locator('#overview-models').get_by_text(
-                'fixture/openai-model', exact=True).wait_for()
-            page.locator('#overview-usage').get_by_text('58% used').wait_for()
+            capacity = page.get_by_test_id('overview-capacity-list')
+            capacity.get_by_text('OpenAI Personal').wait_for()
+            capacity.get_by_text('58% used').wait_for()
+            capacity.get_by_text('42% remaining').wait_for()
+            page.locator('#metric-ready').get_by_text('2').wait_for()
+            page.locator('#metric-fresh').get_by_text('1').wait_for()
             shots = local_playground['screenshot_dir']
             page.screenshot(path=str(shots / 'playground-overview-desktop.png'),
                             full_page=True)
             page.get_by_test_id('nav-accounts').click()
             accounts = page.get_by_test_id('accounts-list')
-            openai_card = accounts.locator('.account-card').filter(has_text='OpenAI Personal')
-            openai_card.get_by_text('OpenAI Personal').wait_for()
+            openai_row = accounts.get_by_test_id('account-row').filter(has_text='OpenAI Personal')
+            openai_row.get_by_text('OpenAI Personal').wait_for()
             accounts.get_by_text('Claude Research').wait_for()
             accounts.get_by_text('Unknown usage').wait_for()
-            openai_card.get_by_text('active', exact=True).wait_for()
+            openai_row.get_by_text('active', exact=True).wait_for()
             page.locator('#accounts-summary').get_by_text(
                 '2 with an active or usable observation').wait_for()
-            openai_card.locator('summary').click()
-            openai_card.get_by_text('Health: Active, binding verified').wait_for()
-            openai_card.get_by_text('Effort: low, high').wait_for()
-            openai_card.get_by_text('Context: 131072').wait_for()
+            openai_row.get_by_test_id('account-models-open').click()
+            models_dialog = page.get_by_test_id('account-models-dialog')
+            models_dialog.get_by_text('Health: Active, binding verified').wait_for()
+            models_dialog.get_by_text('Effort: low, high').wait_for()
+            models_dialog.get_by_text('Context: 131072').wait_for()
             page.screenshot(path=str(shots / 'playground-accounts-desktop.png'),
                             full_page=True)
 
@@ -281,6 +285,8 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
                             full_page=True)
             overflow = page.evaluate('document.documentElement.scrollWidth - document.documentElement.clientWidth')
             assert overflow <= 1
+            page.keyboard.press('Escape')
+            models_dialog.wait_for(state='hidden')
             page.set_viewport_size({'width': 1440, 'height': 1000})
 
             page.get_by_test_id('nav-chat').click()
@@ -340,7 +346,7 @@ def test_browser_login_and_local_account_removal(local_playground):
         try:
             page, errors = _page(browser, local_playground['url'])
             page.get_by_test_id('nav-accounts').click()
-            row = page.get_by_test_id('accounts-list').locator('.account-card').filter(
+            row = page.get_by_test_id('accounts-list').get_by_test_id('account-row').filter(
                 has_text='OpenAI Personal')
             row.get_by_test_id('remove-account').click()
             page.locator('#remove-dialog').get_by_text(
@@ -371,7 +377,7 @@ def test_browser_login_and_local_account_removal(local_playground):
             assert 'fixture/grok-model' in page.get_by_test_id('chat-model').locator(
                 'option').all_text_contents()
             page.get_by_test_id('nav-accounts').click()
-            grok = page.get_by_test_id('accounts-list').locator('.account-card').filter(
+            grok = page.get_by_test_id('accounts-list').get_by_test_id('account-row').filter(
                 has_text='Grok Lab')
             grok.get_by_test_id('remove-account').click()
             page.get_by_test_id('remove-confirm').click()

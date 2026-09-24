@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/components.css">
   <link rel="stylesheet" href="/static/responsive.css">
+  <link rel="stylesheet" href="/static/dashboard-layout.css">
+  <link rel="stylesheet" href="/static/overview-capacity.css">
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
@@ -33,6 +35,10 @@
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
         <div><strong>AgentBridge</strong><small>Local playground</small></div>
+        <div class="refresh-control">
+          <span id="refresh-time" class="visually-hidden" aria-live="off">Waiting for data</span>
+          <button id="refresh-button" class="icon-button" type="button" aria-label="Refresh data" title="Refresh data"><svg><use href="#icon-refresh"></use></svg></button>
+        </div>
       </div>
       <p class="sidebar-label">WORKSPACE</p>
       <nav class="nav-list" aria-label="Views">
@@ -48,12 +54,6 @@
     </aside>
 
     <div class="workspace">
-      <div class="topbar">
-        <div class="topbar-actions">
-          <span id="refresh-time" class="refresh-time" aria-live="off">Waiting for data</span>
-          <button id="refresh-button" class="icon-button" type="button" aria-label="Refresh data" title="Refresh data"><svg><use href="#icon-refresh"></use></svg></button>
-        </div>
-      </div>
       <div id="global-error" class="global-error" role="alert" hidden></div>
 
       <main id="main-content">
@@ -61,31 +61,39 @@
           <h1 id="overview-heading" class="visually-hidden">Overview</h1>
           <div class="metric-grid" aria-label="Workspace summary">
             <article class="metric-card"><div class="metric-head"><span>Connected accounts</span><span class="metric-icon metric-icon-blue"><svg><use href="#icon-users"></use></svg></span></div><strong id="metric-accounts">—</strong><small id="metric-accounts-detail">Loading accounts</small></article>
-            <article class="metric-card"><div class="metric-head"><span>Observed models</span><span class="metric-icon metric-icon-purple"><svg><use href="#icon-grid"></use></svg></span></div><strong id="metric-models">—</strong><small id="metric-models-detail">Loading models</small></article>
-            <article class="metric-card"><div class="metric-head"><span>Usage signals</span><span class="metric-icon metric-icon-green"><svg><use href="#icon-activity"></use></svg></span></div><strong id="metric-usage">—</strong><small id="metric-usage-detail">Loading observations</small></article>
+            <article class="metric-card"><div class="metric-head"><span>Ready accounts</span><span class="metric-icon metric-icon-purple"><svg><use href="#icon-check"></use></svg></span></div><strong id="metric-ready">—</strong><small id="metric-ready-detail">Loading routes</small></article>
+            <article class="metric-card"><div class="metric-head"><span>Fresh usage</span><span class="metric-icon metric-icon-green"><svg><use href="#icon-activity"></use></svg></span></div><strong id="metric-fresh">—</strong><small id="metric-fresh-detail">Loading observations</small></article>
             <article class="metric-card"><div class="metric-head"><span>Conversations</span><span class="metric-icon metric-icon-orange"><svg><use href="#icon-chat"></use></svg></span></div><strong id="metric-instances">—</strong><small id="metric-instances-detail">Loading conversations</small></article>
           </div>
-          <div class="content-grid">
-            <section class="surface models-surface" aria-labelledby="models-heading"><div class="section-heading"><div><span class="overline">ROUTING CATALOG</span><h2 id="models-heading">Available models</h2><p>Exact model IDs observed from connected accounts.</p></div><button id="overview-open-chat" class="text-button" type="button" data-go="chat">Open chat <svg><use href="#icon-arrow"></use></svg></button></div><div id="overview-models" class="model-grid"></div></section>
-            <section class="surface account-surface" aria-labelledby="snapshot-heading"><div class="section-heading"><div><span class="overline">ACCOUNT HEALTH</span><h2 id="snapshot-heading">Usage snapshot</h2><p>Unknown and stale values stay visible.</p></div></div><div id="overview-usage" class="usage-list"></div><button id="overview-manage-accounts" class="surface-link" type="button" data-go="accounts"><span id="overview-account-action">Manage accounts</span><svg><use href="#icon-arrow"></use></svg></button></section>
-          </div>
+          <section class="surface capacity-surface" aria-labelledby="capacity-heading">
+            <div class="capacity-header"><div><span class="overline">ACCOUNT CAPACITY</span><h2 id="capacity-heading">Available routes</h2><p>Fresh quota shows the most constrained observed window. Unknown and stale values stay explicit.</p></div><div class="capacity-actions"><button id="overview-open-chat" class="button button-primary" type="button" data-go="chat">Open chat <svg><use href="#icon-arrow"></use></svg></button><button id="overview-manage-accounts" class="button button-secondary" type="button" data-go="accounts"><span id="overview-account-action">Manage accounts</span></button></div></div>
+            <div id="overview-capacity-list" data-testid="overview-capacity-list" class="capacity-list" role="list" aria-label="Account capacity"></div>
+            <div id="overview-page-controls" class="capacity-pager" hidden><span id="overview-page-status" role="status"></span><div><button id="overview-prev-page" class="button button-secondary" type="button">Previous</button><button id="overview-next-page" class="button button-secondary" type="button">Next</button></div></div>
+          </section>
         </section>
 
         <section id="view-accounts" class="view" aria-labelledby="accounts-heading" hidden>
           <h1 id="accounts-heading" class="visually-hidden">Accounts</h1>
           <div class="view-actions"><button id="accounts-add" data-testid="add-account" class="button button-primary" type="button"><svg><use href="#icon-plus"></use></svg>Add account</button></div>
           <div id="accounts-summary" class="account-summary"></div>
-          <div id="accounts-list" data-testid="accounts-list" class="account-list"></div>
+          <div id="accounts-list" data-testid="accounts-list" class="account-table-wrap"></div>
+          <div id="accounts-pager" class="list-pager" aria-label="Account pages" hidden><span id="accounts-page-label"></span><button id="accounts-prev" class="button button-secondary" type="button" aria-label="Previous accounts page">Previous</button><button id="accounts-next" class="button button-secondary" type="button" aria-label="Next accounts page">Next</button></div>
           <div id="accounts-removal-note" class="info-strip"><svg><use href="#icon-activity"></use></svg><p>Removing an account stops AgentBridge from using it. The provider authorization is not revoked.</p></div>
         </section>
 
         <section id="view-chat" class="view chat-view" aria-labelledby="chat-heading" hidden>
           <h1 id="chat-heading" class="visually-hidden">Chat</h1>
-          <div class="view-actions"><button id="new-conversation" class="button button-secondary" type="button"><svg><use href="#icon-plus"></use></svg>New conversation</button></div>
+          <div class="view-actions chat-actions">
+            <button id="new-conversation" class="button button-secondary" type="button"><svg><use href="#icon-plus"></use></svg>New conversation</button>
+            <details id="route-settings" class="route-settings">
+              <summary><svg><use href="#icon-spark"></use></svg><span>More settings</span><span id="route-summary">Choose a model</span></summary>
+              <div class="route-settings-panel"><div class="route-fields"><label>Account route<select id="chat-account" data-testid="chat-account"><option value="">Automatic · least usage</option></select></label><label>Workspace<input id="chat-workspace" data-testid="chat-workspace" type="text" autocomplete="off" placeholder="Local workspace path"></label><label id="permission-field" hidden>Permission mode<select id="chat-permission" data-testid="chat-permission"></select></label></div><p id="route-help" class="field-help">Model and account availability reflect account observations.</p></div>
+            </details>
+          </div>
           <div class="chat-layout">
             <aside class="conversation-rail" aria-label="Conversations"><div class="rail-heading"><strong>Conversations</strong><span id="conversation-count">0</span></div><div id="conversation-list" data-testid="conversation-list" class="conversation-list"></div></aside>
             <div class="chat-column">
-              <details id="route-settings" class="route-settings" open><summary><span class="route-settings-title"><svg><use href="#icon-spark"></use></svg> Conversation settings</span><span id="route-summary">Choose a model</span></summary><div class="route-fields"><label>Provider<select id="chat-provider" data-testid="chat-provider"><option value="">All providers</option></select></label><label>Model<select id="chat-model" data-testid="chat-model" required><option value="">Select a model</option></select></label><label>Account route<select id="chat-account" data-testid="chat-account"><option value="">Automatic · least usage</option></select></label><label>Workspace<input id="chat-workspace" data-testid="chat-workspace" type="text" autocomplete="off" placeholder="Local workspace path"></label><label id="effort-field" hidden>Reasoning effort<select id="chat-effort" data-testid="chat-effort"></select></label><label id="context-field" hidden>Maximum context tokens<input id="chat-context" data-testid="chat-context" type="number" min="1" step="1" inputmode="numeric" placeholder="Default"></label><label id="permission-field" hidden>Permission mode<select id="chat-permission" data-testid="chat-permission"></select></label></div><p id="route-help" class="field-help">Model and account availability reflect account observations.</p></details>
+              <div class="route-primary-fields" role="group" aria-label="Conversation route"><label>Provider<select id="chat-provider" data-testid="chat-provider"><option value="">All providers</option></select></label><label>Model<select id="chat-model" data-testid="chat-model" required><option value="">Select a model</option></select></label><label id="effort-field" hidden>Reasoning effort<select id="chat-effort" data-testid="chat-effort"></select></label><label id="context-field" hidden>Maximum context tokens<input id="chat-context" data-testid="chat-context" type="number" min="1" step="1" inputmode="numeric" placeholder="Default"></label></div>
               <div class="chat-surface"><div class="chat-surface-head"><div><span class="chat-avatar"><svg><use href="#icon-spark"></use></svg></span><div><strong id="chat-conversation-title">New conversation</strong><small id="chat-conversation-subtitle">Ready when you are</small></div></div><button id="stop-turn" data-testid="chat-stop" class="button button-stop" type="button" hidden><svg><use href="#icon-stop"></use></svg>Stop turn</button></div><div id="chat-messages" data-testid="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-label="Conversation"><div class="chat-empty"><span class="empty-mark"><svg><use href="#icon-spark"></use></svg></span><h2>What can we work on?</h2><p>Select an observed model and send a message. Your conversation stays connected to one AgentBridge instance.</p></div></div><form id="chat-form" class="composer"><label for="chat-input" class="visually-hidden">Message</label><textarea id="chat-input" data-testid="chat-input" rows="2" placeholder="Ask AgentBridge anything…" required></textarea><div class="composer-bottom"><span id="composer-hint">Enter to send · Shift+Enter for a new line</span><button id="chat-send" data-testid="chat-send" class="button button-primary" type="submit">Send <svg><use href="#icon-arrow"></use></svg></button></div></form></div>
               <details class="event-drawer"><summary>Turn activity <span id="event-count">0 events</span></summary><div id="chat-event-list" class="event-list"></div></details>
             </div>
@@ -113,6 +121,12 @@
         <p class="field-help">The name is only used to identify this account in AgentBridge.</p>
         <div class="modal-actions"><button id="login-start" data-testid="login-start" class="button button-primary" type="submit">Start sign-in <svg><use href="#icon-arrow"></use></svg></button></div>
       </form>
+      <section id="login-recovery" class="status-banner" aria-label="Unfinished sign-ins" hidden>
+        <strong>Unfinished sign-ins</strong>
+        <p class="field-help">An earlier OAuth result is unknown. Abandon a local attempt only after checking the provider account; this does not cancel remote authorization.</p>
+        <div id="login-recovery-list" class="event-list"></div>
+        <div id="login-recovery-pages" class="modal-actions" hidden><button id="login-recovery-prev" class="button button-ghost" type="button">Previous</button><button id="login-recovery-next" class="button button-ghost" type="button">Next</button></div>
+      </section>
       <div id="login-progress" hidden>
         <div id="login-status" data-testid="login-status" class="status-banner" aria-live="polite"></div>
         <a id="login-open-url" data-testid="login-open-url" class="button button-primary external-button" target="_blank" rel="noopener noreferrer" hidden>Open authorization page <svg><use href="#icon-external"></use></svg></a>
@@ -121,6 +135,10 @@
         <div class="modal-actions"><button id="login-retry-check" class="button button-secondary" type="button" hidden>Retry verification</button><button id="login-cancel" data-testid="login-cancel" class="button button-ghost" type="button">Cancel login</button></div>
       </div>
     </div>
+  </dialog>
+  <dialog id="account-models-dialog" data-testid="account-models-dialog" class="modal account-models-dialog" aria-labelledby="account-models-heading" aria-describedby="account-models-subtitle">
+    <form method="dialog" class="modal-close-form"><button id="account-models-close" class="icon-button" aria-label="Close models dialog" title="Close models dialog"><svg><use href="#icon-close"></use></svg></button></form>
+    <div class="modal-body"><span class="overline">ACCOUNT CATALOG</span><h2 id="account-models-heading">Account models</h2><p id="account-models-subtitle" class="modal-lead"></p><div id="account-models-content" class="account-models-content"></div></div>
   </dialog>
   <dialog id="remove-dialog" data-testid="remove-dialog" class="modal confirm-modal"><div class="modal-body"><span class="danger-symbol"><svg><use href="#icon-trash"></use></svg></span><h2>Remove account?</h2><p id="remove-account-name" class="confirm-name"></p><p>This stops AgentBridge from using the account. Its provider authorization is not revoked.</p><div id="remove-feedback" class="form-feedback" role="alert" hidden></div><div class="modal-actions"><button id="remove-cancel" class="button button-secondary" type="button">Keep account</button><button id="remove-confirm" data-testid="remove-confirm" class="button button-danger" type="button">Remove account</button></div></div></dialog>
   <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>

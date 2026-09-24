@@ -1,6 +1,7 @@
 """One account login: GrantBridge coordinates OAuth in a local CLIProxyAPI."""
 
 import hashlib
+import json
 import time
 from uuid import uuid4
 
@@ -15,6 +16,10 @@ from .proxy import ManagementClient, ProxyRoute
 
 TERMINAL = {'failed', 'cancelled', 'expired', 'interrupted', 'abandoned', 'revoked', 'replaced'}
 PROVIDERS = ('codex', 'claude', 'grok')
+KNOWN_START_FAILURES = frozenset({
+    'credential_unavailable', 'invalid_environment', 'grantbridge_unavailable',
+    'oauth_callback_port_busy', 'oauth_callback_unavailable',
+})
 
 
 class AuthenticationService:
@@ -22,6 +27,22 @@ class AuthenticationService:
         self.store = store
         self.accounts = accounts
         self.managed_proxy = managed_proxy
+
+    def attempts(self, *, provider=None, limit=100, cursor=0):
+        """List only interrupted local attempts for explicit owner recovery."""
+        if provider is not None and provider not in PROVIDERS:
+            raise BridgeError('invalid_provider', 'Choose a supported proxy provider.')
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise BridgeError('invalid_limit', 'limit must be in [1, 100].')
+        if type(cursor) is not int or not 0 <= cursor <= 10000:
+            raise BridgeError('invalid_cursor', 'cursor must be in [0, 10000].')
+        rows = self.store.interrupted_auth_attempts(provider, limit=limit, cursor=cursor)
+        return [{'attempt_id': row['id'], 'owner_ref': row['owner'],
+                 'provider': row['engine'], 'account_ref': row['name'],
+                 'status': 'interrupted', 'created_at': row['created'],
+                 'error': {'code': auth_contract.error_code(
+                     (json.loads(row['data']).get('error') or {}).get('code'))}}
+                for row in rows]
 
     def start(self, *, provider, name, proxy_base_url=None, key_env=None,
               management_key_env=None, email=None, grantbridge_root=None, data_dir=None,
@@ -39,11 +60,12 @@ class AuthenticationService:
         owner = owner_ref or self._owner_for(request_key)
         identifier(owner)
         accounts = self.accounts.list()
-        existing = next((item for item in accounts
-                         if item.name and account_name_key(item.name) == account_name_key(name)), None)
-        if existing and existing.provider != provider:
-            raise BridgeError('account_migration_required',
-                              'The existing account belongs to a different provider.')
+        matching = [item for item in accounts if (item.provider or item.engine) == provider
+                    and item.name and account_name_key(item.name) == account_name_key(name)]
+        if len(matching) > 1:
+            raise BridgeError('account_name_in_use',
+                              'Multiple accounts with this name already exist for the provider.')
+        existing = matching[0] if matching else None
         account_id = existing.id if existing else uuid4().hex
         supplied = (proxy_base_url, key_env, management_key_env)
         managed_created = not existing and not any(value is not None for value in supplied)
@@ -117,13 +139,26 @@ class AuthenticationService:
                 attempt['id'], owner, grantbridge_id=remote['id'],
                 status=auth_contract.status(remote), data=remote)
         except BridgeError as error:
+            if error.code in KNOWN_START_FAILURES:
+                # These failures happen before the request reaches CLIProxyAPI.
+                self.store.update_auth_attempt(
+                    attempt['id'], owner, status='failed',
+                    data={'error': {'code': error.code}})
+                if managed_created:
+                    try:
+                        self.managed_proxy.retire(account_id)
+                    except BridgeError:
+                        pass
+                raise
             # Once dispatched, an interrupted response cannot prove whether
             # CLIProxyAPI created an OAuth session. Do not retry automatically.
             self.store.update_auth_attempt(
                 attempt['id'], owner, status='interrupted',
                 data={'error': {'code': 'authentication_outcome_unknown'}})
             raise BridgeError('authentication_outcome_unknown',
-                              'OAuth start has an unknown outcome. Abandon this attempt and use a new local proxy endpoint.') from error
+                              'OAuth start has an unknown outcome. Abandon this attempt and use a new local proxy endpoint.',
+                              outcome='unknown',
+                              details={'attempt_id': attempt['id'], 'owner_ref': owner}) from error
         finally:
             client.close()
         return self._public(saved)
@@ -376,11 +411,12 @@ class AuthenticationService:
     def _status(remote, current=None):
         return auth_contract.status(remote)
 
-    @staticmethod
-    def _public(row):
+    def _public(self, row):
         data = auth_contract.projection(row.get('data'))
+        reference = (self.accounts.reference(row['account_id'])
+                     if row['status'] in {'bound', 'usable'} else row['name'])
         result = {'attempt_id': row['id'], 'owner_ref': row['owner'],
-                  'account_ref': row['name'], 'provider': row['engine'],
+                  'account_ref': reference, 'provider': row['engine'],
                   'status': row['status']}
         if row['status'] in {'bound', 'usable'}:
             result['account_id'] = row['account_id']
