@@ -1,7 +1,7 @@
 import { formatClock, node } from './ui.js';
 
 const ACTIVITY_KINDS = new Set([
-  'run.started', 'route.selected', 'tool.started', 'tool.completed',
+  'tool.started', 'tool.completed',
   'context.compacting', 'context.compacted', 'subagent.status', 'run.retrying', 'model.changed',
   'permission.required', 'permission.responded', 'permission.denied',
   'run.error', 'recovery.gap', 'recovery.observed', 'run.finished',
@@ -26,9 +26,6 @@ function activityText(event, completedCalls) {
   const data = event.data || {};
   const name = String(data.name || data.tool || 'Tool').replaceAll('_', ' ');
   switch (event.kind) {
-    case 'run.started': return ['Turn started', 'The provider is working.'];
-    case 'route.selected': return ['Route selected',
-      [data.model, data.account_ref || data.account_id].filter(Boolean).join(' · ')];
     case 'tool.started': return [completedCalls.has(`${event.turn_id}:${data.call_id}`)
       ? `${name} started` : `${name} running`, ''];
     case 'tool.completed': return [`${name} ${data.outcome === 'failed' ? 'failed'
@@ -49,6 +46,18 @@ function activityText(event, completedCalls) {
     case 'run.finished': return ['Turn finished', `State: ${data.state || 'unknown'}`];
     default: return ['', ''];
   }
+}
+
+function showActivity(event) {
+  if (!ACTIVITY_KINDS.has(event.kind)) return false;
+  if (event.kind === 'run.finished') return event.data?.state !== 'completed';
+  if (event.kind === 'recovery.gap') {
+    const data = event.data || {};
+    // Keep these provider observations in Activity without treating them as chat failures.
+    return data.reason !== 'unsupported_provider_observation'
+      && !(data.reason === 'unsupported_item' && data.native_type === 'error');
+  }
+  return true;
 }
 
 function permissionActions(event, answered, finished, onPermission) {
@@ -136,7 +145,7 @@ export function appendTimeline(list, messages, events, activeTurn, onPermission)
     };
     for (const event of ordered) {
       if (!responseShown && outputSeq && event.seq > outputSeq) showResponse();
-      if (!ACTIVITY_KINDS.has(event.kind)) continue;
+      if (!showActivity(event)) continue;
       list.append(activityNode(event, completedCalls, compactedTurns, answered, finished, onPermission));
       count += 1;
     }

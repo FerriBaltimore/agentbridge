@@ -207,11 +207,14 @@ def test_browser_permission_response_reaches_sdk(local_playground, decision, exp
             instance_id = run['session_id']
             assert json.loads(run['options'])['permission_mode'] == 'default'
             permission_id = _pending_permission(bridge, turn_id)
+            action = 'Allow once' if decision == 'allow' else 'Deny'
+            page.get_by_test_id('chat-messages').locator(
+                '[data-kind="permission.required"]').get_by_role(
+                'button', name=action).wait_for(timeout=15000)
             drawer = page.locator('.event-drawer')
             drawer.locator('summary').click()
             events = page.locator('#chat-event-list')
             events.get_by_text('permission.required').wait_for(timeout=15000)
-            action = 'Allow once' if decision == 'allow' else 'Deny'
             events.get_by_role('button', name=action).click()
 
             assert bridge.run(turn_id).wait(15)['state'] == 'completed'
