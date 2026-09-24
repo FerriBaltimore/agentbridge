@@ -37,14 +37,15 @@ export function setupChat({ onDataChanged }) {
   }
 
   function updateControls() {
+    catalog.setBusy(busy || !!activeTurn);
     sendButton.disabled = busy || !!activeTurn || !catalog.canSend();
     stopButton.hidden = !activeTurn;
     newButton.disabled = !!activeTurn || busy;
     byId('activity-refresh').disabled = !current;
+    renderChatHeader(current, activeTurn, catalog.selected(), catalog.hasPendingRoute());
   }
 
   function render() {
-    renderChatHeader(current, activeTurn);
     renderConversations(instances, instanceId(current), activeTurn, selectConversation);
     renderMessages(messages, activeTurn);
     renderEvents(events, current, answerPermission);
@@ -110,6 +111,7 @@ export function setupChat({ onDataChanged }) {
       messages = [];
       events = [];
       eventCursor = 0;
+      pendingSend = null;
       await refreshConversation();
       if (activeTurn) {
         stopPolling();
@@ -120,6 +122,22 @@ export function setupChat({ onDataChanged }) {
     } finally {
       busy = false;
       render();
+    }
+  }
+
+  async function refreshCurrentState() {
+    if (!current) return;
+    const id = instanceId(current);
+    const latest = await api.instance(id);
+    if (instanceId(current) !== id) return;
+    current = latest;
+    instances = [latest, ...instances.filter((item) => instanceId(item) !== id)];
+    catalog.refreshInstance(latest);
+    const lastTurn = latest.last_turn;
+    activeTurn = lastTurn && !TERMINAL.has(lastTurn.state) ? lastTurn.turn_id : null;
+    if (activeTurn) {
+      stopPolling();
+      timer = setTimeout(pollTurn, 300);
     }
   }
 
@@ -142,12 +160,17 @@ export function setupChat({ onDataChanged }) {
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     if (!catalog.canSend()) {
-      toast('Choose a model observed from an available account.', true);
+      toast('Choose an available route and a valid context window.', true);
       return;
     }
     const choice = catalog.selected();
-    if (!pendingSend || pendingSend.text !== text) {
-      pendingSend = { text, createKey: key(), messageKey: key() };
+    const route = choice.account
+      ? { account: choice.account, model: choice.model }
+      : { provider: choice.provider, model: choice.model };
+    const fingerprint = JSON.stringify({ text, route, effort: choice.effort,
+      context: choice.context, permission: choice.permission, workspace: choice.workspace });
+    if (!pendingSend || pendingSend.fingerprint !== fingerprint) {
+      pendingSend = { fingerprint, createKey: key(), messageKey: key() };
     }
     busy = true;
     updateControls();
@@ -163,11 +186,22 @@ export function setupChat({ onDataChanged }) {
         current = await api.createInstance(values);
         catalog.lock(current);
         instances = [current, ...instances.filter((item) => instanceId(item) !== instanceId(current))];
+      } else {
+        const update = catalog.updatePayload();
+        if (update) {
+          try {
+            current = await api.updateInstance(instanceId(current), update);
+            catalog.lock(current);
+            instances = [current, ...instances.filter((item) => instanceId(item) !== instanceId(current))];
+          } catch (error) {
+            await refreshCurrentState().catch(() => {});
+            throw error;
+          }
+        }
       }
       const values = { content: text, idempotency_key: pendingSend.messageKey };
       if (choice.effort) values.effort = choice.effort;
-      if (choice.context) values.context_window = /^[0-9]+$/.test(choice.context)
-        ? Number(choice.context) : choice.context;
+      if (choice.context) values.context_window = Number(choice.context);
       if (choice.permission) values.permission_mode = choice.permission;
       const result = await api.sendMessage(instanceId(current), values);
       activeTurn = result.turn_id;

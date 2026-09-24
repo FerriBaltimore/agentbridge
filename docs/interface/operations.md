@@ -107,7 +107,7 @@ historical time filters and aggregation are unsupported by this adapter.
                      metadata?, idempotency_key?, evaluation?)
     instances.get(instance_id, include_last_turn?, include_usage?)
     instances.list(account_ref?, state?, limit?, cursor?, include_last_turn?)
-    instances.update(instance_id, model?, effort?, context_window?,
+    instances.update(instance_id, model?, provider?, effort?, context_window?,
                      permission_mode?, sandbox_mode?, allowed_tools?,
                      expected_version?, metadata?)
     instances.archive(instance_id, expected_version?)
@@ -126,8 +126,19 @@ writing durable state; it does not prove live entitlement or spend a model turn.
 The signature above includes target optional controls. The current v2 adapter
 rejects nondefault effort, context-window, permission, sandbox and tool
 controls on `instances.create`; send supported controls with each
-`messages.create` call instead. `instances.update` currently changes only
-model or state; its listed advanced defaults are unsupported.
+`messages.create` call instead. `instances.update` changes model, automatic
+routing provider or state; its listed advanced defaults are unsupported.
+Changing model and provider in one call validates their combination and saves
+both with one version change. Omitting `provider` preserves the existing filter;
+passing `provider: null` clears it. Supplying any `provider` value to a pinned
+instance explicitly converts it to automatic routing, including a value equal
+to that account's provider. The last selected account remains visible until a
+new turn is admitted. No update converts an automatic instance back to pinned.
+Route changes require an active, non-evaluation instance with no active turn.
+They check that a non-retired, login-bound proxy account declares the chosen
+model and provider; each later turn still requires fresh local proxy evidence.
+Use `expected_version` to reject a competing change. Effort and context window
+remain per-turn `messages.create` controls.
 
 `evaluation: true` marks a fresh, disposable instance. Such an instance accepts
 one turn through `messages.create` with a validated context package whose

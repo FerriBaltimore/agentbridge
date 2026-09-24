@@ -79,6 +79,8 @@ export const api = {
   loginCancel: (id, ownerRef) => request(`/api/accounts/login/${ref(id)}/cancel`, { method: 'POST', body: { owner_ref: ownerRef } }),
   deleteAccount: (account) => request(`/api/accounts/${ref(account)}`, { method: 'DELETE' }),
   createInstance: (values) => request('/api/instances', { method: 'POST', body: values }),
+  updateInstance: (id, values) => request(`/api/instances/${ref(id)}`,
+    { method: 'POST', body: values }),
   sendMessage: (id, values) => request(`/api/instances/${ref(id)}/messages`, { method: 'POST', body: values }),
   stopTurn: (id) => request(`/api/turns/${ref(id)}/stop`, { method: 'POST', body: { wait: false } }),
   answerPermission: (turnId, permissionId, decision) => request(

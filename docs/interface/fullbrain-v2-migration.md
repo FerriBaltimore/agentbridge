@@ -112,8 +112,11 @@ authorization URL by itself does not verify or create an account.
 Create a v2 instance with `model` and `workspace_path`. Omit `account_ref` for
 automatic routing; optionally set `provider` to limit candidates. A pinned
 instance supplies `account_ref` and cannot also supply `provider`. The routing
-policy is fixed on that instance, and automatic selection occurs before every
-admitted turn. Send supported effort, numeric `context_window`, permissions,
+policy can change through `instances.update(model?, provider?, expected_version?)`
+between turns. Omitting `provider` preserves the filter, while explicit `null`
+clears it; supplying it on a pinned instance converts that instance to
+automatic routing. Automatic selection occurs before every admitted turn.
+Send supported effort, numeric `context_window`, permissions,
 sandbox and timeout **per turn** with `messages.create`. Advanced instance
 defaults, `allowed_tools`, `max_budget`, `provider_options` and arbitrary
 metadata are not usable in the current adapter.

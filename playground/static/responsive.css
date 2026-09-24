@@ -3,7 +3,6 @@
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .content-grid { grid-template-columns: minmax(0, 1fr); }
   .model-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .hero-art { right: -5%; }
 }
 
 @media (max-width: 950px) {
@@ -14,7 +13,6 @@
   .nav-list { display: flex; gap: 4px; min-width: 0; margin-left: auto; }
   .nav-link { width: auto; padding: 10px 12px; }
   .nav-link.is-active { box-shadow: inset 0 -3px #7d96ff; }
-  .hero-art { right: 0; }
   .chat-layout { grid-template-columns: 175px minmax(0, 1fr); }
   .route-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -32,12 +30,7 @@
   .topbar-actions { gap: 7px; }
   main { padding: 18px 18px 45px; }
   .global-error { margin: 12px 18px 0; }
-  .hero { min-height: 255px; }
-  .hero-copy { width: 100%; padding: 31px 28px; }
-  .hero-art { right: -160px; opacity: .32; }
-  .hero h1 { font-size: 37px; }
-  .hero p { max-width: 350px; }
-  .metric-grid { gap: 10px; margin: 14px 0; }
+  .metric-grid { gap: 10px; margin: 0 0 14px; }
   .metric-card { padding: 15px; }
   .metric-card strong { font-size: 25px; }
   .metric-head { font-size: 10px; }
@@ -55,17 +48,14 @@
 
 @media (max-width: 500px) {
   .nav-link { flex-direction: column; gap: 4px; font-size: 9px; }
-  .page-intro { align-items: flex-start; }
-  .page-intro h1 { font-size: 31px; }
-  .page-intro .button { padding: 8px; min-height: 34px; font-size: 10px; }
-  .page-intro .button svg { width: 12px; height: 12px; }
+  .view-actions .button { padding: 8px; min-height: 34px; font-size: 10px; }
+  .view-actions .button svg { width: 12px; height: 12px; }
   .surface { padding: 18px; }
   .model-grid, .account-list { grid-template-columns: minmax(0, 1fr); }
   .section-heading { margin-bottom: 18px; }
   .section-heading h2 { font-size: 17px; }
   .section-heading p { font-size: 10px; }
   .text-button { font-size: 10px; }
-  .chat-intro { align-items: center; }
   .route-fields { grid-template-columns: minmax(0, 1fr); }
   .route-settings summary { align-items: flex-start; }
   #route-summary { text-align: right; }

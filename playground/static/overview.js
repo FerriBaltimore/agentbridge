@@ -17,7 +17,7 @@ function modelCard(model) {
   return card;
 }
 
-export function renderOverview({ accounts, models, instances, usage, onAccounts, onChat }) {
+export function renderOverview({ accounts, models, instances, usage, onChat }) {
   const accountRows = Array.isArray(accounts) ? accounts : [];
   const modelRows = Array.isArray(models?.items) ? models.items
     : Array.isArray(models?.models) ? models.models : [];
@@ -25,25 +25,12 @@ export function renderOverview({ accounts, models, instances, usage, onAccounts,
   const observed = modelRows.filter((model) => model.availability === 'proxy_observed'
     && model.observed_account_refs?.length);
   const freshUsage = accountRows.filter((account) => usageSignal(usage.get(account.account_ref)).fresh);
-  const startButton = byId('hero-start-chat');
   const accountRefs = new Set(accountRows.map((account) => account.account_ref));
   const canChat = observed.some((model) => model.observed_account_refs
     .some((ref) => accountRefs.has(ref)));
-  startButton.textContent = canChat ? 'Start a conversation' : accountRows.length
-    ? 'Review accounts' : 'Connect an account';
-  byId('overview-description').textContent = canChat
-    ? 'Explore your routed models, watch account usage, and start a conversation with your connected accounts.'
-    : accountRows.length
-      ? 'Review your connected accounts and their model observations before starting a conversation.'
-      : 'Connect an account to discover its models, track usage, and start a conversation.';
   byId('overview-open-chat').hidden = !canChat;
-  byId('overview-manage-accounts').hidden = !canChat;
-  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-  use.setAttribute('href', '#icon-arrow');
-  arrow.append(use);
-  startButton.append(arrow);
-  startButton.onclick = canChat ? onChat : onAccounts;
+  byId('overview-account-action').textContent = accountRows.length
+    ? 'Manage accounts' : 'Connect an account';
   byId('metric-accounts').textContent = String(accountRows.length);
   byId('metric-accounts-detail').textContent = accountRows.length === 1 ? 'One local route' : 'Dedicated local routes';
   byId('metric-models').textContent = String(observed.length);

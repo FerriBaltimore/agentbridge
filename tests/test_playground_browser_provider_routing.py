@@ -71,15 +71,13 @@ def test_browser_provider_filters_shared_model_controls_and_route(shared_model_p
             provider = page.get_by_test_id('chat-provider')
             model.select_option(MODEL)
             assert page.locator('#effort-field').is_hidden()
-            assert page.get_by_test_id('chat-context').locator('option').evaluate_all(
-                '(items) => items.map((item) => item.value)') == ['', '65536']
+            assert page.get_by_test_id('chat-context').get_attribute('max') == '65536'
 
             provider.select_option('claude')
             assert model.input_value() == MODEL
             assert page.get_by_test_id('chat-effort').locator('option').evaluate_all(
                 '(items) => items.map((item) => item.value)') == ['', 'low']
-            assert page.get_by_test_id('chat-context').locator('option').evaluate_all(
-                '(items) => items.map((item) => item.value)') == ['', '65536']
+            assert page.get_by_test_id('chat-context').get_attribute('max') == '65536'
             page.get_by_test_id('chat-input').fill('Route within Claude')
             page.get_by_test_id('chat-send').click()
             page.get_by_test_id('chat-messages').get_by_text('Browser fixture answer').wait_for(
@@ -97,8 +95,7 @@ def test_browser_provider_filters_shared_model_controls_and_route(shared_model_p
             model.select_option(MODEL)
             assert page.get_by_test_id('chat-effort').locator('option').evaluate_all(
                 '(items) => items.map((item) => item.value)') == ['', 'high']
-            assert page.get_by_test_id('chat-context').locator('option').evaluate_all(
-                '(items) => items.map((item) => item.value)') == ['', '131072']
+            assert page.get_by_test_id('chat-context').get_attribute('max') == '131072'
             page.get_by_test_id('chat-input').fill('Route within OpenAI')
             page.get_by_test_id('chat-send').click()
             page.get_by_test_id('chat-messages').get_by_text('Browser fixture answer').wait_for(

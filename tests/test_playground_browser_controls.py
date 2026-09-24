@@ -172,7 +172,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
         browser = _launch_browser(playwright)
         try:
             page, errors = _page(browser, local_playground['url'])
-            page.locator('#hero-start-chat').click()
+            page.get_by_test_id('nav-chat').click()
             assert page.locator('#view-chat h1').inner_text() == 'Chat'
             page.get_by_test_id('chat-provider').select_option('codex')
             page.get_by_test_id('chat-model').select_option('fixture/openai-model')
@@ -185,8 +185,8 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
                 timeout=15000)
             playwright_api.expect(page.locator('#new-conversation')).to_be_enabled(
                 timeout=15000)
-            assert page.get_by_test_id('chat-provider').is_disabled()
-            assert route.is_disabled() and route.input_value() == 'OpenAI Personal'
+            assert page.get_by_test_id('chat-provider').is_enabled()
+            assert route.is_enabled() and route.input_value() == 'OpenAI Personal'
             assert page.get_by_test_id('conversation-list').get_by_test_id(
                 'conversation-item').count() == 1
 

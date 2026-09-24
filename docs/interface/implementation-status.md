@@ -16,7 +16,7 @@ historical evidence and read-only data, not a second usable workflow.
 | Login binding | New sidecar must be empty; complete requires one active upstream identity and observed models; account is created atomically | Identity and inventory fixture checks; local observation is not live entitlement |
 | Proxy account routes | Codex Responses endpoint on loopback, key references, unique sidecar URL, identity binding and clean inventory check | One file-backed account per sidecar; config-key-only routes ineligible |
 | Model routing | Exact model support, fresh proxy observation, quota-aware selector with unknown fallback and persisted route decisions | Fixtures; provider/model acceptance and quota completeness pending |
-| Instances and turns | Automatic account selection or pinned proxy route; fixed route for a turn; portable context on a later account change | Cross-account continuation has fixture evidence only |
+| Instances and turns | Automatic account selection or pinned proxy route; atomic model/provider reconfiguration between turns; fixed route for a turn; portable context on a later account change | Reconfiguration and cross-account continuation have fixture evidence only |
 | Account and model RPC | Safe account projection; exact configured IDs and separate observed accounts | Local catalogue presence is not provider entitlement |
 | Usage | Source and timestamp retained; missing or stale quota remains unknown | Upstream quota varies by provider and needs live acceptance |
 | Stop and recovery | Explicit cancellation; lost workers classified without silent replay | Unknown effects stay unknown; no hidden account change |

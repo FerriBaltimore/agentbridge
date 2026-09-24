@@ -93,6 +93,20 @@ def _assert_layout_fits(page):
         assert dialog['left'] >= -1 and dialog['right'] <= page.viewport_size['width'] + 1, metrics
 
 
+def _assert_compact_view(page, view, first_content):
+    section = page.locator(f'#view-{view}')
+    heading = section.locator('h1')
+    assert heading.count() == 1
+    assert heading.get_attribute('class') == 'visually-hidden'
+    assert section.locator('.hero, .page-intro').count() == 0
+    offset = page.evaluate('''([view, selector]) => {
+      const section = document.querySelector(`#view-${view}`);
+      return section.querySelector(selector).getBoundingClientRect().top
+        - section.getBoundingClientRect().top;
+    }''', [view, first_content])
+    assert offset <= 20, (view, offset)
+
+
 def test_responsive_views_dialogs_and_keyboard_navigation(local_playground):
     with playwright_api.sync_playwright() as playwright:
         browser = _launch_browser(playwright)
@@ -102,22 +116,29 @@ def test_responsive_views_dialogs_and_keyboard_navigation(local_playground):
                 page.set_viewport_size({'width': width, 'height': height})
                 page.get_by_test_id('nav-overview').click()
                 page.get_by_role('heading', name='Available models').wait_for()
-                assert page.locator('.view:visible h1').count() == 1
+                _assert_compact_view(page, 'overview', '.metric-grid')
                 assert page.get_by_test_id('add-account').is_hidden()
                 _assert_layout_fits(page)
 
                 page.get_by_test_id('nav-activity').click()
                 page.locator('#activity-title').get_by_text('No conversation selected').wait_for()
                 page.get_by_test_id('activity-list').get_by_text('No events recorded').wait_for()
-                assert page.locator('.view:visible h1').count() == 1
+                _assert_compact_view(page, 'activity', '.activity-surface')
+                assert page.get_by_role('button', name='Refresh events').is_visible()
                 assert page.get_by_test_id('add-account').is_hidden()
                 _assert_layout_fits(page)
 
                 page.get_by_test_id('nav-accounts').click()
                 page.get_by_test_id('accounts-list').get_by_text('OpenAI Personal').wait_for()
-                assert page.locator('.view:visible h1').count() == 1
+                _assert_compact_view(page, 'accounts', '.view-actions')
                 assert page.get_by_role('button', name='Add account').count() == 1
                 _assert_layout_fits(page)
+
+                page.get_by_test_id('nav-chat').click()
+                _assert_compact_view(page, 'chat', '.view-actions')
+                assert page.get_by_role('button', name='New conversation').is_visible()
+                _assert_layout_fits(page)
+                page.get_by_test_id('nav-accounts').click()
 
                 page.get_by_test_id('add-account').click()
                 dialog = page.get_by_test_id('login-dialog')
@@ -161,18 +182,20 @@ def test_empty_workspace_has_honest_states_and_no_overflow(empty_playground):
             page.locator('#metric-accounts').get_by_text('0').wait_for()
             page.locator('#overview-models').get_by_text('No models yet').wait_for()
             page.locator('#overview-usage').get_by_text('No account observations').wait_for()
-            assert page.locator('#hero-start-chat').inner_text() == 'Connect an account'
             assert page.locator('#overview-models').get_by_role('button').count() == 0
             assert page.locator('#overview-open-chat').is_hidden()
-            assert page.locator('#overview-manage-accounts').is_hidden()
-            page.locator('#hero-start-chat').click()
-            assert page.locator('#accounts-heading').is_visible()
+            assert page.locator('#overview-manage-accounts').inner_text() == 'Connect an account'
+            page.locator('#overview-manage-accounts').click()
+            assert page.get_by_test_id('add-account').is_visible()
             for width, height in [(1440, 1000), (390, 844), (320, 700)]:
                 page.set_viewport_size({'width': width, 'height': height})
                 for view in ['overview', 'accounts', 'chat', 'activity']:
                     page.get_by_test_id(f'nav-{view}').click()
-                    assert page.locator(f'#view-{view} h1').is_visible()
-                    assert page.locator('.view:visible h1').count() == 1
+                    first_content = {
+                        'overview': '.metric-grid', 'accounts': '.view-actions',
+                        'chat': '.view-actions', 'activity': '.activity-surface',
+                    }[view]
+                    _assert_compact_view(page, view, first_content)
                     _assert_layout_fits(page)
                 page.get_by_test_id('nav-accounts').click()
                 page.get_by_test_id('accounts-list').get_by_text('No accounts connected').wait_for()
@@ -211,7 +234,7 @@ def test_unknown_usage_and_missing_model_metadata_stay_unknown(unknown_playgroun
             assert page.locator('#effort-field').is_hidden()
             assert page.locator('#context-field').is_hidden()
             assert page.locator('#chat-effort').locator('option').all_text_contents() == ['Default']
-            assert page.locator('#chat-context').locator('option').all_text_contents() == ['Default']
+            assert page.locator('#chat-context').input_value() == ''
             page.set_viewport_size({'width': 320, 'height': 700})
             _assert_layout_fits(page)
             assert errors == []

@@ -18,8 +18,10 @@ export function renderConversations(instances, selectedId, activeTurn, onSelect)
     button.disabled = !!activeTurn && id !== selectedId;
     button.dataset.testid = 'conversation-item';
     button.setAttribute('aria-current', id === selectedId ? 'true' : 'false');
+    const route = instance.routing_mode === 'pinned'
+      ? instance.account_ref : instance.routing_provider || 'All providers';
     button.append(node('strong', '', instance.model || 'Untitled conversation'),
-      node('small', '', `${instance.routing_provider || instance.account_ref || 'Automatic'} · ${formatClock(instance.created_at || instance.created)}`));
+      node('small', '', `${route} · ${formatClock(instance.created_at || instance.created)}`));
     button.addEventListener('click', () => onSelect(id));
     list.append(button);
   }
@@ -117,8 +119,10 @@ export function renderEvents(events, instance, onPermission) {
     .map((event) => event.turn_id).filter(Boolean));
   byId('event-count').textContent = `${visible.length} event${visible.length === 1 ? '' : 's'}`;
   byId('activity-title').textContent = instance?.model || 'No conversation selected';
+  const route = instance?.routing_mode === 'pinned'
+    ? `Pinned to ${instance.account_ref}` : instance?.routing_provider || 'All providers';
   byId('activity-subtitle').textContent = instance
-    ? `Instance ${instance.instance_id || instance.id} · ${instance.routing_provider || 'All providers'}`
+    ? `Instance ${instance.instance_id || instance.id} · ${route}`
     : 'Open a conversation in Chat to inspect its events.';
   for (const id of ['chat-event-list', 'activity-list']) {
     const list = clear(byId(id));
@@ -134,11 +138,15 @@ export function renderEvents(events, instance, onPermission) {
   }
 }
 
-export function renderChatHeader(instance, activeTurn) {
+export function renderChatHeader(instance, activeTurn, selected, pending) {
   byId('chat-conversation-title').textContent = instance?.model || 'New conversation';
+  const applied = instance?.routing_mode === 'pinned'
+    ? `Pinned to ${instance.account_ref}`
+    : `${instance?.routing_provider || 'All providers'} · automatic`;
+  const next = `${selected?.provider || 'All providers'} · ${selected?.model || 'Choose a model'} · ${selected?.account || 'automatic'}`;
   byId('chat-conversation-subtitle').textContent = activeTurn
-    ? 'A turn is running' : instance
-      ? `${instance.routing_provider || 'All providers'} · ${instance.routing_mode === 'pinned' ? instance.account_ref : 'Automatic routing'}`
-      : 'Ready when you are';
+    ? `A turn is running · ${applied}` : pending
+      ? `Pending: ${next} · Applied: ${instance.model} · ${applied}`
+      : instance ? applied : 'Ready when you are';
   byId('stop-turn').hidden = !activeTurn;
 }

@@ -83,6 +83,12 @@ class PublicBridgeStub:
                 'last_turn': {'id': 'turn-1', 'state': 'running',
                               'prompt': 'private-fixture-prompt'}}
 
+    def instance_update(self, instance_id, **options):
+        self._record('instance_update', instance_id, **options)
+        return {'instance_id': instance_id, 'model': options.get('model', 'fixture-model'),
+                'routing_provider': options.get('provider'),
+                'version': options['expected_version'] + 1}
+
     def messages(self, instance_id, *, limit):
         self._record('messages', instance_id, limit=limit)
         return [{'role': 'assistant', 'content': 'Hello'}]
@@ -233,6 +239,13 @@ def test_chat_routes_forward_optional_turn_controls(local_server, tmp_path):
                    body={'model': 'fixture-model', 'provider': 'codex',
                          'idempotency_key': 'create-1'})[1][
                        'result']['instance_id'] == 'instance-1'
+    update = {'expected_version': 2, 'provider': 'claude', 'model': 'fixture-claude'}
+    assert request(server, 'POST', '/api/instances/instance-1', body=update)[1][
+        'result']['routing_provider'] == 'claude'
+    assert ('instance_update', ('instance-1',), update) in bridge.calls
+    status, rejected = request(server, 'POST', '/api/instances/instance-1',
+                               body={**update, 'secret': 'must-not-pass'})
+    assert status == 400 and rejected['error']['code'] == 'invalid_request'
     message = {'content': 'Hello', 'model': 'fixture-model', 'effort': 'high',
                'context_window': 200000, 'permission_mode': 'dontAsk',
                'sandbox_mode': 'read-only', 'timeout_ms': 1000,

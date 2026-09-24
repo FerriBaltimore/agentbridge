@@ -13,6 +13,7 @@ from .auth_store import AuthStoreMixin
 from .routing.persistence import RoutingStoreMixin
 from .routing.binding import ProxyBindingStoreMixin
 from .routing.schema import migrate_v4, migrate_v5
+from .routing.reconfiguration import PROVIDER_UNSET, require_declared_route, validate_provider
 from .evaluation.schema import migrate_v6
 from .evaluation.persistence import EvaluationStoreMixin
 from .account_retirement import AccountRetirementStoreMixin, migrate_v7
@@ -249,12 +250,16 @@ class Store(AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStore
         """Native-home promotion is historical and cannot create a v2 route."""
         raise BridgeError('authentication_required', 'Reauthenticate through the proxy login flow.')
 
-    def update_session(self, id, *, expected_version=None, **values):
+    def update_session(self, id, *, expected_version=None,
+                       routing_provider=PROVIDER_UNSET, **values):
         allowed = {'model', 'native_id', 'context', 'state'}
-        if not values or not values.keys() <= allowed:
+        if (not values and routing_provider is PROVIDER_UNSET) or not values.keys() <= allowed:
             raise ValueError('Invalid session update fields')
         if 'state' in values and values['state'] not in {'active', 'archived'}:
             raise BridgeError('invalid_state', 'Instance state must be active or archived.')
+        if routing_provider is not PROVIDER_UNSET:
+            validate_provider(routing_provider)
+        route_changed = 'model' in values or routing_provider is not PROVIDER_UNSET
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM sessions WHERE id=?', (id,)).fetchone()
@@ -266,12 +271,33 @@ class Store(AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStore
                 raise BridgeError('version_conflict', 'Instance changed since it was read.')
             active = db.execute("SELECT 1 FROM runs WHERE session_id=? AND state IN ('starting','running','stopping')",
                                 (id,)).fetchone()
-            if active and values.get('state') == 'archived':
+            if active and (route_changed or values.get('state') == 'archived'):
                 raise BusyError()
+            if route_changed:
+                if current['state'] != 'active' or values.get('state') == 'archived':
+                    raise BridgeError('instance_archived',
+                                      'An archived instance cannot change its route.')
+                if db.execute('SELECT 1 FROM evaluation_instances WHERE session_id=?',
+                              (id,)).fetchone():
+                    raise BridgeError('evaluation_immutable',
+                                      'Evaluation instances cannot change their route.')
+                routing = db.execute('SELECT mode,provider FROM session_routing WHERE session_id=?',
+                                     (id,)).fetchone()
+                if routing is None:
+                    raise BridgeError('schema_version', 'Session routing metadata is missing.')
+                automatic = routing['mode'] == 'automatic' or routing_provider is not PROVIDER_UNSET
+                provider = (routing['provider'] if routing_provider is PROVIDER_UNSET
+                            else routing_provider)
+                require_declared_route(db, values.get('model', row['model']),
+                                       provider=provider if automatic else None,
+                                       account_id=None if automatic else row['account_id'])
             session_values = {key: value for key, value in values.items() if key in {'model', 'native_id', 'context'}}
             if session_values:
                 db.execute(f"UPDATE sessions SET {','.join(key+'=?' for key in session_values)} WHERE id=?",
                            (*session_values.values(), id))
+            if routing_provider is not PROVIDER_UNSET:
+                db.execute("UPDATE session_routing SET mode='automatic',provider=? WHERE session_id=?",
+                           (routing_provider, id))
             state = values.get('state', current['state'])
             version = current['version'] + 1
             db.execute('INSERT OR REPLACE INTO instance_metadata(session_id,state,version,updated) VALUES (?,?,?,?)',

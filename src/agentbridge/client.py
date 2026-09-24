@@ -22,6 +22,7 @@ from .transcript import messages as transcript_messages
 from .error_management import ErrorManagementMixin
 from .provider_contracts import ContractRegistry
 from .routing.service import RoutingService
+from .routing.reconfiguration import PROVIDER_UNSET
 from .proxy.managed import ManagedProxyClient
 from .execution_context import verify
 from .evaluation.service import EvaluationMixin
@@ -231,32 +232,23 @@ class Bridge(AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, Di
                 row['last_turn'] = self.store.last_session_run(row['id'])
         return [self._public_instance(row) for row in selected]
 
-    def instance_update(self, instance_id, *, model=None, effort=None, context_window=None,
+    def instance_update(self, instance_id, *, model=None, provider=PROVIDER_UNSET,
+                        effort=None, context_window=None,
                         permission_mode=None, sandbox_mode=None, allowed_tools=None,
                         expected_version=None, metadata=None, provider_options=None, state=None):
         if any(value is not None for value in (effort, context_window, permission_mode,
                                                 sandbox_mode, allowed_tools, metadata, provider_options)):
-            raise UnsupportedError('Only model and state updates are supported by this adapter.')
+            raise UnsupportedError('Only model, provider and state updates are supported by this adapter.')
         values = {}
         if model is not None:
-            current = self.get_session(instance_id)
-            routing = self.store.routing(instance_id)
-            if routing['mode'] == 'automatic':
-                declared = any(account.proxy_base_url and model in account.supported_models
-                               and (routing.get('provider') is None
-                                    or account.provider == routing['provider'])
-                               for account in self.accounts())
-            else:
-                account = self.account(current['account_id'])
-                declared = bool(account.proxy_base_url and model in account.supported_models)
-            if not declared:
-                raise BridgeError('model_unavailable', 'No account declares support for this model.')
             values['model'] = model
         if state is not None:
             values['state'] = state
-        if not values:
+        if not values and provider is PROVIDER_UNSET:
             raise BridgeError('invalid_request', 'At least one instance field must change.')
-        return self._public_instance(self.store.update_session(instance_id, expected_version=expected_version, **values))
+        updated = self.store.update_session(instance_id, expected_version=expected_version,
+                                            routing_provider=provider, **values)
+        return self._public_instance(updated)
 
     def instance_archive(self, instance_id, *, expected_version=None):
         return self._public_instance(self.store.update_session(instance_id, expected_version=expected_version, state='archived'))

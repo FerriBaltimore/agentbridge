@@ -77,6 +77,17 @@ tool calls. A change starts a fresh Codex thread with bounded portable context
 and explicit omissions. No new turn can execute through an older direct
 Codex or Claude Code account.
 
+`instances.update(instance_id, model?, provider?, expected_version?)` can
+change the default model and provider filter together between turns. Omitting
+`provider` keeps the current filter; an explicit `null` clears it. Setting a
+provider on a pinned instance, including `null`, explicitly converts it to
+automatic routing. This does not rerun an earlier turn. If the next selected
+account differs, admission builds bounded portable context and records the
+change and omissions in route evidence. A route change is rejected while a
+turn is active and on archived or evaluation instances. The update checks
+declared, login-bound proxy account support; turn admission repeats the fresh
+proxy and model checks. `expected_version` protects concurrent edits.
+
 Every selected route must have one active upstream auth file, a clean inventory
 with no hidden API-key or plugin credential route, a stable provider identity,
 the requested exact model in the local catalogue, and available proxy client

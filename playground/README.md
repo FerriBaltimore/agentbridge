@@ -14,7 +14,7 @@ python -m playground.server --workspace-path . --port 8765
 ```
 
 Open `http://127.0.0.1:8765/`. The server binds to loopback and requires a
-same-origin mutation header. AgentBridge 2.1.0 includes CLIProxyAPI, Codex,
+same-origin mutation header. AgentBridge 2.2.0 includes CLIProxyAPI, Codex,
 Node.js and the GrantBridge proxy adapter in its Linux platform wheel; no
 separate runtime installation or environment variables are needed. Account
 sign-in asks only for a provider and display name. AgentBridge creates an
@@ -34,9 +34,12 @@ default. AgentBridge does not silently import or discard the old accounts.
   status, exact observed models and usage. Missing usage stays unknown.
 - Choose a provider and model in Chat. Automatic routing balances eligible
   accounts within the selected provider; an account can also be pinned.
+- Change the provider and model between turns within the same conversation.
+  A pinned account can be switched to automatic routing; its next turn uses
+  portable context if the account changes.
 - Reasoning and context controls appear only when the proxy client model API
-  reports them. Context values are maximum token counts reported for the
-  selected model and route.
+  reports them. Context accepts a positive integer up to the observed maximum
+  for the selected model and route. The provider may reject an override.
 - The permission selector follows SDK capabilities. Choose "Ask before actions"
   to test an interactive provider request, then allow or deny it from Activity.
 - Send a message, inspect recorded events, stop a turn, and review its output.
@@ -49,5 +52,5 @@ or model acceptance. Run them with `python -m pytest tests/test_playground_brows
 when Playwright Chromium or Chrome is installed. CI installs Chromium and
 requires it to launch before running the test suite. The playground itself is
 kept in this repository; it is not included in the AgentBridge runtime wheel.
-See the [playground acceptance record](../docs/development/playground-acceptance.md)
-for the 2.1.0 browser and bundled-runtime checks.
+See the [2.2.0 playground acceptance record](../docs/development/playground-2-2-acceptance.md)
+and the earlier [bundled-runtime record](../docs/development/bundle-acceptance.md).
