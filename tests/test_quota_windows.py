@@ -118,7 +118,8 @@ def test_usage_cli_shows_known_proxy_percent_and_unknown_reset(tmp_path, monkeyp
         configured_proxy(Bridge(tmp_path), port)
         main(['--root', str(tmp_path), 'accounts', 'usage', 'Codex test', '--refresh'])
         output = capsys.readouterr().out
-        assert 'Model: gpt-test' in output
+        assert 'Window: primary (account)' in output
+        assert 'Model: gpt-test' not in output
         assert 'Used: 100.0% | Remaining: 0%' in output
         assert 'Stale: no' in output
         assert 'Reset in:' not in output

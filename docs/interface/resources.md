@@ -101,3 +101,9 @@ no proxy endpoint or credential reference.
 Usage has scope account, instance or turn and includes source, timestamp,
 staleness and support state. Quota windows include used values, limits and reset
 times when the provider exposes them. Absence is not zero.
+Account windows are separate observations with stable IDs, labels, periods,
+reset times, scope, used and remaining percentages, and individual freshness.
+Codex and Claude usage refreshes query the provider through the verified local
+CLIProxyAPI account; status and model reads remain passive. Raw provider
+responses and credential values are not stored. A failed refresh retains
+the last observed values with their original age and a safe failure code.

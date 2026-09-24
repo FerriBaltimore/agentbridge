@@ -1,8 +1,9 @@
-"""Read bounded, passive observations from one local CLIProxyAPI sidecar.
+"""Read bounded observations from one verified local CLIProxyAPI sidecar.
 
 The Management API returns sensitive credential metadata and raw quota headers.
-Only the allowlisted fields below leave this module. No provider request is
-made: active quota fetching is deliberately outside this read-only client.
+Only allowlisted facts leave this module. A provider quota request is made only
+by explicit usage refresh through the sidecar's bound credential. Raw bodies
+and credential references are never returned or persisted.
 """
 
 from datetime import datetime, timezone
@@ -12,16 +13,22 @@ import json
 import math
 import os
 import re
+from time import time
 from urllib.parse import quote, urlsplit
 
 from ..errors import BridgeError
 from ..models import model_id
 from .route import ProxyRoute
+from .quota import active as active_quota, passive as passive_quota
 
 
 _MAX_BODY = 1024 * 1024
 _KEY_ENV = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
-_USAGE_HEADERS = ("x-codex-primary-used-percent", "x-codex-secondary-used-percent")
+_UPSTREAM_USAGE = {
+    "codex": ("https://chatgpt.com/backend-api/wham/usage", {}),
+    "claude": ("https://api.anthropic.com/api/oauth/usage",
+               {"anthropic-beta": "oauth-2025-04-20"}),
+}
 _CONFIG_CREDENTIAL_KEYS = (
     "gemini-api-key", "interactions-api-key", "claude-api-key", "codex-api-key",
     "xai-api-key", "meta-api-key", "vertex-api-key", "openai-compatibility",
@@ -67,7 +74,6 @@ class ManagementClient:
         if not (isinstance(email, str) and 0 < len(email) <= 320 and email.strip() == email
                 and "@" in email and all(32 < ord(char) < 127 for char in email)):
             email = None
-        account_percent, account_quota_at = _usage(entry.get("quota")) if provider == "codex" else (None, None)
         model_quotas = entry.get("model_quotas")
         if not isinstance(model_quotas, dict):
             model_quotas = {}
@@ -85,15 +91,18 @@ class ManagementClient:
             if model in seen:
                 continue
             seen.add(model)
-            model_percent, model_quota_at = _usage(model_quotas.get(model)) if provider == "codex" else (None, None)
-            if model_percent is None or (account_percent is not None and account_percent > model_percent):
-                used_percent, quota_at = account_percent, account_quota_at
-                quota_scope = "account" if used_percent is not None else None
-            else:
-                used_percent, quota_at, quota_scope = model_percent, model_quota_at, "model"
-            models.append({"id": model, "used_percent": used_percent,
-                           "quota_observed_at": quota_at, "quota_scope": quota_scope,
-                           "cooldown_until": cooldowns.get(model) or cooldowns.get("*")})
+            models.append({"id": model, "cooldown_until": cooldowns.get(model) or cooldowns.get("*")})
+        windows = passive_quota(provider, entry.get("quota"), model_quotas, seen)
+        for item in models:
+            applicable = [row for row in windows if row["scope"] == "account" or
+                          row["scope"] == "model" and row["model_id"] == item["id"]]
+            observed = [row for row in applicable if row["used_percent"] is not None]
+            highest = max(observed, key=lambda row: row["used_percent"]) if observed else None
+            item["used_percent"] = min(highest["used_percent"], 100) if highest else None
+            item["quota_observed_at"] = highest["observed_at"] if highest else None
+            item["quota_scope"] = highest["scope"] if highest else None
+        account_rows = [row for row in windows if row["scope"] == "account" and row["used_percent"] is not None]
+        account_highest = max(account_rows, key=lambda row: row["used_percent"]) if account_rows else None
         return {
             "account_id": self.route.account_id,
             "source": "cliproxy_management",
@@ -106,10 +115,55 @@ class ManagementClient:
             "disabled": entry.get("disabled") if isinstance(entry.get("disabled"), bool) else None,
             "unavailable": entry.get("unavailable") if isinstance(entry.get("unavailable"), bool) else None,
             "cooldown_known": cooldown_known,
-            "account_used_percent": account_percent,
-            "account_quota_observed_at": account_quota_at,
+            "account_used_percent": account_highest["used_percent"] if account_highest else None,
+            "account_quota_observed_at": account_highest["observed_at"] if account_highest else None,
+            "quota_windows": windows,
             "models": models,
         }
+
+    def fetch_quota(self, expected_binding_fingerprint: str) -> dict:
+        """Refresh quota through the bound proxy credential, never exposing a token."""
+        secret = self._secret()
+        payload = self._get_json("/v0/management/auth-files", secret)
+        files = payload.get("files")
+        if not isinstance(files, list) or len(files) != 1 or not isinstance(files[0], dict):
+            raise BridgeError("proxy_binding_unverified", "The local proxy must expose exactly one account.")
+        entry = files[0]
+        provider = _provider(entry.get("provider"))
+        if (entry.get("source") != "file" or entry.get("runtime_only") is not False
+                or entry.get("status") != "active" or entry.get("disabled") is not False
+                or entry.get("unavailable") is not False or not isinstance(entry.get("cooldowns"), list)
+                or provider not in _UPSTREAM_USAGE):
+            raise BridgeError("proxy_binding_unverified", "The local proxy account cannot be queried.")
+        _verify_config_inventory(self._get_json("/v0/management/config", secret))
+        binding, _ = _binding(entry, provider)
+        if binding != expected_binding_fingerprint:
+            raise BridgeError("proxy_binding_unverified", "The local proxy account binding changed.")
+        url, extra_headers = _UPSTREAM_USAGE[provider]
+        headers = {"Authorization": "Bearer $TOKEN$", "Accept": "application/json", **extra_headers}
+        if provider == "codex":
+            claims = entry.get("id_token")
+            account_id = claims.get("chatgpt_account_id") if isinstance(claims, dict) else None
+            if not isinstance(account_id, str) or not account_id:
+                raise BridgeError("proxy_binding_unverified", "The Codex account identity is unavailable.")
+            headers["Chatgpt-Account-Id"] = account_id
+        response = self._post_json("/v0/management/api-call", secret, {
+            "auth_index": entry["auth_index"], "method": "GET", "url": url, "header": headers})
+        if response.get("status_code") != 200:
+            raise BridgeError("upstream_quota_unavailable", "The provider did not provide quota usage.")
+        body = response.get("body")
+        if not isinstance(body, str) or len(body) > 262144:
+            raise BridgeError("upstream_quota_unavailable", "The provider quota response is unavailable.")
+        try:
+            data = json.loads(body)
+        except ValueError:
+            raise BridgeError("upstream_quota_unavailable", "The provider quota response is invalid.") from None
+        observed_at = _timestamp(datetime.fromtimestamp(time(), timezone.utc).isoformat())
+        windows = active_quota(provider, data, observed_at)
+        if not windows:
+            raise BridgeError("upstream_quota_unavailable", "The provider did not report quota windows.")
+        return {"source": "cliproxy_upstream_usage", "quota_windows": windows,
+                "observed_at": observed_at}
 
     def ensure_empty(self) -> None:
         """Require an uncredentialed, isolated sidecar before a new login."""
@@ -145,10 +199,22 @@ class ManagementClient:
         return secret
 
     def _get_json(self, path: str, secret: str) -> dict:
+        return self._request_json("GET", path, secret)
+
+    def _post_json(self, path: str, secret: str, body: dict) -> dict:
+        return self._request_json("POST", path, secret, body)
+
+    def _request_json(self, method: str, path: str, secret: str, body: dict | None = None) -> dict:
         endpoint = urlsplit(self.route.base_url)
         connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=self.timeout)
         try:
-            connection.request("GET", path, headers={"Authorization": f"Bearer {secret}", "Accept": "application/json"})
+            headers = {"Authorization": f"Bearer {secret}", "Accept": "application/json"}
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+            if body is None:
+                connection.request(method, path, headers=headers)
+            else:
+                connection.request(method, path, body=json.dumps(body), headers=headers)
             response = connection.getresponse()
             if response.status != 200:
                 raise BridgeError("proxy_observation_unavailable", "The local proxy management observation failed.")
@@ -224,26 +290,6 @@ def _status(value) -> str:
     if isinstance(value, str) and value in {"active", "pending", "refreshing", "error", "disabled"}:
         return value
     return "unknown"
-
-
-def _usage(raw) -> tuple[float | None, str | None]:
-    if not isinstance(raw, dict):
-        return None, None
-    observed_at = _timestamp(raw.get("observed_at"))
-    signals = raw.get("signals")
-    if observed_at is None or not isinstance(signals, dict):
-        return None, observed_at
-    values = []
-    for key, value in signals.items():
-        if not isinstance(key, str) or key.lower() not in _USAGE_HEADERS or not isinstance(value, str):
-            continue
-        try:
-            percent = float(value)
-        except ValueError:
-            continue
-        if math.isfinite(percent) and 0 <= percent <= 100:
-            values.append(percent)
-    return (max(values) if values else None), observed_at
 
 
 def _cooldowns(raw) -> tuple[bool, dict[str, str]]:

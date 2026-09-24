@@ -220,6 +220,7 @@ def local_playground(tmp_path, monkeypatch):
             yield {
                 'url': f'http://127.0.0.1:{server.server_port}/',
                 'bridge': bridge, 'capture': capture, 'openai': openai,
+                'claude': claude,
                 'openai_seen': openai_seen, 'grok_port': grok_port,
                 'managed': managed,
                 'screenshot_dir': tmp_path,
@@ -257,7 +258,6 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             capacity = page.get_by_test_id('overview-capacity-list')
             capacity.get_by_text('OpenAI Personal').wait_for()
             capacity.get_by_text('58% used').wait_for()
-            capacity.get_by_text('42% remaining').wait_for()
             page.locator('#metric-ready').get_by_text('2').wait_for()
             page.locator('#metric-fresh').get_by_text('1').wait_for()
             shots = local_playground['screenshot_dir']
@@ -272,6 +272,11 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             openai_row.get_by_text('active', exact=True).wait_for()
             page.locator('#accounts-summary').get_by_text(
                 '2 with an active or usable observation').wait_for()
+            openai_row.get_by_test_id('account-usage-open').click()
+            usage_dialog = page.get_by_test_id('account-usage-dialog')
+            usage_dialog.get_by_text('42% remaining', exact=False).wait_for()
+            page.keyboard.press('Escape')
+            usage_dialog.wait_for(state='hidden')
             openai_row.get_by_test_id('account-models-open').click()
             models_dialog = page.get_by_test_id('account-models-dialog')
             models_dialog.get_by_text('Health: Active, binding verified').wait_for()

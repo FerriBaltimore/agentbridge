@@ -297,8 +297,8 @@ def test_overview_does_not_count_stale_quota_as_fresh(local_playground):
             page.get_by_test_id('nav-overview').click()
             row = page.get_by_test_id('overview-capacity-row').filter(
                 has_text='OpenAI Personal')
-            row.get_by_text('Stale usage').wait_for()
-            assert row.get_by_text('58% used').count() == 0
+            row.get_by_text('58% used').wait_for()
+            row.get_by_text('stale', exact=False).wait_for()
             page.locator('#metric-fresh').get_by_text('0').wait_for()
             assert errors == []
         finally:

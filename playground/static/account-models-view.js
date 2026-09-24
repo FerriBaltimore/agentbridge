@@ -1,4 +1,5 @@
-import { byId, clear, formatTime, node, percent } from './ui.js';
+import { byId, clear, formatTime, node } from './ui.js';
+import { observedPercent, usageValue } from './usage-view.js';
 
 function metadataFor(status, modelId) {
   const metadata = status?.model_metadata;
@@ -16,11 +17,8 @@ export function accountModels(account, status) {
 }
 
 function modelUsage(model) {
-  const value = percent(model?.used_percent);
-  const observedAt = model?.quota_observed_at ? new Date(model.quota_observed_at) : null;
-  const fresh = value !== null && observedAt && !Number.isNaN(observedAt.getTime())
-    && Date.now() >= observedAt.getTime() && Date.now() - observedAt.getTime() < 60000;
-  return fresh ? `${Math.round(value)}% used` : value === null ? 'Usage unknown' : 'Usage stale';
+  const value = observedPercent(model?.used_percent);
+  return value === null ? 'Usage unknown' : `${usageValue({ used_percent: value, stale: false })} · observed`;
 }
 
 function modelDetail(entry, status) {

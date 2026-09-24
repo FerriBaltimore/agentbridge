@@ -1,5 +1,5 @@
-import { byId, clear, emptyState, formatTime, node, statusPill } from './ui.js';
-import { usageSignal } from './usage-view.js';
+import { byId, clear, emptyState, node, statusPill } from './ui.js';
+import { usageUnavailable, usageValue, usageWindows } from './usage-view.js';
 
 let capacityRows = [];
 let capacityPage = 0;
@@ -43,13 +43,9 @@ function accountHealth(account, status, routeRefs) {
 }
 
 function quota(accountUsage) {
-  const signal = usageSignal(accountUsage);
-  if (signal.fresh) {
-    return { fresh: true, used: Math.round(signal.observed),
-      remaining: Math.round(100 - signal.observed), newest: signal.newest };
-  }
-  return { fresh: false, stale: signal.observed !== null, newest: signal.newest,
-    reason: accountUsage?.reason };
+  const windows = usageWindows(accountUsage);
+  return { windows, fresh: windows.some((window) => !window.stale && window.used_percent !== null),
+    unavailable: usageUnavailable(accountUsage) };
 }
 
 function capacityRow(entry) {
@@ -68,23 +64,18 @@ function capacityRow(entry) {
   const condition = node('div', 'capacity-condition');
   condition.append(statusPill(health.label, health.tone), node('small', '', health.detail));
   const quotaArea = node('div', 'capacity-quota');
-  if (usage.fresh) {
-    const values = node('div', 'capacity-values');
-    values.append(node('strong', '', `${usage.used}% used`),
-      node('span', '', `${usage.remaining}% remaining`));
-    const track = node('div', 'capacity-track');
-    track.setAttribute('aria-hidden', 'true');
-    const fill = node('span', usage.used >= 80 ? 'capacity-fill is-high' : 'capacity-fill');
-    fill.style.width = `${usage.used}%`;
-    track.append(fill);
-    quotaArea.append(values, track, node('small', '', usage.newest
-      ? `Observed ${formatTime(usage.newest)}` : 'Fresh quota observation'));
+  if (usage.windows.length) {
+    for (const window of usage.windows.slice(0, 2)) {
+      const item = node('div', 'capacity-window');
+      const label = node('strong', '', window.display_label);
+      label.title = window.display_label;
+      item.append(label, node('span', window.stale ? 'is-stale' : '', usageValue(window)));
+      quotaArea.append(item);
+    }
+    if (usage.windows.length > 2) quotaArea.append(node('small', '', `${usage.windows.length - 2} more windows in Accounts`));
   } else {
-    quotaArea.append(node('strong', 'capacity-unknown', usage.stale ? 'Stale usage' : 'Unknown usage'));
-    quotaArea.append(node('small', '', usage.newest
-      ? `Last observed ${formatTime(usage.newest)}`
-      : usage.reason ? `Reason: ${String(usage.reason).replaceAll('_', ' ')}`
-        : 'No fresh quota observation'));
+    quotaArea.append(node('strong', 'capacity-unknown', 'Unknown usage'));
+    quotaArea.title = usage.unavailable;
   }
   row.append(identity, condition, quotaArea);
   return row;
@@ -155,7 +146,6 @@ export function renderOverview({ accounts, models, instances, usage, statuses })
     return { account, health, quota: quota(usage?.get(account.account_ref)) };
   }).sort((left, right) => Number(right.health.ready) - Number(left.health.ready)
     || Number(right.quota.fresh) - Number(left.quota.fresh)
-    || (right.quota.remaining ?? -1) - (left.quota.remaining ?? -1)
     || (left.account.name || left.account.account_ref).localeCompare(
       right.account.name || right.account.account_ref));
   const readyCount = capacityRows.filter((entry) => entry.health.ready).length;

@@ -25,18 +25,39 @@ model turn.
 ## Proxy account quota
 
 `accounts.usage` returns `account_id`, `scope: account`, `source`, `supported`,
-`stale`, `quota_windows` and `reason`. A reported window contains only
-`model_id`, `used_percent` and `observed_at`. These are sanitized
-CLIProxyAPI Management API observations, not the richer native Codex or
-Claude quota structures from the earlier direct adapters.
+`stale`, `quota_windows` and `reason`. Each sanitized window has an `id`,
+`label`, `scope`, optional `model_id` or `model_family`, observed `used_percent`, derived
+`remaining_percent`, optional `window_seconds` and `resets_at`, `observed_at`,
+`age_seconds`, `stale_at` and `stale`. Periods and scoped pools stay separate;
+the SDK does not collapse them to one account percentage. A provider may report
+more than 100% utilization; the observed value is retained and remaining is
+floored at zero. An unknown pool scope is never treated as model entitlement.
+`source` is `cliproxy_management` for passive signals,
+`cliproxy_upstream_usage` for an active response, or
+`cliproxy_combined_usage` when distinct windows from both are retained. In a
+combined response each window also names its source.
 
-The current observer accepts attributable percentage quota for a Codex
-upstream account. Claude and Grok account quota is unavailable through this
-local observer. If a provider omits quota, the response has
+Passive observations read the dedicated CLIProxyAPI sidecar's bounded quota
+signals. Codex primary, secondary and additional named windows and Claude
+unified short, weekly and scoped windows are parsed from their reported fields,
+without a fixed model list. `refresh=true` for `accounts.usage` or account
+`usage.get` also asks Codex or Claude for current usage through the verified
+sidecar credential. The SDK sends no credential value: CLIProxyAPI substitutes
+the bound token. Only normalized quota facts are persisted; raw upstream bodies
+and private errors are discarded. `accounts.status`, `models.list` and routing
+observations do not trigger an upstream quota request. Grok quota remains
+unknown unless a supported attributable source is added.
+
+If a provider omits quota, the response has
 `quota_windows: []`, `supported: false`, `stale: true` and a reason such as
 `upstream_quota_unavailable`. A failed binding check also returns unknown
-quota with a reason. A reported value whose observation is too old is stale;
-AgentBridge does not turn it into zero or claim renewed capacity.
+quota with a reason. If active refresh fails, the newest bound passive or prior
+active observation remains visible with a safe `refresh_reason`; its original
+time and per-window staleness remain intact. The displayed percentage is never
+silently made current by a failed request. When windows have different ages,
+the snapshot is stale only if no observed percentage is fresh; each window
+retains its own `stale` and `stale_at`. A passed reset makes that old window
+stale, not evidence of a renewed balance.
 
 Automatic selection compares fresh model-applicable used percentages.
 Accounts with known capacity take priority over unknown capacity; if none
@@ -47,14 +68,18 @@ route remains fixed for the whole turn.
 `accounts.history` reads stored observations. Each proxy row records its
 source, scope, observed time, staleness and the sanitized quota snapshot.
 History is evidence of what was seen then, not a fresh balance. Time-range
-filters and aggregation are unsupported. An account usage refresh checks the
-local sidecar; it does not query a provider dashboard or infer usage from an
-account label.
+filters and aggregation are unsupported. An account usage refresh makes at most
+one bounded upstream quota request for Codex or Claude after rechecking the
+dedicated sidecar and its original GrantBridge binding. It does not infer usage
+from an account label or start a model turn. Provider quota endpoints can be
+unavailable or change independently of CLIProxyAPI; fixture tests establish
+the request and normalization shape, while each provider still needs live
+acceptance.
 
 The local proxy does not expose Codex earned-reset redemption.
 `accounts.quota.reset` returns unsupported in v2; there is no CLI
-`accounts quota-reset` command. Historical native reset-credit and Claude
-OAuth quota formats do not appear in current proxy account responses.
+`accounts quota-reset` command. Historical native reset-credit operations do
+not appear in current proxy account responses.
 
 ## Models and consumption
 

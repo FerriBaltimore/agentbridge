@@ -157,13 +157,17 @@ class AccountService:
         rows = self.store.usage_history(account.id, limit=limit)
         result = []
         for row in rows:
-            if row['source'] == 'cliproxy_management':
-                from .routing.service import OBSERVATION_TTL
+            if row['source'] in {'cliproxy_management', 'cliproxy_upstream_usage'}:
+                from .proxy.quota import project as project_quota
                 age = time.time() - row['observed_at']
-                stale = row['stale'] or not 0 <= age < OBSERVATION_TTL
+                windows = project_quota(row['data'].get('quota_windows'))
+                stale = (row['stale'] or not 0 <= age < 60 or
+                         not any(not item['stale'] and item.get('used_percent') is not None
+                                 for item in windows))
                 data = {**row['data'], 'account_id': account.id,
                         'source': row['source'], 'scope': row['scope'],
                         'observed_at': stamp(row['observed_at']), 'stale': stale,
+                        'quota_windows': windows,
                         'age_seconds': round(age, 3) if age >= 0 else None}
                 result.append({**row, 'stale': stale, 'data': data})
             else:

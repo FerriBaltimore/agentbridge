@@ -5,7 +5,7 @@ backend-path = ["tools"]
 
 [project]
 name = "ferran-agentbridge"
-version = "2.3.1"
+version = "2.3.2"
 description = "Model-first Codex execution with observable local account routing"
 readme = "README.md"
 requires-python = ">=3.11"

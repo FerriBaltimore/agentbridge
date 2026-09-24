@@ -79,6 +79,15 @@ that same pending login.
 authentication and identity. `accounts.usage` reports `scope: "account"`,
 `supported`, `stale` and `reason`; `source` and `quota_windows` are present
 when known.
+Each window has `id`, `label`, `scope`, optional `model_id`, `used_percent`,
+`remaining_percent`, optional `window_seconds` and `resets_at`, `observed_at`,
+`stale_at` and `stale`. Render each period separately, including Claude weekly
+and scoped windows; an unknown value is not zero. `refresh: true` on usage
+requests an upstream quota read through the bound local proxy for Codex or
+Claude. A failed refresh leaves the last observation and its original age
+intact and reports a safe `refresh_reason`. Use `stale_at` to expire a visible
+percentage locally while the page stays open; request another explicit refresh
+to obtain a new provider observation.
 Usage history is available through `accounts.usage_history` or
 `usage.history`; both return bare arrays, and historical time filters and
 aggregation are currently unsupported.

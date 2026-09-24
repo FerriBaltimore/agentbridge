@@ -30,10 +30,17 @@ def print_usage(value, account_name=None):
         used = row.get('used_percent')
         if isinstance(used, bool) or not isinstance(used, (int, float)) or not math.isfinite(used):
             used = None
-        remaining = max(0, 100 - used) if used is not None and 0 <= used <= 100 else None
-        print(f"Model: {row.get('model_id') or 'unknown'}")
+        remaining = max(0, 100 - used) if used is not None and used >= 0 else None
+        print(f"Window: {row.get('label') or row.get('id') or 'unknown'} ({row.get('scope') or 'unknown'})")
+        if row.get('model_id'):
+            print(f"  Model: {row['model_id']}")
         print(f"  Used: {shown(used)}% | Remaining: {shown(remaining)}%")
+        if row.get('window_seconds') is not None:
+            print(f"  Window length: {duration(row['window_seconds'])}")
+        if row.get('resets_at'):
+            print(f"  Reset at: {row['resets_at']}")
         print(f"  Quota observed at: {row.get('observed_at') or 'unknown'}")
+        print(f"  Stale: {'yes' if row.get('stale', True) else 'no'}")
     for row in value.get('windows', []):
         print(f"Window: {row.get('id') or row['name']} ({row.get('scope', 'unknown')})")
         if row.get('label'):

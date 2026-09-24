@@ -117,6 +117,15 @@ monetary cost is returned only when its source is known. Missing or stale
 usage is unknown, never zero. `accounts.usage` and `usage.get(scope="account")`
 read the same proxy quota surface. Account history methods return arrays;
 historical time filters and aggregation are unsupported by this adapter.
+For Codex and Claude accounts, `refresh=true` performs one bounded upstream
+quota GET through the verified local CLIProxyAPI credential. Without refresh,
+the SDK reads cached and passive evidence only. `quota_windows[]` exposes
+separate named pools with observed used and derived remaining percentages,
+period and reset when reported, source, observed time and per-window staleness.
+An active refresh failure returns retained evidence with `refresh_reason`;
+it never changes the age of that evidence. A provider may report more than
+100% utilization. Grok account quota remains unknown without an attributable
+provider observation.
 
 ## Instances
 

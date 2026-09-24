@@ -4,6 +4,7 @@ import { setupChat } from './chat.js';
 import { setupLogin } from './login.js';
 import { renderOverview } from './overview.js';
 import { byId, describeError, setGlobalError, toast } from './ui.js';
+import { nextUsageExpiry } from './usage-view.js';
 
 const state = {
   capabilities: null,
@@ -17,6 +18,7 @@ const state = {
 
 const titles = { overview: 'Overview', chat: 'Chat', accounts: 'Accounts', activity: 'Activity' };
 let refreshPromise = null;
+let usageExpiryTimer = null;
 
 function navigate(view) {
   if (!Object.hasOwn(titles, view)) return;
@@ -38,7 +40,7 @@ const openLogin = setupLogin({
 });
 const openRemove = setupRemoval(refreshAll);
 
-function render() {
+function renderAccountSummaries() {
   const shared = {
     accounts: state.accounts,
     models: state.models,
@@ -53,6 +55,23 @@ function render() {
     statuses: state.statuses,
     onRemove: openRemove,
   });
+}
+
+function scheduleUsageExpiry() {
+  if (usageExpiryTimer !== null) clearTimeout(usageExpiryTimer);
+  usageExpiryTimer = null;
+  const expiry = nextUsageExpiry(state.usage.values());
+  if (expiry === null) return;
+  usageExpiryTimer = setTimeout(() => {
+    usageExpiryTimer = null;
+    if (refreshPromise) return;
+    renderAccountSummaries();
+    scheduleUsageExpiry();
+  }, Math.max(1, expiry - Date.now() + 25));
+}
+
+function render() {
+  renderAccountSummaries();
   chat.updateData({
     models: state.models,
     accounts: state.accounts,
@@ -60,6 +79,7 @@ function render() {
     workspacePath: state.workspacePath,
     instanceRows: state.instances,
   });
+  scheduleUsageExpiry();
 }
 
 async function loadAccountObservations(accounts) {
@@ -74,7 +94,7 @@ async function loadAccountObservations(accounts) {
       statuses.set(ref, { error: describeError(error) });
     }
     try {
-      usage.set(ref, await api.accountUsage(ref));
+      usage.set(ref, await api.accountUsage(ref, true));
     } catch (error) {
       usage.set(ref, { supported: false, stale: true, reason: error.code || 'observation_unavailable' });
     }

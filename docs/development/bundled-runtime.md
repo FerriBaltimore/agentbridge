@@ -27,6 +27,10 @@ AGENTBRIDGE_TARGET_ARCH=aarch64 python -m pip wheel . --no-deps -w dist/wheels
 python tools/verify_bundle_wheel.py dist/wheels/*manylinux_2_28*.whl
 ```
 
+The build backend serializes simultaneous wheel builds because both platform
+builds stage archives in the same source tree. Run source-tree tests after the
+x86_64 build so their local runtime assets match the host architecture.
+
 The build backend fetches any missing archives into `dist/bundle-cache`, checks
 each archive against the committed hash, validates its contents and ELF
 architecture, and packages only the selected architecture. Building a source

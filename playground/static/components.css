@@ -22,8 +22,10 @@
 .usage-head span { color: #75849a; font-size: 11px; font-weight: 750; white-space: nowrap; }
 .usage-track { overflow: hidden; width: 100%; height: 7px; margin: 10px 0 7px; border-radius: 20px; background: #edf1f6; }
 .usage-track.is-unknown { background: repeating-linear-gradient(110deg, #edf1f6 0 7px, #dce4ee 7px 9px); }
+.usage-track.is-stale { background: #edf1f6; }
 .usage-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6a89ff, #4e6df0); }
 .usage-fill.is-high { background: linear-gradient(90deg, #efbd70, #e78c61); }
+.usage-track.is-stale .usage-fill { opacity: .48; }
 .usage-subline { display: flex; justify-content: space-between; gap: 8px; color: #a0aab9; font-size: 10px; }
 .usage-subline span:last-child { text-align: right; }
 .surface-link { width: 100%; justify-content: space-between; margin-top: 23px; padding: 14px 0 0; border-top: 1px solid #edf0f5; }
@@ -41,12 +43,12 @@
 .account-table thead th { padding-top: 13px; padding-bottom: 13px; background: #f9fbfe; color: #8b98aa; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
 .account-table tbody tr:last-child th, .account-table tbody tr:last-child td { border-bottom: 0; }
 .account-table tbody tr:hover { background: #fbfcff; }
-.account-table-identity { min-width: 185px; width: 26%; }
-.account-table-provider { width: 11%; }
-.account-table-status { width: 13%; }
-.account-table-usage-cell { min-width: 154px; width: 25%; }
-.account-table-models { width: 16%; }
-.account-table-actions { width: 9%; text-align: right; }
+.account-table-identity { min-width: 170px; width: 25%; }
+.account-table-provider { width: 10%; }
+.account-table-status { width: 12%; }
+.account-table-usage-cell { min-width: 210px; width: 30%; }
+.account-table-models { width: 15%; }
+.account-table-actions { width: 8%; text-align: right; }
 .account-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .account-identity-text { min-width: 0; }
 .account-avatar { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 11px; background: #eaf0ff; color: #536fdb; font-size: 16px; font-weight: 850; }
@@ -54,11 +56,22 @@
 .account-avatar.is-grok { background: #e9eff1; color: #456573; }
 .account-name { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .account-email { display: block; overflow: hidden; margin-top: 4px; color: #8d99aa; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.account-table-usage strong, .account-table-usage small { display: block; }
-.account-table-usage strong { color: #2d405d; font-size: 11px; }
-.account-table-usage .usage-unknown { color: #8b97a9; }
-.account-table-usage .usage-track { max-width: 165px; height: 5px; margin: 7px 0 5px; }
-.account-table-usage .usage-detail { color: #9ca8b7; font-size: 9px; line-height: 1.35; }
+.account-table-usage { display: grid; gap: 5px; min-width: 0; }
+.account-usage-window { display: grid; gap: 7px; min-width: 0; padding: 12px; border: 1px solid #e9edf4; border-radius: 9px; background: #fafcff; }
+.account-usage-window.is-compact { gap: 3px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.account-usage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 7px; min-width: 0; }
+.account-usage-name { min-width: 0; overflow: hidden; color: #344766; font-size: 10px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.account-usage-head span { flex: none; color: #2d405d; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.account-usage-head .usage-stale { color: #8c6d44; }
+.account-usage-head .usage-unknown { color: #8b97a9; }
+.account-usage-window .usage-track { width: 100%; height: 5px; margin: 0; }
+.account-usage-window.is-compact .usage-track { height: 4px; }
+.account-usage-details { color: #8b97a9; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.account-usage-open { justify-self: start; padding: 0; border: 0; background: none; color: #526fdd; cursor: pointer; font-size: 9px; font-weight: 750; }
+.account-usage-open:hover { text-decoration: underline; }
+.account-usage-dialog { width: min(640px, calc(100vw - 28px)); }
+.account-usage-content { display: grid; gap: 9px; margin-top: 22px; }
+.account-usage-dialog .modal-body h2 { overflow-wrap: anywhere; }
 .account-models-button { min-height: 32px; padding: 7px 9px; font-size: 10px; }
 .model-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 6px; background: #edf2ff; color: #5572dc; font-size: 9px; }
 .account-models-dialog { width: min(710px, calc(100vw - 28px)); }

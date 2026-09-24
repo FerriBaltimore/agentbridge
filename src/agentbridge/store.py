@@ -217,10 +217,14 @@ class Store(AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStore
             db.execute('INSERT INTO usage_observations(account_id,observed_at,source,scope,stale,data) VALUES (?,?,?,?,?,?)',
                        (account_id, observed_at or time.time(), source, scope, int(stale), dumps(data)))
 
-    def latest_usage_observation(self, account_id, scope='account'):
+    def latest_usage_observation(self, account_id, scope='account', *, source=None):
         with self.connect() as db:
-            row = db.execute('SELECT * FROM usage_observations WHERE account_id=? AND scope=? ORDER BY observed_at DESC,id DESC LIMIT 1',
-                             (account_id, scope)).fetchone()
+            if source is None:
+                row = db.execute('SELECT * FROM usage_observations WHERE account_id=? AND scope=? ORDER BY observed_at DESC,id DESC LIMIT 1',
+                                 (account_id, scope)).fetchone()
+            else:
+                row = db.execute('SELECT * FROM usage_observations WHERE account_id=? AND scope=? AND source=? ORDER BY observed_at DESC,id DESC LIMIT 1',
+                                 (account_id, scope, source)).fetchone()
         if not row:
             return None
         result = dict(row)

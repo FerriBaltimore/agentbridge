@@ -1,10 +1,12 @@
 import { api } from './api.js';
 import { accountModels, renderAccountModelsDialog } from './account-models-view.js';
-import { byId, clear, describeError, emptyState, formatTime, node, setFeedback, statusPill, toast } from './ui.js';
-import { usageSignal } from './usage-view.js';
+import { byId, clear, describeError, emptyState, node, setFeedback, statusPill, toast } from './ui.js';
+import { usageUnavailable, usageWindowRow, usageWindows } from './usage-view.js';
 
 let selectedModelsAccountRef = null;
+let selectedUsageAccountRef = null;
 let modelsDialogReady = false;
+let usageDialogReady = false;
 let accountRows = [];
 let accountUsageRows = new Map();
 let accountStatuses = new Map();
@@ -72,24 +74,62 @@ function accountIdentity(account) {
   return identity;
 }
 
-function accountUsage(snapshot) {
-  const { observed, fresh, newest } = usageSignal(snapshot);
+function accountUsage(account, snapshot) {
+  const windows = usageWindows(snapshot);
   const wrapper = node('div', 'account-table-usage');
-  wrapper.append(node('strong', fresh ? 'usage-known' : 'usage-unknown',
-    fresh ? `${Math.round(observed)}% used` : observed === null ? 'Unknown usage' : 'Stale usage'));
-  const track = node('div', fresh ? 'usage-track' : 'usage-track is-unknown');
-  track.setAttribute('aria-hidden', 'true');
-  if (fresh) {
-    const fill = node('span', observed >= 80 ? 'usage-fill is-high' : 'usage-fill');
-    fill.style.width = `${observed}%`;
-    track.append(fill);
+  if (!windows.length) {
+    wrapper.append(node('span', 'usage-unknown', 'Unknown usage'));
+    wrapper.title = usageUnavailable(snapshot);
+    return wrapper;
   }
-  wrapper.append(track);
-  const detail = newest ? `Observed ${formatTime(newest)}`
-    : snapshot?.reason ? `Reason: ${String(snapshot.reason).replaceAll('_', ' ')}`
-      : 'No fresh quota observation';
-  wrapper.append(node('small', 'usage-detail', detail));
+  for (const window of windows.slice(0, 2)) wrapper.append(usageWindowRow(window, { compact: true }));
+  const details = node('button', 'account-usage-open', windows.length > 2
+    ? `View all ${windows.length} windows` : 'Usage details');
+  details.type = 'button';
+  details.dataset.testid = 'account-usage-open';
+  details.dataset.accountRef = account.account_ref;
+  details.setAttribute('aria-label', `View usage for ${account.name || account.account_ref}`);
+  details.addEventListener('click', () => openUsage(account, snapshot));
+  wrapper.append(details);
   return wrapper;
+}
+
+function renderUsageDialog(account, snapshot) {
+  const windows = usageWindows(snapshot);
+  byId('account-usage-heading').textContent = `Usage for ${account.name || account.account_ref}`;
+  byId('account-usage-subtitle').textContent = `${account.provider || 'Historical'} account · ${windows.length} observed window${windows.length === 1 ? '' : 's'}`;
+  const content = clear(byId('account-usage-content'));
+  if (!windows.length) {
+    content.append(node('p', 'account-detail-note', usageUnavailable(snapshot)));
+    return;
+  }
+  for (const window of windows) content.append(usageWindowRow(window));
+  if (snapshot?.refresh_reason) {
+    content.append(node('p', 'account-detail-note',
+      `Current quota refresh unavailable (${String(snapshot.refresh_reason).replaceAll('_', ' ')}). Showing observed usage.`));
+  }
+  if (snapshot?.reason && windows.every((window) => window.stale)) {
+    content.append(node('p', 'account-detail-note', `Latest refresh: ${String(snapshot.reason).replaceAll('_', ' ')}.`));
+  }
+}
+
+function openUsage(account, snapshot) {
+  selectedUsageAccountRef = account.account_ref;
+  renderUsageDialog(account, snapshot);
+  byId('account-usage-dialog').showModal();
+  byId('account-usage-close').focus();
+}
+
+function ensureUsageDialog() {
+  if (usageDialogReady) return;
+  usageDialogReady = true;
+  byId('account-usage-dialog').addEventListener('close', () => {
+    const ref = selectedUsageAccountRef;
+    selectedUsageAccountRef = null;
+    const button = [...byId('accounts-list').querySelectorAll('[data-testid="account-usage-open"]')]
+      .find((candidate) => candidate.dataset.accountRef === ref);
+    if (button?.getClientRects().length) button.focus();
+  });
 }
 
 function openModels(account, status) {
@@ -123,7 +163,7 @@ function accountRow(account, snapshot, status, onRemove) {
   const health = node('td', 'account-table-status');
   health.append(accountStatus(account, status));
   const usage = node('td', 'account-table-usage-cell');
-  usage.append(accountUsage(snapshot));
+  usage.append(accountUsage(account, snapshot));
   const models = node('td', 'account-table-models');
   const modelsButton = node('button', 'button button-secondary account-models-button', 'View models');
   modelsButton.type = 'button';
@@ -185,6 +225,7 @@ function renderAccountRows() {
 
 export function renderAccounts(accounts, usage, { statuses, onRemove }) {
   ensureModelsDialog();
+  ensureUsageDialog();
   setupPagination();
   accountRows = Array.isArray(accounts) ? accounts : [];
   accountUsageRows = usage;
@@ -198,7 +239,7 @@ export function renderAccounts(accounts, usage, { statuses, onRemove }) {
     return ['usable', 'active'].includes(observed?.authentication?.status || observed?.status);
   }).length;
   summary.append(node('span', 'pulse-dot'));
-  summary.append(node('span', '', `${accountRows.length} saved account${accountRows.length === 1 ? '' : 's'} · ${connected} with an active or usable observation. Usage is shown only when a fresh signal exists.`));
+  summary.append(node('span', '', `${accountRows.length} saved account${accountRows.length === 1 ? '' : 's'} · ${connected} with an active or usable observation. Quota windows show provider observations and their freshness.`));
   renderAccountRows();
   queuePageLayout();
   const dialog = byId('account-models-dialog');
@@ -206,6 +247,12 @@ export function renderAccounts(accounts, usage, { statuses, onRemove }) {
     const selected = accountRows.find((account) => account.account_ref === selectedModelsAccountRef);
     if (selected) renderAccountModelsDialog(selected, statuses?.get(selected.account_ref));
     else dialog.close();
+  }
+  const usageDialog = byId('account-usage-dialog');
+  if (usageDialog.open && selectedUsageAccountRef) {
+    const selected = accountRows.find((account) => account.account_ref === selectedUsageAccountRef);
+    if (selected) renderUsageDialog(selected, usage?.get(selected.account_ref));
+    else usageDialog.close();
   }
 }
 

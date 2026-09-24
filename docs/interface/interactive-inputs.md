@@ -73,6 +73,12 @@ Account quota is reported only when the proxy provides a fresh, attributable
 observation. A stale observation remains stale; missing usage never becomes
 zero. Codex duplex token updates are session cumulative and are labeled
 accordingly, rather than being reported as the current turn's total.
+`accounts.usage(refresh=true)` can obtain current Codex or Claude quota through
+the bound proxy OAuth credential, without a model turn. Windows remain
+separate, including Claude weekly and scoped pools; the SDK reports the
+provider's percentage, period, reset and per-window freshness where known.
+Unverified scopes do not influence model routing. Fixture coverage establishes
+the request and normalization shape, not live provider acceptance.
 Historical time filters and aggregation remain unsupported.
 
 Source: [Codex app-server](https://learn.chatgpt.com/docs/app-server).

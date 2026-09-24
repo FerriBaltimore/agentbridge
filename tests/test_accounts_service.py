@@ -60,7 +60,8 @@ def test_account_status_and_usage_are_observed_without_a_model_run(tmp_path, mon
         assert usage["source"] == "cliproxy_management"
         assert usage["supported"] is True and usage["stale"] is False
         assert len(usage["quota_windows"]) == 1
-        assert usage["quota_windows"][0]["model_id"] == "gpt-test"
+        assert usage["quota_windows"][0]["scope"] == "account"
+        assert usage["quota_windows"][0]["model_id"] is None
         assert usage["quota_windows"][0]["used_percent"] == 12.0
         assert usage["quota_windows"][0]["observed_at"] == (
             responses["/v0/management/auth-files"][1]["files"][0]["quota"]["observed_at"]

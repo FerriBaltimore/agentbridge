@@ -5,6 +5,7 @@ import time
 
 from ..errors import BridgeError
 from ..proxy import ManagementClient, ProxyRoute
+from ..proxy.quota import project as project_quota
 from ..quota_windows import timestamp
 from .selector import QuotaObservation, RouteCandidate, select_route
 
@@ -223,21 +224,81 @@ class RoutingService:
 
     def usage(self, account, *, refresh=False):
         saved = self.observation(account, refresh=refresh)
-        return self._usage_snapshot(account.id, saved['data'] if self._verified(account, saved)
-                                    else None, failure=saved['data'].get('reason') if saved else None)
+        verified = self._verified(account, saved)
+        snapshot = self._usage_snapshot(account.id, saved['data'] if verified else None,
+                                        failure=saved['data'].get('reason') if saved else None)
+        if verified:
+            previous = self.store.latest_usage_observation(
+                account.id, source='cliproxy_upstream_usage')
+            if previous:
+                prior = self._usage_snapshot(account.id, {
+                    **previous['data'], 'source': previous['source']})
+                snapshot = self._newer_usage(snapshot, prior)
+        if not refresh or not verified or account.provider not in {'codex', 'claude'}:
+            return snapshot
+        binding = self.store.proxy_binding(account.id)
+        if not binding:
+            return {**snapshot, 'refresh_reason': 'proxy_binding_unverified'}
+        route = ProxyRoute(account.id, account.proxy_base_url, account.key_env)
+        try:
+            active = ManagementClient(route, account.management_key_env, timeout=8).fetch_quota(
+                binding['binding_fingerprint'])
+        except BridgeError as error:
+            return {**snapshot, 'refresh_reason': error.code}
+        result = self._usage_snapshot(account.id, active)
+        self.store.usage_observation(account.id, result['source'], 'account',
+            {key: result[key] for key in ('supported', 'quota_windows', 'reason')},
+            stale=result['stale'])
+        return self._newer_usage(snapshot, result)
+
+    @staticmethod
+    def _newer_usage(first, second):
+        def identity(item):
+            # Both upstream and passive headers describe the same account
+            # period when they report the same explicit duration. Opaque
+            # scoped pools stay distinct unless their provider IDs coincide.
+            identifier = item.get('id', '').removeprefix('account:')
+            if identifier.startswith('base:'):
+                return ('base_pool', identifier)
+            if item.get('scope') == 'account' and item.get('window_seconds'):
+                return ('account_period', item['window_seconds'])
+            return ('pool', item.get('scope'), item.get('model_id'),
+                    identifier)
+
+        def priority(item):
+            observed = timestamp(item.get('observed_at'))
+            return (not item.get('stale'), observed if observed is not None else -1)
+
+        chosen = {}
+        for snapshot in (first, second):
+            for item in snapshot['quota_windows']:
+                candidate = {**item, 'source': snapshot['source']}
+                key = identity(candidate)
+                if key not in chosen or priority(candidate) > priority(chosen[key]):
+                    chosen[key] = candidate
+        if not chosen:
+            return first
+        sources = {item['source'] for item in chosen.values()}
+        source = sources.pop() if len(sources) == 1 else 'cliproxy_combined_usage'
+        return RoutingService._usage_snapshot(first['account_id'], {
+            'source': source, 'quota_windows': list(chosen.values())})
 
     @staticmethod
     def _usage_snapshot(account_id, data, *, failure=None):
-        rows = data.get('models', []) if isinstance(data, dict) else []
-        windows = [{'model_id': item['id'], 'used_percent': item['used_percent'],
-                    'observed_at': item.get('quota_observed_at')}
-                   for item in rows if isinstance(item, dict) and item.get('used_percent') is not None]
-        now = time.time()
-        fresh = bool(windows) and all(
-            (observed := timestamp(item['observed_at'])) is not None
-            and 0 <= now - observed < 60 for item in windows)
+        if isinstance(data, dict) and 'quota_windows' in data:
+            windows = project_quota(data['quota_windows'])
+        else:
+            rows = data.get('models', []) if isinstance(data, dict) else []
+            windows = project_quota([{'id': item['id'], 'label': item['id'],
+                'scope': 'model', 'model_id': item['id'], 'used_percent': item['used_percent'],
+                'remaining_percent': max(0, 100 - item['used_percent']),
+                'window_seconds': None, 'resets_at': None,
+                'observed_at': item.get('quota_observed_at')}
+                for item in rows if isinstance(item, dict) and item.get('used_percent') is not None])
+        fresh = any(not item['stale'] and item.get('used_percent') is not None for item in windows)
         reason = None if fresh else (failure or (
             'upstream_quota_stale' if windows else 'upstream_quota_unavailable'))
-        return {'account_id': account_id, 'source': 'cliproxy_management' if data or failure else None,
-                'scope': 'account', 'supported': bool(windows),
+        return {'account_id': account_id, 'source': data.get('source', 'cliproxy_management')
+                if isinstance(data, dict) else 'cliproxy_management' if failure else None,
+                'scope': 'account', 'supported': any(item.get('used_percent') is not None for item in windows),
                 'stale': not fresh, 'quota_windows': windows, 'reason': reason}
