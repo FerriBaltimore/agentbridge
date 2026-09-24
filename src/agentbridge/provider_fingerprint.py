@@ -174,8 +174,12 @@ def _name(value):
     return isinstance(value, str) and 0 < len(value) <= 256 and all(32 <= ord(c) < 127 for c in value)
 
 
-def _native(engine):
-    executable = shutil.which(engine)
+def _native(engine, state_root=None):
+    if engine == 'codex' and state_root is not None:
+        from .bundle.runtime import resolve_binary
+        executable = str(resolve_binary('codex', state_root))
+    else:
+        executable = shutil.which(engine)
     if executable is None:
         raise BridgeError('provider_unavailable', 'The provider executable is unavailable.')
     with tempfile.TemporaryDirectory(prefix='agentbridge-contract-') as directory:
@@ -210,8 +214,8 @@ def _native(engine):
                 'structural_hash': digest, 'surface_names': names, 'limitations': limitations}
 
 
-def inspect_surface(engine):
-    """Inspect installed defaults only; no accounts, custom commands or inference.
+def inspect_surface(engine, state_root=None):
+    """Inspect the managed Codex or an installed legacy CLI without accounts.
 
     Hash equality is evidence for review, never automatic version acceptance.
     Claude's structural_hash intentionally contains an observation-only help
@@ -219,4 +223,4 @@ def inspect_surface(engine):
     """
     if engine not in ('codex', 'claude'):
         raise BridgeError('invalid_engine', 'Unknown provider for offline inspection.')
-    return _native(engine)
+    return _native(engine, state_root)

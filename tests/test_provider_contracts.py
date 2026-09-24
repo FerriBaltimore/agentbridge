@@ -19,7 +19,8 @@ from test_proxy_binding import management
 def registry(tmp_path, monkeypatch):
     bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
     register_verified_proxy_account(bridge.store, 'a', 8317, provider='codex')
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.153.0')
+    monkeypatch.setattr('agentbridge.error_observer.provider_version',
+                        lambda account, state_root=None: '0.153.0')
     return ContractRegistry(bridge.store), bridge
 
 
@@ -31,7 +32,8 @@ def observation(registry, **changes):
 
 
 def inspect_value(monkeypatch, registry, **changes):
-    monkeypatch.setattr('agentbridge.provider_fingerprint.inspect_surface', lambda engine: observation(registry, **changes))
+    monkeypatch.setattr('agentbridge.provider_fingerprint.inspect_surface',
+                        lambda engine, state_root=None: observation(registry, **changes))
     return registry.inspect('codex')
 
 
@@ -45,7 +47,8 @@ def test_index_shared_contracts_have_stable_content_hashes():
 
 def test_unknown_release_blocked_before_credentials_admission_or_spawn(registry, monkeypatch, tmp_path):
     registry, bridge = registry
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
+    monkeypatch.setattr('agentbridge.error_observer.provider_version',
+                        lambda account, state_root=None: '0.154.0')
     def unexpected(account):
         pytest.fail('Credentials must not be resolved for unreviewed releases')
     monkeypatch.setattr('agentbridge.routing.execution.environment', unexpected)
@@ -62,7 +65,8 @@ def test_same_structure_new_release_suggests_reuse_without_activation(registry, 
     registry, bridge = registry
     result = inspect_value(monkeypatch, registry, version='0.154.0')
     assert result['status'] == 'candidate' and result['suggested_contract_id']
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
+    monkeypatch.setattr('agentbridge.error_observer.provider_version',
+                        lambda account, state_root=None: '0.154.0')
     assert not registry.check(bridge.account('a'))['native_operations_allowed']
     again = ContractRegistry(bridge.store).latest('codex', '0.154.0')
     assert again == result
@@ -89,7 +93,8 @@ def test_changed_structure_does_not_suggest_reuse(registry, monkeypatch):
 def test_worker_version_change_and_old_receipt_are_observable(registry, monkeypatch):
     registry, bridge = registry
     saved = registry.record_run('fixture-run', registry.check(bridge.account('a')))
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
+    monkeypatch.setattr('agentbridge.error_observer.provider_version',
+                        lambda account, state_root=None: '0.154.0')
     with pytest.raises(BridgeError, match='review'):
         registry.verify_run(bridge.account('a'), 'fixture-run')
     assert ContractRegistry(bridge.store).run('fixture-run') == saved
@@ -149,7 +154,8 @@ def test_completed_idempotent_replay_survives_upgrade(registry, monkeypatch, tmp
     run_id, created = bridge.store.admit('existing', session_id, 'hello', RunOptions(), 'same-key')
     receipt = registry.record_run(run_id, registry.check(bridge.account('a')))
     bridge.store.finish(run_id, 'completed')
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
+    monkeypatch.setattr('agentbridge.error_observer.provider_version',
+                        lambda account, state_root=None: '0.154.0')
     replay = bridge.submit(session_id, 'hello', request_key='same-key')
     assert replay.replayed and replay.id == run_id
     assert bridge.turn(run_id)['provider_compatibility'] == receipt
@@ -157,7 +163,7 @@ def test_completed_idempotent_replay_survives_upgrade(registry, monkeypatch, tmp
 
 def test_inspection_detected_component_mismatch_blocks_later_calls(registry, monkeypatch):
     registry, bridge = registry
-    def mismatch(engine):
+    def mismatch(engine, state_root=None):
         raise BridgeError('provider_contract_changed', 'Components differ.',
                           details={'engine': 'codex', 'version': '0.153.0', 'component': 'codex-cli'})
     monkeypatch.setattr('agentbridge.provider_fingerprint.inspect_surface', mismatch)
@@ -167,7 +173,8 @@ def test_inspection_detected_component_mismatch_blocks_later_calls(registry, mon
 
 def test_unindexed_release_keeps_proxy_metadata_separate_from_native_probes(registry, monkeypatch):
     registry, bridge = registry
-    monkeypatch.setattr('agentbridge.error_observer.provider_version', lambda account: '0.154.0')
+    monkeypatch.setattr('agentbridge.error_observer.provider_version',
+                        lambda account, state_root=None: '0.154.0')
     models = bridge.models(account_ref='a')
     assert models['models'][0]['availability'] == 'proxy_observed'
     account = bridge.account_status('a')

@@ -12,6 +12,7 @@ import time
 
 from .errors import BridgeError
 from .security import base_environment
+from .codex_executable import codex_argv
 
 
 def stamp(value=None):
@@ -37,15 +38,16 @@ class CodexAppServerProbe:
 
     source = "codex_app_server"
 
-    def __init__(self, account, *, timeout=30):
+    def __init__(self, account, *, timeout=30, state_root=None):
         self.account = account
         self.timeout = timeout
+        self.state_root = state_root
         self.process = None
         self.next_id = 0
         self.buffer = b''
 
     def _command(self):
-        return list(self.account.command or ("codex",)) + ["app-server", "--stdio"]
+        return codex_argv(self.account, self.state_root) + ["app-server", "--stdio"]
 
     def _start(self):
         env = base_environment()

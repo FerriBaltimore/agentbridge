@@ -53,6 +53,12 @@ operation at `fixture_tested` or `unsupported`.
 
 ## Local verification
 
+Build a platform wheel for the Linux architecture under test. On a source
+build, missing upstream archives are downloaded and matched to the committed
+SHA-256 lock. The installed wheel carries those archives and resolves the
+runtime offline. Verify both architectures before distributing both wheels;
+a local build on one machine only checks that architecture.
+
 ```bash
 python -m pytest -q
 python tools/check_repository.py
@@ -60,8 +66,11 @@ python -m compileall -q src
 python -m pip wheel . --no-deps --wheel-dir /tmp/agentbridge-wheel
 ```
 
-The wheel and installed CLI checks are part of the release procedure. Live
-provider checks remain an operator-controlled step because they require access
+The wheel and installed CLI checks are part of the release procedure. Record
+the wheel tag, pinned component versions and binary hashes. A new wheel does
+not restart existing sidecars: explicitly drain and restart them, then check
+their actual runtime version. Live provider checks remain an operator-controlled
+step because they require access
 to disposable accounts and credentials.
 
 ## Input and observation acceptance (2026-09-20)

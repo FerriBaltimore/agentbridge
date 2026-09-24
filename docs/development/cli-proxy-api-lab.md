@@ -66,8 +66,9 @@ between turns using attributable observations.
 Account onboarding uses one flow: `accounts login` with provider and account
 name. AgentBridge now prepares an empty dedicated local sidecar by default,
 with an isolated auth directory and transient client and management keys held
-by its supervisor. A compatible CLIProxyAPI executable must be installed or
-selected with `AGENTBRIDGE_CLIPROXY_BIN`. Advanced callers may provide a
+by its supervisor. The delivered Linux wheel includes a pinned CLIProxyAPI
+executable; the original lab selected an external binary with
+`AGENTBRIDGE_CLIPROXY_BIN`. Advanced callers may provide a
 proxy URL and environment variable names for the two keys to use an existing
 isolated sidecar in the same OAuth flow. GrantBridge coordinates the
 sidecar's Management API OAuth; CLIProxyAPI stores and renews upstream

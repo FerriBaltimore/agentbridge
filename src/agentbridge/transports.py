@@ -3,6 +3,7 @@ import json
 import sys
 from .errors import BridgeError, UnsupportedError
 from .attachments import images
+from .codex_executable import codex_argv
 
 
 def require_proxy_account(account):
@@ -17,7 +18,7 @@ def duplex(account, options):
         or options.permission_mode not in {'dontAsk', 'bypassPermissions'})
 
 
-def command(account, session, options, *, native_transport=False):
+def command(account, session, options, *, native_transport=False, state_root=None):
     require_proxy_account(account)
     native=session.get('native_id')
     model=options.model or session.get('model')
@@ -32,9 +33,9 @@ def command(account, session, options, *, native_transport=False):
     if options.max_turns is not None or options.max_budget_usd is not None or options.allowed_tools:
         raise UnsupportedError('Codex exec does not support AgentBridge turn, tool-list or dollar caps.')
     if duplex(account, options):
-        return list(account.command or ('codex',)) + ['app-server', '--stdio'] + route_args if native_transport else [
+        return codex_argv(account, state_root) + ['app-server', '--stdio'] + route_args if native_transport else [
             sys.executable, '-P', '-m', 'agentbridge.interactive_worker']
-    cmd=list(account.command or ('codex',))+['exec']
+    cmd=codex_argv(account, state_root)+['exec']
     if native:cmd+=['resume',native]
     cmd+=['--json','--skip-git-repo-check','-c','approval_policy="never"','-c',f'sandbox_mode={json.dumps(options.sandbox)}']
     cmd+=route_args

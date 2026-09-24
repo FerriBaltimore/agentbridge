@@ -1,0 +1,62 @@
+{
+  "cli_proxy_api": {
+    "assets": {
+      "linux_aarch64": {
+        "sha256": "4643d9db59aabf958b9099dbf1f84b0bba52ac25f713b0c21707e7234325a566",
+        "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v7.3.16/CLIProxyAPI_7.3.16_linux_aarch64_no-plugin.tar.gz"
+      },
+      "linux_x86_64": {
+        "sha256": "07bb37028409382cbca93e09b8dd5812748d5d3e9a8966bd4debc84e9edaa3ac",
+        "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v7.3.16/CLIProxyAPI_7.3.16_linux_amd64_no-plugin.tar.gz"
+      }
+    },
+    "version": "7.3.16"
+  },
+  "codex": {
+    "assets": {
+      "linux_aarch64": {
+        "sha256": "076b2b7512bad8b96e24370c031d2d1311f983e98650af9824639a619fa99be4",
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.153.0/codex-package-aarch64-unknown-linux-musl.tar.gz"
+      },
+      "linux_x86_64": {
+        "sha256": "27b0d7a753ac190c343918541a42067be307cc88a32b1a9feaf6f93648a0e9ea",
+        "url": "https://github.com/openai/codex/releases/download/rust-v0.153.0/codex-package-x86_64-unknown-linux-musl.tar.gz"
+      }
+    },
+    "licenses": {
+      "LICENSE": {
+        "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.153.0/LICENSE"
+      },
+      "NOTICE": {
+        "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+        "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.153.0/NOTICE"
+      }
+    },
+    "version": "0.153.0"
+  },
+  "grantbridge": {
+    "commit": "d60873c999b7ee5215eb8cfa7bb65326175ff2f6",
+    "files": {
+      "LICENSE": "909350af40c822e47840abe9f36dea176c5c8d0feec0bb82a5c6d54cb34763f6",
+      "scripts/agentbridge-proxy-adapter.mjs": "a34c4fb5ff80558fdd6933947fea7eddd6401fdde624109af238530dcc233fc4",
+      "src/agentbridge-proxy-errors.mjs": "dfa63fb95c8b55bab9e328cc143ae8d99e19bca3cd4c92621a37fca52238534a",
+      "src/agentbridge-proxy.mjs": "160a3057b7e193142ce92f58ef508abd537ef864bc1c8fcdf1821496c018ca1e"
+    },
+    "source_sha256": "e2eeeaaae72f60171e3365b3c70726adbb5e2fcddddac43ffe746fdce31365f0"
+  },
+  "node": {
+    "assets": {
+      "linux_aarch64": {
+        "sha256": "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2",
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.xz"
+      },
+      "linux_x86_64": {
+        "sha256": "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6",
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz"
+      }
+    },
+    "version": "v24.21.0"
+  },
+  "schema": 1
+}

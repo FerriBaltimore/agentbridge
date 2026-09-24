@@ -24,6 +24,8 @@ def admit_turn(bridge, session, prompt, options, request_key, message_id,
             bridge, session, options, excluded_account_refs=excluded_account_refs)
         if account.proxy_base_url and model not in account.supported_models:
             raise BridgeError('model_unavailable', 'The selected account does not declare this model.')
+        # Validate argv options before resolving a native runtime. The contract
+        # check below is the admission boundary for the managed executable.
         command(account, session, options)
         contracts = ContractRegistry(bridge.store)
         receipt = contracts.check(account, enforce=True)

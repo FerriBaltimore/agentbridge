@@ -15,6 +15,7 @@ import sys
 
 from .native_process_guard import restrict_process_inspection
 from .workspace_policy import overlaps_private_state, writable_runtime_in_workspace
+from .errors import BridgeError
 
 
 _CREATE_RULESET = 444
@@ -94,8 +95,14 @@ def restrict(*, cwd, home, temporary, executable, inputs_only=True,
         raise ValueError('Codex state must be scoped to one instance')
     state_root = home.parent.parent
     if any(executable.is_relative_to(path)
-           for path in (cwd, state_root, temporary, home)):
+           for path in (cwd, temporary, home)):
         raise ValueError('Native executable must be outside writable runtime paths')
+    bundle_directory = None
+    if executable.is_relative_to(state_root):
+        from .bundle.runtime import is_bundled_codex
+        bundle_directory = is_bundled_codex(executable, state_root)
+        if bundle_directory is None:
+            raise ValueError('Native executable must be outside writable runtime paths')
     if temporary == Path('/tmp'):
         raise ValueError('Native temporary path must be private')
     if overlaps_private_state(cwd, state_root):
@@ -124,6 +131,8 @@ def restrict(*, cwd, home, temporary, executable, inputs_only=True,
             _rule(libc, ruleset_fd, '/dev/null', _READ_FILE | _WRITE_FILE)
         _rule(libc, ruleset_fd, cwd, _READ | (_WRITE if workspace_write else 0))
         _rule(libc, ruleset_fd, executable, _EXECUTE | _READ_FILE)
+        if bundle_directory is not None:
+            _rule(libc, ruleset_fd, bundle_directory, _READ)
         _rule(libc, ruleset_fd, home, _DATA | _WRITE)
         _rule(libc, ruleset_fd, temporary, _DATA | _WRITE)
         if mcp_enabled:
@@ -180,7 +189,7 @@ def main():
                  inputs_only=inputs_only, workspace_write=workspace_write,
                  mcp_enabled=mcp_enabled)
         os.execvpe(executable, command, os.environ)
-    except (OSError, ValueError, KeyError, RuntimeError):
+    except (OSError, ValueError, KeyError, RuntimeError, BridgeError):
         # Stderr belongs to the private native channel and is never persisted.
         raise SystemExit(1) from None
 

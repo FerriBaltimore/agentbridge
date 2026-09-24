@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+src/agentbridge/bundle/assets/
+src/agentbridge/bundle/licenses/
 .venv/
 .agentbridge/
 .env

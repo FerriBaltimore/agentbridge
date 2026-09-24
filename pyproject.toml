@@ -1,10 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["setuptools>=70.1", "wheel>=0.40"]
+build-backend = "bundle_backend"
+backend-path = ["tools"]
 
 [project]
 name = "ferran-agentbridge"
-version = "2.0.0"
+version = "2.1.0"
 description = "Model-first Codex execution with observable local account routing"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,7 +22,12 @@ agentbridge = "agentbridge.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agentbridge = ["py.typed", "provider_contract_index.json"]
+agentbridge = [
+    "py.typed", "provider_contract_index.json", "bundle/lock.json",
+    "bundle/assets/*.tar.gz", "bundle/assets/*.tar.xz",
+    "bundle/grantbridge/*.mjs", "bundle/grantbridge/**/*.mjs",
+    "bundle/grantbridge/LICENSE", "bundle/licenses/*.txt",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

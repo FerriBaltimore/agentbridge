@@ -20,12 +20,12 @@ AgentBridge database or public account projections. No account is created
 until the sidecar reports one verified upstream identity
 and a usable model catalogue.
 
-Set `AGENTBRIDGE_CLIPROXY_BIN` to the absolute path of a compatible CLIProxyAPI
-executable outside every model-writable workspace. AgentBridge does not resolve
-the proxy binary from `PATH`.
-Provide a GrantBridge checkout with `--grantbridge-root` or
-`AGENTBRIDGE_GRANTBRIDGE_ROOT` when the adapter is not found beside the source
-checkout. Managed sidecars currently require Linux `memfd` support. Then run:
+Install the AgentBridge wheel for Linux x86_64 or ARM64. It includes pinned
+CLIProxyAPI, Codex, the GrantBridge proxy adapter and Node.js; no separate
+runtime installation or binary environment variable is needed. On first use,
+AgentBridge verifies and extracts these resources into its private state root,
+outside the model-writable workspace. Managed sidecars require Linux `memfd`
+support. Then run:
 
 ```bash
 agentbridge accounts login --provider codex --name "Personal Codex"
@@ -70,8 +70,8 @@ with private permissions. An explicit root must stay outside the workspace.
 If the project has `.agentbridge/bridge.sqlite3`, stop its active work and
 move that state deliberately before using the new default; AgentBridge raises
 `state_migration_required` rather than silently ignoring existing accounts.
-For a `workspace-write` turn, install the AgentBridge runtime and pin the
-CLIProxyAPI executable outside that writable workspace.
+For a `workspace-write` turn, keep the AgentBridge installation and private
+state directory outside the writable workspace.
 
 `models.list` exposes exact configured model IDs and marks which accounts have
 fresh local proxy observations for each ID. When available, it also reports
@@ -121,6 +121,10 @@ sidecars bind to loopback; the SDK does not expose a public network server.
 Fullbrain's v1-to-v2 work is mapped in the
 [migration guide](docs/interface/fullbrain-v2-migration.md) and
 [implemented RPC reference](docs/interface/fullbrain-v2-rpc.md).
+The [bundled runtime guide](docs/development/bundled-runtime.md) describes
+platform wheels, pinned sources, offline execution and upgrade behavior.
+The [CLIProxyAPI update guide](docs/development/cli-proxy-api-update.md)
+describes the reviewed updater.
 For a JSON-RPC caller:
 
 ```bash
@@ -136,7 +140,11 @@ python -m pytest
 python -m pip wheel . --no-deps -w dist
 ```
 
-Install the built wheel into a disposable environment and run the installed
-example and CLI. Reinstall delivered SDK changes into this repository's
-`.venv` and verify them. The repository is unlicensed until its owner chooses
-a license; do not publish a package without that instruction.
+Source builds download missing upstream archives into `dist/bundle-cache`,
+verify their pinned SHA-256 hashes and package one architecture per wheel.
+Installed wheels do not download runtimes. Install the built wheel into a
+disposable environment and run the installed example and CLI. Reinstall
+delivered SDK changes into this repository's `.venv` and verify them. Updating
+a wheel does not restart already-running account sidecars. The repository is
+unlicensed until its owner chooses a license; do not publish a package without
+that instruction.

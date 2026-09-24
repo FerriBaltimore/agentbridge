@@ -1,0 +1,2 @@
+recursive-include src/agentbridge/bundle *.json *.mjs *.txt *.gz *.xz
+recursive-include tools *.py

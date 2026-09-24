@@ -88,7 +88,7 @@ def test_rule_application_uses_admission_version_after_cli_upgrade(tmp_path, mon
 def test_legacy_error_observation_probes_only_once(tmp_path, monkeypatch):
     bridge, account = admitted(tmp_path, 'legacy-run')
     queries = []
-    def query(account):
+    def query(account, state_root=None):
         queries.append(True)
         return '0.153.0'
     monkeypatch.setattr(observer, 'provider_version', query)

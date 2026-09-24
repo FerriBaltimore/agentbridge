@@ -7,14 +7,17 @@ from .error_learning import Learning
 from .errors import BridgeError
 from .provider_contracts import ContractRegistry
 from .security import base_environment
+from .codex_executable import codex_argv
 
 
-def provider_version(account):
+def provider_version(account, state_root=None):
     if account.command:
         return None  # Custom launchers have no guaranteed version-query contract.
+    executable = (codex_argv(account, state_root)[0] if account.engine == 'codex'
+                  else account.engine)
     try:
         env = base_environment()
-        version = read_output([account.engine, '--version'], env=env,
+        version = read_output([executable, '--version'], env=env,
                               timeout=2, max_bytes=256).decode('utf-8')
         # Version labels are a compatibility boundary, not free-text search.
         # Never assign prerelease/build/custom output to the stable version's rules.
@@ -31,7 +34,7 @@ def run_version(store, account, turn_id):
     """An admitted release remains the source for this turn after an upgrade."""
     receipt = ContractRegistry(store).run(turn_id)
     if receipt is None:
-        return provider_version(account)  # Older runs have no admission receipt.
+        return provider_version(account, store.root)  # Older runs have no admission receipt.
     version = receipt.get('version') if receipt.get('engine') == account.engine else None
     return version if isinstance(version, str) and re.fullmatch(
         r'[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}', version) else None

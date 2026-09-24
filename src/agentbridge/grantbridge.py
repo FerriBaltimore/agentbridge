@@ -16,30 +16,30 @@ import time
 
 from .errors import BridgeError
 from .auth_contract import response_result
+from .bundle import resolve_binary, resolve_grantbridge_adapter
 
 
 class GrantBridgeClient:
     """Drive one local GrantBridge adapter process over JSON-RPC 2.0."""
 
-    def __init__(self, grantbridge_root=None, *, data_dir=None, node=None, adapter=None, timeout=30):
+    def __init__(self, grantbridge_root=None, *, data_dir=None, node=None, adapter=None,
+                 state_root=None, timeout=30):
         configured = grantbridge_root or os.environ.get("AGENTBRIDGE_GRANTBRIDGE_ROOT")
+        bundled = adapter is None and not configured
         if adapter is None:
             if configured:
                 root = Path(configured).expanduser().resolve()
+                adapter = root / "scripts" / "agentbridge-proxy-adapter.mjs"
+                if not adapter.is_file():
+                    adapter = root / "scripts" / "agentbridge-adapter.mjs"
             else:
-                candidates = (Path.cwd() / "grantbridge",
-                              Path.cwd().parent / "grantbridge",
-                              Path(__file__).resolve().parents[3] / "grantbridge")
-                root = next((candidate for candidate in candidates
-                             if (candidate / "scripts" / "agentbridge-adapter.mjs").is_file()), None)
-            if root is None:
-                raise BridgeError("grantbridge_unavailable", "GrantBridge is not configured. Pass --grantbridge-root or set AGENTBRIDGE_GRANTBRIDGE_ROOT.")
-            adapter = root / "scripts" / "agentbridge-adapter.mjs"
+                adapter = resolve_grantbridge_adapter(state_root)
         self.adapter = Path(adapter).expanduser().resolve()
         if not self.adapter.is_file():
             raise BridgeError("grantbridge_unavailable", "The GrantBridge AgentBridge adapter was not found.")
         self.data_dir = Path(data_dir).expanduser().resolve() if data_dir else None
-        self.node = node or os.environ.get("AGENTBRIDGE_NODE", "node")
+        self.node = (node or os.environ.get("AGENTBRIDGE_NODE") or
+                     (str(resolve_binary("node", state_root)) if bundled else "node"))
         self.timeout = max(1.0, float(timeout))
         self.process = None
         self._next_id = 0

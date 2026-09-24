@@ -56,12 +56,11 @@ show that state and require an explicit recovery decision.
 ## Authentication
 
 Call `accounts.login.start` with `provider` and `name`. AgentBridge prepares an
-empty, dedicated local CLIProxyAPI sidecar; the deployment must provide a
-compatible CLIProxyAPI executable with an absolute
-`AGENTBRIDGE_CLIPROXY_BIN` path outside model-writable workspaces on a Linux
-host with `memfd` support. Set
-`AGENTBRIDGE_GRANTBRIDGE_ROOT` when the GrantBridge adapter is not discoverable
-beside the source checkout. Persist the returned `attempt_id` and `owner_ref`;
+empty, dedicated local CLIProxyAPI sidecar from its Linux x86_64 or ARM64
+wheel. Codex, the GrantBridge proxy adapter and Node.js are included. The
+host needs Linux `memfd` support and a private state directory outside
+model-writable workspaces; no separate binary installation or runtime path
+variable is required. Persist the returned `attempt_id` and `owner_ref`;
 show the authorization URL or user code. GrantBridge coordinates the browser
 flow through the sidecar Management API, while CLIProxyAPI owns and refreshes
 the upstream credential in its isolated auth directory. Poll
@@ -101,4 +100,6 @@ expose the stdio process as a network service. On graceful shutdown stop or
 detach the worker, then call `recover` after restart to classify unfinished
 runs. Run the deterministic suite, repository guard, wheel install smoke test
 and the disposable provider acceptance job before enabling a provider in a
-production deployment.
+production deployment. A wheel upgrade leaves running sidecars on their old
+binary; drain active work and explicitly restart each sidecar under the new
+wheel before claiming that its version changed.

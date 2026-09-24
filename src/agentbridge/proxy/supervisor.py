@@ -19,6 +19,7 @@ import threading
 import time
 
 from ..errors import BridgeError
+from ..bundle import resolve_binary
 from ..models import identifier
 from .managed import _managed_root, _names, _socket_address
 from .process_lifecycle import _pid_start, _same_process, _stop_record
@@ -33,9 +34,14 @@ MAX_RESPONSE = 16 * 1024
 READY_SECONDS = 15
 
 
-def _binary():
+def _binary(state_root=None):
     configured = os.environ.get('AGENTBRIDGE_CLIPROXY_BIN')
-    if not configured or not Path(configured).is_absolute():
+    if not configured:
+        if state_root is None:
+            raise BridgeError('proxy_binary_unavailable',
+                              'The managed CLIProxyAPI runtime needs an AgentBridge state root.')
+        return resolve_binary('cli_proxy_api', state_root)
+    if not Path(configured).is_absolute():
         raise BridgeError('proxy_binary_unavailable',
                           'Set AGENTBRIDGE_CLIPROXY_BIN to an absolute CLIProxyAPI executable path.')
     path = Path(configured).resolve()
@@ -294,7 +300,7 @@ class Supervisor:
                         raise BridgeError("managed_proxy_recovery_required",
                                           "The running proxy could not be reattached safely. Stop it explicitly before retrying.")
                 if active is None:
-                    binary = _binary()
+                    binary = _binary(self.directory.parent)
                     active = _launch(binary, account_dir, account_id, port)
                 self.running[account_id] = active
             client_env, management_env = _names(account_id)

@@ -27,8 +27,8 @@ where the implementation declares support.
 The login methods are one asynchronous onboarding flow. `login.start` returns
 an opaque `attempt_id` and `owner_ref`; the attempt remains queryable after an
 AgentBridge restart. AgentBridge launches an empty, dedicated local CLIProxyAPI
-sidecar by default; an absolute `AGENTBRIDGE_CLIPROXY_BIN` path outside
-model-writable workspaces is required. Advanced callers may supply all three existing proxy route
+sidecar from the installed Linux wheel by default. No external executable path
+is required. Advanced callers may supply all three existing proxy route
 references together. GrantBridge coordinates provider OAuth using that
 sidecar's Management API. CLIProxyAPI owns and refreshes the upstream
 credential in its isolated auth directory. `login.check` verifies one active

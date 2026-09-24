@@ -34,7 +34,8 @@ class AuthenticationService:
             raise BridgeError('unsupported_operation', 'Proxy login currently supports a local browser.')
         if request_key is not None and (not isinstance(request_key, str) or not 1 <= len(request_key) <= 256):
             raise BridgeError('invalid_request', 'request_key must contain 1-256 characters.')
-        connection = GrantBridgeClient(grantbridge_root, data_dir=data_dir).configuration()
+        connection = GrantBridgeClient(grantbridge_root, data_dir=data_dir,
+                                       state_root=self.store.root).configuration()
         owner = owner_ref or self._owner_for(request_key)
         identifier(owner)
         accounts = self.accounts.list()

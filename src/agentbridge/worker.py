@@ -94,7 +94,7 @@ def main():
         from .proxy import session_home
         env['CODEX_HOME']=str(session_home(store.root,session['id']))
         env['HOME']=env['CODEX_HOME']
-        cmd=command(account,session,options)
+        cmd=command(account,session,options,state_root=store.root)
         prompt=run['prompt']
         if session.get('context') and not session.get('native_id'):
             prompt=session['context']+'\n\nCurrent user request:\n'+prompt
@@ -103,7 +103,8 @@ def main():
             payload = json.dumps({'engine': account.engine, 'prompt': prompt, 'cwd': session['cwd'],
                 'model': options.model or session.get('model'), 'native_id': session.get('native_id'),
                 'options': asdict(options), 'root': str(store.root), 'turn_id': run_id,
-                'command': command(account, session, options, native_transport=True),
+                'command': command(account, session, options, native_transport=True,
+                                   state_root=store.root),
                 'secret_names': [*secrets, *([MCP_CAPABILITY_ENV] if mcp_env else [])],
                 'context_package': execution['context_package'] if execution else None,
                 'mcp_enabled': bool(mcp_env)})

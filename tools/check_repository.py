@@ -11,7 +11,7 @@ SNAKE_CASE = re.compile(r"_?[a-z][a-z0-9]*(?:_[a-z0-9]+)*|__[a-z][a-z0-9_]*__|_"
 CONSTANT_CASE = re.compile(r"_?[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*")
 CLASS_CASE = re.compile(r"[A-Z][a-zA-Z0-9]*")
 KEBAB_CASE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-SPECIAL_NAMES = {"AGENTS.md", "README.md", "CLAUDE.md", "LICENSE", "NOTICE", "Makefile"}
+SPECIAL_NAMES = {"AGENTS.md", "README.md", "CLAUDE.md", "LICENSE", "NOTICE", "Makefile", "MANIFEST.in"}
 OPAQUE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".pdf"}
 
 

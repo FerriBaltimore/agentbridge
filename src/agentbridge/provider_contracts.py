@@ -72,7 +72,7 @@ class ContractRegistry:
 
     def check(self, account, *, enforce=False):
         from .error_observer import provider_version
-        version = provider_version(account)
+        version = provider_version(account, self.store.root)
         binding = next((b for b in index()['bindings']
                         if b['engine'] == account.engine and b['version'] == version), None)
         state = 'custom_adapter' if account.command else 'version_unavailable' if version is None else (
@@ -129,7 +129,7 @@ class ContractRegistry:
         if engine not in ENGINES:
             raise BridgeError('invalid_engine', 'Unknown engine.')
         try:
-            observed = inspect_surface(engine)
+            observed = inspect_surface(engine, state_root=self.store.root)
         except BridgeError as error:
             if error.code == 'provider_contract_changed' and error.details.get('engine') == engine:
                 observed = {**error.details, 'structural_hash': None, 'evidence_kind': None,

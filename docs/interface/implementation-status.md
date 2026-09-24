@@ -1,6 +1,6 @@
 # Implementation inventory
 
-Reviewed 2026-09-23 against the AgentBridge and GrantBridge working trees.
+Reviewed 2026-09-24 against the AgentBridge and GrantBridge working trees.
 The v2 execution and onboarding contract has one route: Codex through a
 local CLIProxyAPI sidecar. Older direct adapters and their account records are
 historical evidence and read-only data, not a second usable workflow.
@@ -10,7 +10,8 @@ historical evidence and read-only data, not a second usable workflow.
 | Surface | Implemented behavior | Evidence and limit |
 | --- | --- | --- |
 | Account login | `accounts.login.start/status/check/complete/cancel` and blocking `accounts login` use provider `codex`, `claude` or `grok` and name; optional advanced route references select an existing isolated proxy within the same flow | Deterministic Python→Node→fake Management API subprocess coverage; real OAuth pending |
-| Managed sidecar | AgentBridge prepares one loopback CLIProxyAPI process and auth directory per account; the proxy executable requires an absolute `AGENTBRIDGE_CLIPROXY_BIN` pin outside model-writable workspaces | Linux `memfd` is required; local lifecycle checks do not establish live provider acceptance |
+| Bundled runtime | Linux x86_64 and ARM64 wheels carry pinned CLIProxyAPI 7.3.16, Codex 0.153.0, GrantBridge proxy adapter commit `d60873c` and Node.js 24.21.0; source builds verify pinned downloads and runtime extraction verifies wheel assets | No separate binaries or binary environment variables are required for the installed wheel; build and local smoke checks do not establish live provider acceptance |
+| Managed sidecar | AgentBridge prepares one loopback CLIProxyAPI process and auth directory per account from the bundled executable by default | Linux `memfd` is required; existing sidecars keep their running binary until explicitly restarted; local lifecycle checks do not establish live provider acceptance |
 | Auth custody | GrantBridge coordinates the sidecar Management API browser flow; CLIProxyAPI owns upstream credential and refresh; the supervisor generates local keys and passes them to authorized local processes as needed | No credential values or raw provider errors in AgentBridge records; the client key reaches Codex but the management key does not; live refresh pending |
 | Login binding | New sidecar must be empty; complete requires one active upstream identity and observed models; account is created atomically | Identity and inventory fixture checks; local observation is not live entitlement |
 | Proxy account routes | Codex Responses endpoint on loopback, key references, unique sidecar URL, identity binding and clean inventory check | One file-backed account per sidecar; config-key-only routes ineligible |
@@ -69,8 +70,9 @@ integration tests use local Management API fixtures and a deterministic Codex
 executable. The login subprocess test exercises Python→GrantBridge adapter→
 fake Management API. None of these is live provider acceptance.
 
-Production enablement requires a pinned AgentBridge/GrantBridge/CLIProxyAPI
-version set, installed smoke checks, live acceptance for each selected
+Production enablement requires a reviewed AgentBridge wheel and its pinned
+Codex, GrantBridge, Node.js and CLIProxyAPI contents, installed smoke checks,
+live acceptance for each selected
 provider and model, and restart/Stop testing through the actual host client.
 Fullbrain integration is outside this repository. General production
 readiness is not established.

@@ -145,6 +145,50 @@ def test_native_launcher_rejects_codex_executable_inside_workspace(tmp_path):
     assert 'workspace-executable-ran' not in result.stdout
 
 
+@pytest.mark.skipif(not available(), reason='Landlock unavailable')
+def test_verified_codex_bundle_can_read_its_resources_but_not_state(tmp_path):
+    """The managed executable's sibling tools must not expose account state."""
+    state = tmp_path / 'state'
+    home = state / 'codex-runtime' / 'instance'
+    package = state / 'bundled-runtimes' / 'codex-fixture'
+    executable = package / 'bin' / 'codex'
+    resource = package / 'codex-resources' / 'fixture'
+    secret = state / 'canary'
+    temporary = tmp_path / 'native-tmp'
+    workspace = tmp_path / 'workspace'
+    for path in (home, executable.parent, resource.parent, temporary, workspace):
+        path.mkdir(parents=True, exist_ok=True)
+    executable.write_text('#!/bin/sh\n')
+    executable.chmod(0o700)
+    resource.write_text('bundle-data')
+    secret.write_text('private-state')
+    script = '''import errno,json
+from pathlib import Path
+from agentbridge.bundle import runtime
+from agentbridge.native_sandbox import restrict
+runtime.is_bundled_codex = lambda executable, state_root: Path(PACKAGE)
+restrict(cwd=CWD, home=HOME, temporary=TEMP, executable=EXECUTABLE,
+         inputs_only=False)
+result = {'resource': Path(RESOURCE).read_text()}
+try:
+    result['state'] = Path(SECRET).read_text()
+except OSError as error:
+    result['state'] = error.errno
+print(json.dumps(result))
+'''
+    values = {'PACKAGE': str(package), 'CWD': str(workspace), 'HOME': str(home),
+              'TEMP': str(temporary), 'EXECUTABLE': str(executable),
+              'RESOURCE': str(resource), 'SECRET': str(secret)}
+    assignments = '\n'.join(f'{name} = {value!r}' for name, value in values.items())
+    result = subprocess.run(
+        ['/usr/bin/python3', '-P', '-c', assignments + '\n' + script],
+        cwd=workspace, env={'PYTHONPATH': str(ROOT / 'src'),
+                            'PATH': '/usr/bin:/bin'},
+        capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {'resource': 'bundle-data', 'state': errno.EACCES}
+
+
 @pytest.mark.parametrize('inputs_only', (True, False))
 @pytest.mark.skipif(not available() or not Path('/usr/bin/bwrap').exists(),
                     reason='The production Linux isolation profile is unavailable')
