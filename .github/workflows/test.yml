@@ -8,6 +8,12 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: python tools/check_repository.py
-      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install --upgrade pip pytest playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: |
+          python -c "from playwright.sync_api import sync_playwright; \
+          playwright = sync_playwright().start(); \
+          browser = playwright.chromium.launch(headless=True); \
+          browser.close(); playwright.stop()"
       - run: python -m pytest
       - run: python -m pip wheel . --no-deps -w dist

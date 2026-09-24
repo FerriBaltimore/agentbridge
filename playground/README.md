@@ -14,15 +14,13 @@ python -m playground.server --workspace-path . --port 8765
 ```
 
 Open `http://127.0.0.1:8765/`. The server binds to loopback and requires a
-same-origin mutation header. Install the `cliproxy` CLIProxyAPI executable
-and the GrantBridge adapter on the local machine. Set
-`AGENTBRIDGE_CLIPROXY_BIN` to the executable's absolute path outside the
-workspace. Set
-`AGENTBRIDGE_GRANTBRIDGE_ROOT` if GrantBridge is outside its standard
-location. Account sign-in asks only for a provider and display name.
-AgentBridge creates an isolated local proxy connection for each account and
-uses GrantBridge to coordinate browser authorization. Its generated keys and
-local endpoint are never entered in the browser form.
+same-origin mutation header. AgentBridge 2.1.0 includes CLIProxyAPI, Codex,
+Node.js and the GrantBridge proxy adapter in its Linux platform wheel; no
+separate runtime installation or environment variables are needed. Account
+sign-in asks only for a provider and display name. AgentBridge creates an
+isolated local proxy connection for each account and uses GrantBridge to
+coordinate browser authorization. Its generated keys and local endpoint are
+never entered in the browser form.
 
 The default state is `${XDG_STATE_HOME:-~/.local/state}/agentbridge`, outside
 the project workspace. An explicit `--root` must also be outside the workspace.
@@ -47,5 +45,9 @@ default. AgentBridge does not silently import or discard the old accounts.
 
 Browser tests use simulated local proxy responses, GrantBridge and Codex
 processes. They do not discover real accounts or verify live provider OAuth
-or model acceptance. Run them with `python -m pytest tests/test_playground_browser.py`
-when Playwright Chromium or Chrome is installed.
+or model acceptance. Run them with `python -m pytest tests/test_playground_browser*.py`
+when Playwright Chromium or Chrome is installed. CI installs Chromium and
+requires it to launch before running the test suite. The playground itself is
+kept in this repository; it is not included in the AgentBridge runtime wheel.
+See the [playground acceptance record](../docs/development/playground-acceptance.md)
+for the 2.1.0 browser and bundled-runtime checks.
