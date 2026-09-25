@@ -1,5 +1,7 @@
 """Earned reset controls use SDK-backed fixture responses, never real credits."""
 
+import pytest
+
 from agentbridge import BridgeError
 from test_playground_browser import _launch_browser, _now, _page, local_playground, playwright_api
 from test_playground_browser_layout import _assert_layout_fits, _observed_page
@@ -192,7 +194,12 @@ def test_sdk_pending_receipt_can_be_resolved_without_local_storage(local_playgro
             browser.close()
 
 
-def test_definitive_preflight_refusal_clears_new_local_attempt(local_playground, monkeypatch):
+@pytest.mark.parametrize(('code', 'message'), [
+    ('reset_observation_stale', 'The reset observation is stale.'),
+    ('authentication_in_progress', 'Finish the account login before redeeming a reset credit.'),
+])
+def test_definitive_preflight_refusal_clears_new_local_attempt(
+        local_playground, monkeypatch, code, message):
     bridge = local_playground['bridge']
     writes = []
     monkeypatch.setattr(bridge, 'account_reset_credits',
@@ -200,7 +207,7 @@ def test_definitive_preflight_refusal_clears_new_local_attempt(local_playground,
 
     def refuse(account_ref, *, idempotency_key, observation_ref, credit_id=None):
         writes.append(idempotency_key)
-        raise BridgeError('reset_observation_stale', 'The reset observation is stale.')
+        raise BridgeError(code, message)
 
     monkeypatch.setattr(bridge, 'account_quota_reset', refuse, raising=False)
     with playwright_api.sync_playwright() as playwright:
@@ -211,7 +218,7 @@ def test_definitive_preflight_refusal_clears_new_local_attempt(local_playground,
             reset.get_by_text('2 earned resets available').wait_for()
             reset.get_by_test_id('account-reset-use').click()
             reset.get_by_test_id('account-reset-confirm').click()
-            reset.get_by_text('The reset observation is stale', exact=False).wait_for()
+            reset.get_by_text(message, exact=False).wait_for()
             assert len(writes) == 1
             assert page.evaluate("localStorage.getItem('agentbridge.quota-reset:openai-personal')") is None
             assert reset.get_by_text('A reset attempt has an unknown outcome', exact=False).count() == 0

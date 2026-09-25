@@ -12,7 +12,7 @@ const DEFINITIVE_PREFLIGHT = new Set([
   'invalid_request', 'reset_observation_changed', 'reset_observation_stale',
   'reset_credit_unavailable', 'reset_credit_changed', 'reset_observation_used',
   'idempotency_conflict', 'proxy_binding_changed', 'busy', 'account_retired',
-  'reset_pending',
+  'reset_pending', 'authentication_in_progress', 'proxy_binding_unverified',
 ]);
 const STORAGE_PREFIX = 'agentbridge.quota-reset:';
 
@@ -252,7 +252,8 @@ export function createAccountResetView(account, observedStatus, onRedeemed) {
       catch (error) { toast(`The reset finished. ${describeError(error)}`, true); }
     } catch (error) {
       state.error = describeError(error);
-      if ((!wasPending && DEFINITIVE_PREFLIGHT.has(error?.code))
+      if ((!wasPending && (DEFINITIVE_PREFLIGHT.has(error?.code)
+          || error?.data?.outcome === 'not_started'))
           || error?.code === 'reset_attempt_not_started') {
         try {
           localStorage.removeItem(storageKey(state.accountId));
