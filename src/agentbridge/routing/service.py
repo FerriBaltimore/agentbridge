@@ -326,6 +326,7 @@ class RoutingService:
         verified = self._verified(account, saved)
         snapshot = self._usage_snapshot(account.id, saved['data'] if verified else None,
                                         failure=saved['data'].get('reason') if saved else None)
+        previous = None
         if verified:
             previous = self.store.latest_usage_observation(
                 account.id, source='cliproxy_upstream_usage')
@@ -351,8 +352,9 @@ class RoutingService:
         if not self.store.usage_observation(
                 account.id, result['source'], 'account',
                 {key: result[key] for key in ('supported', 'quota_windows', 'reason')},
-                stale=result['stale'], expected_reset_generation=reset_generation):
-            return self._after_reset(account.id, snapshot, force=True)
+                stale=result['stale'], expected_reset_generation=reset_generation,
+                expected_latest_id=previous['id'] if previous else None):
+            return self._quota_snapshot(account, saved)
         return self._after_reset(account.id, self._newer_usage(snapshot, result))
 
     def _after_reset(self, account_id, snapshot, *, force=False):

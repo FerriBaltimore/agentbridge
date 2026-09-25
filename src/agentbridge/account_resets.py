@@ -102,7 +102,9 @@ class AccountResetMixin:
         try:
             data = self._reset_proxy(account, binding).read()
             self.store.save_reset_observation(account.id, binding, data,
-                                              state['generation'])
+                                              state['generation'],
+                                              state['observation']['observation_ref']
+                                              if state['observation'] else None)
         except BridgeError as error:
             self.store.expire_reset_observation(
                 account.id, state['generation'],

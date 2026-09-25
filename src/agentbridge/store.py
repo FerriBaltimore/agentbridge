@@ -25,6 +25,9 @@ from .native_sessions import bind_native_session, migrate_v12
 from .account_reset_store import AccountResetStoreMixin, migrate_v13
 
 
+NO_LATEST_OBSERVATION_CHECK = object()
+
+
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
@@ -233,12 +236,21 @@ class Store(AccountResetStoreMixin, InstanceDeletionStoreMixin, AccountPauseStor
         return [dict(row) for row in rows]
 
     def usage_observation(self, account_id, source, scope, data, *, stale=False,
-                          observed_at=None, expected_reset_generation=None):
+                          observed_at=None, expected_reset_generation=None,
+                          expected_latest_id=NO_LATEST_OBSERVATION_CHECK):
         with self.connect() as db:
-            if expected_reset_generation is not None:
+            if (expected_reset_generation is not None or
+                    expected_latest_id is not NO_LATEST_OBSERVATION_CHECK):
                 db.execute('BEGIN IMMEDIATE')
-                if not self._reset_read_current(db, account_id, expected_reset_generation):
+                if (expected_reset_generation is not None and
+                        not self._reset_read_current(db, account_id, expected_reset_generation)):
                     return False
+                if expected_latest_id is not NO_LATEST_OBSERVATION_CHECK:
+                    latest = db.execute('SELECT id FROM usage_observations WHERE account_id=? '
+                                        'AND scope=? AND source=? ORDER BY observed_at DESC,id DESC LIMIT 1',
+                                        (account_id, scope, source)).fetchone()
+                    if (latest['id'] if latest else None) != expected_latest_id:
+                        return False
             db.execute('INSERT INTO usage_observations(account_id,observed_at,source,scope,stale,data) VALUES (?,?,?,?,?,?)',
                        (account_id, observed_at or time.time(), source, scope, int(stale), dumps(data)))
         return True

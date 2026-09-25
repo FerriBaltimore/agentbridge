@@ -32,6 +32,8 @@ Reads begun before a reset cannot overwrite its outcome: a durable account
 generation fences credit and quota observations after the provider call. While
 an attempt is pending, the credit count and quota percentages are unknown;
 the prior credit observation cannot authorize a new redemption.
+An overlapping older read cannot replace a credit or direct quota observation
+saved by another request.
 After a confirmed reset, passive proxy quota headers remain unknown even if
 the sidecar reports a newer timestamp. A direct upstream quota read must
 confirm the new percentages.

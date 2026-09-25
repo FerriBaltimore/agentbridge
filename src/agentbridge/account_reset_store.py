@@ -121,13 +121,18 @@ class AccountResetStoreMixin:
                                  (account_id, observation_ref, expected_generation))
             return changed.rowcount == 1
 
-    def save_reset_observation(self, account_id, binding, data, expected_generation):
+    def save_reset_observation(self, account_id, binding, data, expected_generation,
+                               expected_observation_ref):
         """Store only bounded normalized credit facts after verifying the login binding."""
         observed_at = time.time()
         observation_ref = uuid4().hex
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             if not self._reset_read_current(db, account_id, expected_generation):
+                return None
+            prior = db.execute('SELECT observation_ref FROM account_reset_observations '
+                               'WHERE account_id=?', (account_id,)).fetchone()
+            if (prior['observation_ref'] if prior else None) != expected_observation_ref:
                 return None
             if db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
                           (account_id,)).fetchone():

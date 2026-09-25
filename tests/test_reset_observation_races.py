@@ -152,3 +152,77 @@ def test_post_reset_passive_cache_stays_unknown_until_upstream_read(
         later_passive = bridge.account_usage("fixture")
         assert later_passive["stale"] is False
         assert any(row["used_percent"] == 12 for row in later_passive["quota_windows"])
+
+
+def test_older_credit_get_cannot_replace_newer_get_in_same_generation(
+        tmp_path, monkeypatch):
+    with reset_proxy(monkeypatch) as (client, _, state):
+        bridge = bound_bridge(tmp_path, client)
+        entered, release = Event(), Event()
+        original = CodexResetProxy.read
+
+        def paused_first_read(proxy):
+            result = original(proxy)
+            if not entered.is_set():
+                entered.set()
+                assert release.wait(timeout=5)
+            return result
+
+        monkeypatch.setattr(CodexResetProxy, "read", paused_first_read)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = pool.submit(Bridge(bridge.root).account_reset_credits,
+                                "fixture", refresh=True)
+            try:
+                assert entered.wait(timeout=5)
+                state["usage"] = {"status_code": 200, "body": json.dumps({
+                    "rate_limit_reset_credits": {"available_count": 0}})}
+                state["details"] = {"status_code": 200, "body": json.dumps({
+                    "available_count": 0, "credits": []})}
+                newer = bridge.account_reset_credits("fixture", refresh=True)
+                assert newer["available_count"] == 0
+            finally:
+                release.set()
+            older = first.result(timeout=5)
+        assert older["available_count"] == 0
+        assert older["observation_ref"] == newer["observation_ref"]
+        assert bridge.store.reset_observation("fixture")["data"]["available_count"] == 0
+
+
+def test_older_quota_get_cannot_replace_newer_get_in_same_generation(
+        tmp_path, monkeypatch):
+    with reset_proxy(monkeypatch) as (client, _, state):
+        state["entry"]["unavailable"] = False
+        bridge = bound_bridge(tmp_path, client)
+        snapshot = observed(bridge)
+        _complete_fixture_reset(bridge, snapshot)
+        state["usage"] = {"status_code": 200, "body": json.dumps({
+            "rate_limit": {"primary_window": {
+                "used_percent": 63, "limit_window_seconds": 18000}}})}
+        entered, release = Event(), Event()
+        original = ManagementClient.fetch_quota
+
+        def paused_first_fetch(management, binding):
+            result = original(management, binding)
+            if not entered.is_set():
+                entered.set()
+                assert release.wait(timeout=5)
+            return result
+
+        monkeypatch.setattr(ManagementClient, "fetch_quota", paused_first_fetch)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = pool.submit(Bridge(bridge.root).account_usage,
+                                "fixture", refresh=True)
+            try:
+                assert entered.wait(timeout=5)
+                state["usage"] = {"status_code": 200, "body": json.dumps({
+                    "rate_limit": {"primary_window": {
+                        "used_percent": 12, "limit_window_seconds": 18000}}})}
+                newer = bridge.account_usage("fixture", refresh=True)
+                assert any(row["used_percent"] == 12 for row in newer["quota_windows"])
+            finally:
+                release.set()
+            older = first.result(timeout=5)
+        assert older["stale"] is False
+        assert any(row["used_percent"] == 12 for row in older["quota_windows"])
+        cached = bridge.account_usage("fixture")
+        assert any(row["used_percent"] == 12 for row in cached["quota_windows"])
