@@ -65,6 +65,28 @@ def test_sdk_returns_first_durable_receipt_if_later_provider_reply_differs(
         assert len(provider_calls(state, "POST")) == 1
 
 
+def test_definite_preflight_failure_returns_concurrent_known_receipt(
+        tmp_path, monkeypatch):
+    with reset_proxy(monkeypatch) as (client, _, state):
+        bridge = bound_bridge(tmp_path, client)
+        snapshot = observed(bridge)
+
+        def concurrent_receipt_then_preflight_failure(proxy, key, credit_id=None):
+            bridge.store.finish_reset_attempt(key, "reset", 1)
+            raise BridgeError("proxy_binding_changed", "Fixture preflight changed.",
+                              phase="redemption", outcome="not_started")
+
+        monkeypatch.setattr(CodexResetProxy, "consume",
+                            concurrent_receipt_then_preflight_failure)
+        result = bridge.account_quota_reset(
+            "fixture", idempotency_key=FIRST_KEY,
+            observation_ref=snapshot["observation_ref"])
+        assert result["outcome"] == "reset"
+        assert result["windows_reset"] == 1
+        assert bridge.store.pending_reset_attempt("fixture") is None
+        assert provider_calls(state, "POST") == []
+
+
 def test_expired_dispatch_claim_allows_explicit_same_key_recovery(tmp_path, monkeypatch):
     with reset_proxy(monkeypatch) as (client, _, state):
         bridge = bound_bridge(tmp_path, client)
@@ -98,6 +120,15 @@ def test_cached_credit_identity_change_is_not_presented_as_available(
         assert cached["stale"] is True
         assert cached["reason"] == "proxy_binding_changed"
         assert provider_calls(state, "POST") == []
+
+
+def test_uncertain_reset_has_execution_error_category():
+    error = BridgeError("reset_outcome_unknown", "The reset outcome is unknown.",
+                        phase="redemption", outcome="unknown")
+    data = error.safe_data()
+    assert data["category"] == "execution"
+    assert data["action"] == "inspect"
+    assert data["retryable"] is False
 
 
 def test_known_redemption_survives_subsequent_refresh_failures(tmp_path, monkeypatch):

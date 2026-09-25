@@ -135,32 +135,35 @@ class AccountResetMixin:
         except BridgeError as error:
             if error.outcome == 'not_started' and attempt['started_now']:
                 try:
-                    self.store.finish_reset_attempt(
+                    receipt = self.store.finish_reset_attempt(
                         key, 'not_started', None,
                         dispatch_started=attempt['dispatch_started'])
                 except Exception:
                     raise BridgeError('reset_outcome_unknown',
                                       'The Codex reset outcome is unknown.',
                                       phase='redemption', outcome='unknown') from None
+                if receipt['outcome'] == 'not_started':
+                    raise
+            else:
+                try:
+                    self.store.release_reset_attempt(key, attempt['dispatch_started'])
+                except Exception:
+                    pass
+                if error.outcome == 'not_started':
+                    raise BridgeError('reset_outcome_unknown', 'The Codex reset outcome is unknown.',
+                                      phase='redemption', outcome='unknown') from None
                 raise
+        else:
             try:
-                self.store.release_reset_attempt(key, attempt['dispatch_started'])
+                receipt = self.store.finish_reset_attempt(
+                    key, result['outcome'], result.get('windows_reset'))
             except Exception:
-                pass
-            if error.outcome == 'not_started':
+                try:
+                    self.store.release_reset_attempt(key, attempt['dispatch_started'])
+                except Exception:
+                    pass
                 raise BridgeError('reset_outcome_unknown', 'The Codex reset outcome is unknown.',
                                   phase='redemption', outcome='unknown') from None
-            raise
-        try:
-            receipt = self.store.finish_reset_attempt(
-                key, result['outcome'], result.get('windows_reset'))
-        except Exception:
-            try:
-                self.store.release_reset_attempt(key, attempt['dispatch_started'])
-            except Exception:
-                pass
-            raise BridgeError('reset_outcome_unknown', 'The Codex reset outcome is unknown.',
-                              phase='redemption', outcome='unknown') from None
         outcome = receipt['outcome']
         windows_reset = receipt['windows_reset']
         if outcome == 'not_started':
