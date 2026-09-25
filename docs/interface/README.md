@@ -12,10 +12,12 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - capabilities.md: v2 proxy behavior, support and acceptance maturity.
 - events.md: event envelope and stream semantics.
 - interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
+- message-queues.md: persistent ordered input, queue editing and explicit immediate delivery.
 - context-and-mcp.md: bounded selected instructions, evidence and private execution tools.
 - errors.md: stable error envelope and retry behavior.
 - review.md: completeness checklist and acceptance evidence.
 - provider-acceptance.md: release matrix and live-provider gate.
+- account-affinity.md: sticky automatic routing, manual controls and cache evidence limits.
 - v2-model-routing.md: model-first Codex proxy routing and evidence limits.
 - fullbrain-integration.md: host integration principles.
 - fullbrain-v2-migration.md: Fullbrain v1 to v2 migration gates and data changes.

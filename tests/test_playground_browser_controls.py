@@ -247,6 +247,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
             page.locator('#route-settings summary').click()
             route = page.get_by_test_id('chat-account')
             assert route.locator('option').count() == 2
+            page.get_by_test_id('chat-routing-mode').select_option('pinned')
             route.select_option('OpenAI Personal')
             page.get_by_test_id('chat-input').fill('Pinned OpenAI request')
             page.get_by_test_id('chat-send').click()
@@ -281,6 +282,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
                 'option').all_text_contents()
             page.get_by_test_id('chat-model').select_option('fixture/claude-model')
             page.locator('#route-settings summary').click()
+            page.get_by_test_id('chat-routing-mode').select_option('pinned')
             route.select_option('Claude Research')
             page.get_by_test_id('chat-input').fill('Pinned Claude request')
             page.get_by_test_id('chat-send').click()

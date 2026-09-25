@@ -158,6 +158,8 @@ def test_reopen_running_turn_then_stop_without_retry_or_account_change(local_pla
             page.get_by_test_id('chat-input').fill('Wait so I can stop this turn')
             page.get_by_test_id('chat-send').click()
             page.get_by_test_id('chat-stop').wait_for(state='visible', timeout=15000)
+            assert page.get_by_test_id('chat-routing-mode').is_disabled()
+            assert page.get_by_test_id('chat-account').is_disabled()
             _wait_for_launch(capture)
             assert len(bridge.runs()) == 1
             turn_id = bridge.runs()[0]['id']

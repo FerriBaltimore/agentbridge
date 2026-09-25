@@ -119,6 +119,17 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
         alpha["used"], beta["used"] = 5, 90
         bridge.routes.observe(bridge.account("alpha"))
         bridge.routes.observe(bridge.account("beta"))
+        steady = bridge.message_create(instance["id"], "stay on the warm account")
+        assert bridge.run(steady["turn_id"]).wait(10)["state"] == "completed"
+        assert steady["account_ref"] == "Beta"
+        assert json.loads(bridge.run(steady["turn_id"]).text) == {
+            "account": "beta", "resumed": True, "portable": False}
+        steady_route = [event for event in bridge.turn_events(steady["turn_id"])
+                        if event["kind"] == "route.selected"][0]["data"]
+        assert steady_route["reason"] == "affinity"
+
+        beta["used"] = 100
+        bridge.routes.observe(bridge.account("beta"))
         second = bridge.message_create(instance["id"], "second")
         assert bridge.run(second["turn_id"]).wait(10)["state"] == "completed"
         assert second["account_ref"] == "Alpha"
@@ -128,7 +139,10 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
                     if event["kind"] == "route.selected"]
         assert selected[0]["data"]["account_changed"] is True
         assert selected[0]["data"]["portable_context_used"] is True
+        assert selected[0]["data"]["affinity_break_reason"] == "quota_exhausted"
 
+        beta["used"] = 0
+        bridge.routes.observe(bridge.account("beta"))
         third = bridge.message_create(instance["id"], "third")
         assert bridge.run(third["turn_id"]).wait(10)["state"] == "completed"
         assert json.loads(bridge.run(third["turn_id"]).text) == {
@@ -146,11 +160,13 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
             return original_admit(*args, **kwargs)
 
         bridge.store.admit = admit_with_competing_turn
-        fourth = bridge.message_create(instance["id"], "fourth")
+        with pytest.raises(BridgeError) as busy:
+            bridge.message_create(instance["id"], "fourth")
         bridge.store.admit = original_admit
-        assert bridge.run(fourth["turn_id"]).wait(10)["state"] == "completed"
+        assert busy.value.code == "account_busy"
         assert contested["occurred"] is True
-        assert fourth["account_ref"] == "Beta"
+        assert bridge.store.routing(instance["id"])["affinity_account_id"] == "alpha"
+        assert bridge.store.session_run_count(instance["id"]) == 4
         bridge.store.finish("blocking-turn", "cancelled")
 
         pinned = bridge.instance_create(model="lab-model", account_ref="Alpha",

@@ -13,6 +13,8 @@ OPERATIONS = (
     "instances.list", "instances.update", "instances.archive", "instances.delete",
     "instances.discard_evaluation",
     "instances.events", "messages.create",
+    "messages.get", "queues.list", "queues.add", "queues.move", "queues.delete",
+    "queues.dispatch", "queues.pause", "queues.resume",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
     "error_cases.list", "error_cases.get", "error_cases.diagnose", "error_diagnoses.get",
@@ -47,6 +49,9 @@ def proxy_payload(*, include_parameters=True):
             item['limitations'] = ['schema_audit_only', 'execution_engine_is_codex']
         elif operation == 'models.list':
             item['limitations'] = ['local_catalog_is_not_provider_entitlement']
+        elif operation.startswith('queues.'):
+            item['limitations'] = ['conversation_local_order', 'private_context_rebind_after_dispatcher_loss',
+                                   'live_provider_acceptance_pending']
         elif operation == 'instances.transfer':
             item['support'] = 'portable'
             item['limitations'] = ['bounded_context', 'explicit_omissions']
@@ -66,6 +71,14 @@ def proxy_payload(*, include_parameters=True):
              'operations': operations}
     if include_parameters:
         value['parameters'] = {
+            'routing_mode': {'support': 'adapter', 'maturity': 'fixture_tested',
+                             'values': ['automatic', 'pinned'],
+                             'limitations': ['between_turns_only', 'automatic_account_affinity',
+                                             'provider_cache_savings_unverified']},
+            'delivery': {'support': 'adapter', 'maturity': 'fixture_tested',
+                         'values': ['reject', 'queue', 'steer', 'interrupt'],
+                         'limitations': ['steer_requires_interactive_turn',
+                                         'legacy_default_rejects_busy', 'live_provider_acceptance_pending']},
             'model': {'support': 'adapter', 'maturity': 'fixture_tested'},
             'effort': {'support': 'adapter', 'maturity': 'fixture_tested',
                        'limitations': ['provider_model_may_ignore_effort']},

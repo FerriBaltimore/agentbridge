@@ -88,12 +88,18 @@ def test_instance_cli_uses_model_and_auto_account_unless_pinned(monkeypatch, cap
     assert 'Engine:' not in output
     assert bridge.calls[-1] == ('create', {'model': 'provider/model',
         'workspace_path': '/workspace', 'account_ref': None,
-        'provider': None, 'idempotency_key': 'create-1'})
+        'provider': None, 'routing_mode': None, 'idempotency_key': 'create-1'})
 
     cli.main(['instances', 'create', '--model', 'provider/model',
               '--account-ref', 'Pinned', '--json'])
     assert json.loads(capsys.readouterr().out)['account_ref'] == 'Pinned'
     assert bridge.calls[-1][1]['account_ref'] == 'Pinned'
+
+    cli.main(['instances', 'create', '--model', 'provider/model',
+              '--account-ref', 'Preferred', '--routing-mode', 'automatic', '--json'])
+    capsys.readouterr()
+    assert bridge.calls[-1][1]['account_ref'] == 'Preferred'
+    assert bridge.calls[-1][1]['routing_mode'] == 'automatic'
 
     cli.main(['instances', 'create', '--model', 'provider/model',
               '--provider', 'claude', '--json'])

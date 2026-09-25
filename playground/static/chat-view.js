@@ -1,5 +1,6 @@
 import { byId, clear, emptyState, formatClock, node } from './ui.js';
 import { appendTimeline } from './chat-timeline.js';
+import { appliedRoute, requestedRoute, routingMode, selectedAccount } from './chat-routing.js';
 
 const emptyConversation = byId('chat-messages')?.firstElementChild?.cloneNode(true);
 
@@ -37,8 +38,9 @@ export function renderConversations(instances, selectedId, activeTurn, onSelect,
     button.disabled = !!activeTurn && id !== selectedId;
     button.dataset.testid = 'conversation-item';
     button.setAttribute('aria-current', id === selectedId ? 'true' : 'false');
-    const route = instance.routing_mode === 'pinned'
-      ? instance.account_ref : instance.routing_provider || 'All providers';
+    const route = routingMode(instance) === 'pinned'
+      ? `Pinned · ${instance.account_ref}`
+      : `Automatic · ${selectedAccount(instance) || 'no account yet'}`;
     button.append(node('strong', '', instance.model || 'Untitled conversation'),
       node('small', '', `${route} · ${formatClock(instance.updated_at || instance.updated || instance.created_at || instance.created)}`));
     button.addEventListener('click', () => onSelect(id));
@@ -147,10 +149,8 @@ export function renderEvents(events, instance, onPermission) {
     .map((event) => event.turn_id).filter(Boolean));
   byId('event-count').textContent = `${visible.length} event${visible.length === 1 ? '' : 's'}`;
   byId('activity-title').textContent = instance?.model || 'No conversation selected';
-  const route = instance?.routing_mode === 'pinned'
-    ? `Pinned to ${instance.account_ref}` : instance?.routing_provider || 'All providers';
   byId('activity-subtitle').textContent = instance
-    ? `Instance ${instance.instance_id || instance.id} · ${route}`
+    ? `Instance ${instance.instance_id || instance.id} · ${appliedRoute(instance)}`
     : 'Open a conversation in Chat to inspect its events.';
   for (const id of ['chat-event-list', 'activity-list']) {
     const list = clear(byId(id));
@@ -166,14 +166,16 @@ export function renderEvents(events, instance, onPermission) {
   }
 }
 
-export function renderChatHeader(instance, activeTurn, selected, pending) {
+export function renderChatHeader(instance, activeTurn, selected, pending, activeRouteRef = null) {
   byId('chat-conversation-title').textContent = instance?.model || 'New conversation';
-  const applied = instance?.routing_mode === 'pinned'
-    ? `Pinned to ${instance.account_ref}`
-    : `${instance?.routing_provider || 'All providers'} · automatic`;
-  const next = `${selected?.provider || 'All providers'} · ${selected?.model || 'Choose a model'} · ${selected?.account || 'automatic'}`;
+  const applied = appliedRoute(instance);
+  const running = activeRouteRef
+    ? routingMode(instance) === 'pinned' ? `Pinned to ${activeRouteRef}`
+      : `Automatic · ${instance?.routing_provider || 'All providers'} · running on: ${activeRouteRef}`
+    : applied;
+  const next = `${selected?.model || 'Choose a model'} · ${requestedRoute(selected, instance)}`;
   byId('chat-conversation-subtitle').textContent = activeTurn
-    ? `A turn is running · ${applied}` : pending
+    ? `A turn is running · ${running}` : pending
       ? `Pending: ${next} · Applied: ${instance.model} · ${applied}`
       : instance ? applied : 'Ready when you are';
   byId('stop-turn').hidden = !activeTurn;

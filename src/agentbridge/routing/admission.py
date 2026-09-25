@@ -46,7 +46,8 @@ def verify_proxy_model(routes, account, model, *, refresh, context_window=None):
 
 
 def create_automatic_instance(bridge, *, workspace_path, model, provider=None,
-                              idempotency_key, evaluation=False, excluded_account_refs=()):
+                              idempotency_key, evaluation=False, excluded_account_refs=(),
+                              initial_account=None):
     """Select an initial route while keeping the conversation automatically routed."""
     if model is None:
         raise BridgeError('model_required', 'Choose a model for automatic routing.')
@@ -56,15 +57,31 @@ def create_automatic_instance(bridge, *, workspace_path, model, provider=None,
     cwd = str(validate_workspace(workspace_path or '.', bridge.store.root))
     replayed = bridge.store.replay_auto_session(idempotency_key, cwd, model, provider=provider,
                                                 evaluation=evaluation,
-                                                excluded_account_refs=excluded_account_refs)
+                                                excluded_account_refs=excluded_account_refs,
+                                                initial_account_id=initial_account.id if initial_account else None)
     if replayed:
         return {**bridge._public_instance(bridge.get_session(replayed)), 'replayed': True}
-    decision = bridge.routes.select(model, provider=provider,
-                                    excluded_account_refs=excluded_account_refs)
+    if initial_account is None:
+        decision = bridge.routes.select(model, provider=provider,
+                                        excluded_account_refs=excluded_account_refs)
+        account_id = decision.account_id
+    else:
+        account_id = initial_account.id
+        if bridge.store.retirement_status(account_id)['retired']:
+            raise BridgeError('account_removed', 'The selected proxy account has been removed.')
+        excluded = {bridge.resolve_account(ref).id for ref in excluded_account_refs}
+        if account_id in excluded:
+            raise BridgeError('invalid_request', 'The initial account is excluded from routing.')
+        if provider is not None and provider != initial_account.provider:
+            raise BridgeError('provider_unavailable', 'The initial account does not match the provider filter.')
+        if bridge.store.pause_status(account_id)['paused']:
+            raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
+        verify_proxy_model(bridge.routes, initial_account, model, refresh=True)
     session_id, created = bridge.store.add_session(
-        uuid4().hex, decision.account_id, cwd, model,
+        uuid4().hex, account_id, cwd, model,
         request_key=idempotency_key, routing_mode='automatic', routing_provider=provider,
-        evaluation=evaluation, excluded_account_refs=excluded_account_refs)
+        evaluation=evaluation, excluded_account_refs=excluded_account_refs,
+        initial_account_id=initial_account.id if initial_account else None)
     return {**bridge._public_instance(bridge.get_session(session_id)), 'replayed': not created}
 
 
@@ -79,13 +96,21 @@ def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
             raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
         verify_proxy_model(bridge.routes, account, options.model or session['model'],
                            refresh=True, context_window=options.context_window)
+        prior = bridge.store.last_session_run(session['id'])
+        previous = routing['last_completed_account_id']
+        if prior is not None and (
+                prior['account_id'] != account.id
+                or (previous is not None and previous != account.id)
+                or (not session.get('native_id') and routing['last_native_id'])):
+            return _portable_turn(bridge, session['id'], account, None)
         return account, None, None, 0, None
     model = options.model or session['model']
     if model is None:
         raise BridgeError('model_required', 'Choose a model for automatic routing.')
     decision = bridge.routes.select(model, provider=routing['provider'],
                                     excluded_account_refs=excluded_account_refs,
-                                    context_window=options.context_window)
+                                    context_window=options.context_window,
+                                    affinity_account_id=routing.get('affinity_account_id'))
     account = bridge.account(decision.account_id)
     verify_proxy_model(bridge.routes, account, model, refresh=False,
                        context_window=options.context_window)
@@ -94,13 +119,18 @@ def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
     account_changed = (prior is not None and prior['account_id'] != account.id) or (
         previous is not None and previous != account.id)
     needs_portable_context = prior is not None and (
-        account_changed or not routing['last_native_id'] or prior['state'] != 'completed')
+        account_changed or not routing['last_native_id'] or not session.get('native_id')
+        or prior['state'] != 'completed')
     if not needs_portable_context:
         return account, decision, None, 0, None
+    return _portable_turn(bridge, session['id'], account, decision)
+
+
+def _portable_turn(bridge, session_id, account, decision):
     for _ in range(3):
-        before = bridge.store.last_route_event_seq(session['id'])
-        bundle = build(bridge.store, session['id'], budget_bytes=128000)
-        after = bridge.store.last_route_event_seq(session['id'])
+        before = bridge.store.last_route_event_seq(session_id)
+        bundle = build(bridge.store, session_id, budget_bytes=128000)
+        after = bridge.store.last_route_event_seq(session_id)
         if before == after:
             return account, decision, bundle.text, len(bundle.omitted), after
     raise BridgeError('context_stale', 'Conversation evidence changed while preparing portable context.',

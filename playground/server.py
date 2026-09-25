@@ -219,14 +219,14 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
         if parts == ['api', 'instances'] and method == 'GET':
             return bridge.instances(limit=100)
         if parts == ['api', 'instances'] and method == 'POST':
-            values = _fields(body, ('model',), ('account_ref', 'provider',
+            values = _fields(body, ('model',), ('account_ref', 'provider', 'routing_mode',
                                                'workspace_path', 'idempotency_key'))
             values.setdefault('workspace_path', self.server.workspace_path)
             return bridge.instance_create(**values)
         if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'DELETE':
             return bridge.instance_delete(parts[2])
         if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'POST':
-            values = _fields(body, ('expected_version',), ('model', 'provider'))
+            values = _fields(body, ('expected_version',), ('model', 'provider', 'routing_mode', 'account_ref'))
             return bridge.instance_update(parts[2], **values)
         if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'GET':
             instance = bridge.instance_get(parts[2], include_last_turn=True)

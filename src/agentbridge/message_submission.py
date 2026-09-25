@@ -10,7 +10,13 @@ class MessageSubmissionMixin:
                        permission_mode='dontAsk', sandbox_mode='read-only', allowed_tools=(),
                        max_turns=None, max_budget=None, timeout_ms=None, attachments=None,
                        provider_options=None, metadata=None, idempotency_key=None,
-                       context_package=None, mcp=None, excluded_account_refs=()):
+                       context_package=None, mcp=None, excluded_account_refs=(),
+                       delivery='reject', position=None, expected_version=None, expected_turn_id=None):
+        if delivery not in ('reject', 'queue', 'steer', 'interrupt'):
+            raise BridgeError('invalid_delivery', 'Choose reject, queue, steer or interrupt delivery.')
+        if delivery == 'reject' and any(value is not None for value in (
+                position, expected_version, expected_turn_id)):
+            raise BridgeError('invalid_request', 'Queue controls require explicit queue delivery.')
         prompt = self._message_text(content)
         if provider_options or metadata:
             raise UnsupportedError('Provider-specific options and metadata require an adapter contract.')
@@ -23,6 +29,13 @@ class MessageSubmissionMixin:
             max_budget_usd=max_budget, collect_usage=True, attachments=attachments,
             context_package_digest=package_digest, mcp_binding_digest=binding_digest,
         )
+        if delivery != 'reject':
+            return self._queue_submit(
+                instance_id, prompt, options,
+                execution=execution if package_digest or binding_digest else None,
+                exclusions=excluded_account_refs, idempotency_key=idempotency_key,
+                position=position, expected_version=expected_version,
+                delivery=delivery, expected_turn_id=expected_turn_id)
         run = self.submit(instance_id, prompt, options=options, request_key=idempotency_key,
                           execution=execution if package_digest or binding_digest else None,
                           excluded_account_refs=excluded_account_refs)

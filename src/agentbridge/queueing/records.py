@@ -51,10 +51,10 @@ def item_record(db, instance_id, message_id):
     return row
 
 
-def require_pending(row):
+def require_pending(row, *, allow_replacement=False):
     if row['state'] not in PENDING:
         raise BridgeError('message_not_pending', 'This message is no longer pending in the queue.')
-    if row['delivery'] != 'queue':
+    if row['delivery'] != 'queue' and not allow_replacement:
         raise BridgeError('message_dispatching', 'Immediate delivery has already been requested.')
 
 
@@ -101,15 +101,11 @@ def admit(store, db, instance_id, message_id, turn_id, prompt, options, exclusio
             raise BridgeError('idempotency_conflict', 'Request key belongs to a queued message.')
         return
     from dataclasses import asdict
+    expected = json.loads(json.dumps(asdict(options)))
     if (row['session_id'] != instance_id or row['content'] != prompt
-            or json.loads(row['options']) != asdict(options)
+            or json.loads(row['options']) != expected
             or json.loads(row['exclusions']) != list(exclusions)):
-        # JSON arrays and dataclass tuples need the same canonical representation.
-        expected = json.loads(json.dumps(asdict(options)))
-        if (row['session_id'] != instance_id or row['content'] != prompt
-                or json.loads(row['options']) != expected
-                or json.loads(row['exclusions']) != list(exclusions)):
-            raise BridgeError('idempotency_conflict', 'Queued input cannot change during admission.')
+        raise BridgeError('idempotency_conflict', 'Queued input cannot change during admission.')
     queue = queue_record(db, instance_id)
     head = pending(db, instance_id)
     if queue['paused'] or row['state'] != 'queued' or not head or head[0]['id'] != message_id:
@@ -118,6 +114,7 @@ def admit(store, db, instance_id, message_id, turn_id, prompt, options, exclusio
         raise BusyError()
     db.execute("UPDATE queued_messages SET state='dispatched',turn_id=?,updated=? WHERE id=?",
                (turn_id, time.time(), message_id))
+    reorder(db, [item['id'] for item in pending(db, instance_id)])
     changed(store, db, instance_id, 'dispatched', message_id, turn_id)
 
 

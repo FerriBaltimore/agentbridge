@@ -13,7 +13,7 @@ def require_proxy_account(account):
 
 def duplex(account, options):
     return account.engine == 'codex' and bool(account.proxy_base_url) and (
-        bool(images(options.attachments)) or options.context_package_digest is not None
+        options.steerable or bool(images(options.attachments)) or options.context_package_digest is not None
         or options.mcp_binding_digest is not None
         or options.permission_mode not in {'dontAsk', 'bypassPermissions'})
 

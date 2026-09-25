@@ -8,6 +8,7 @@ from uuid import uuid4
 from ..attachments import descriptors
 from ..errors import BridgeError
 from ..models import identifier, page_values
+from ..process import alive
 from ..store import dumps
 from .records import (PENDING, changed, insert_position, item_record, pending,
                       queue_record, reorder, require_pending, set_paused)
@@ -41,6 +42,7 @@ class QueueStore:
                                   (instance_id,)).fetchall()
         selected = rows[cursor:cursor + limit]
         return {'instance_id': instance_id, 'version': queue['version'],
+                'dispatcher_running': alive(queue.get('dispatcher_pid'), queue.get('dispatcher_identity')),
                 'paused': bool(queue['paused']), 'reason': queue['reason'],
                 'items': [dict(public_item(row), position=cursor + index)
                           for index, row in enumerate(selected)],
@@ -93,6 +95,11 @@ class QueueStore:
             if len(ids) >= 1000:
                 raise BridgeError('queue_full', 'A conversation queue accepts at most 1000 pending messages.')
             insert_position(ids, message_id, position)
+            replacement = db.execute("SELECT id FROM queued_messages WHERE session_id=? "
+                                     "AND delivery='interrupt' AND state IN ('staged','queued','blocked')",
+                                     (instance_id,)).fetchone()
+            if replacement and ids[0] != replacement['id']:
+                raise BridgeError('interrupt_pending', 'An immediate replacement must remain first.')
             now = time.time()
             db.execute('''INSERT INTO queued_messages
                 (id,session_id,content,options,exclusions,request_key,request_digest,
@@ -104,6 +111,8 @@ class QueueStore:
         return message_id, True
 
     def move(self, instance_id, message_id, position, *, expected_version=None):
+        if type(position) is not int:
+            raise BridgeError('invalid_position', 'position must be a zero-based integer.')
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             queue_record(db, instance_id, expected_version)
@@ -111,6 +120,11 @@ class QueueStore:
             require_pending(row)
             ids = [item['id'] for item in pending(db, instance_id) if item['id'] != message_id]
             insert_position(ids, message_id, position)
+            replacement = db.execute("SELECT id FROM queued_messages WHERE session_id=? "
+                                     "AND delivery='interrupt' AND state IN ('staged','queued','blocked')",
+                                     (instance_id,)).fetchone()
+            if replacement and ids[0] != replacement['id']:
+                raise BridgeError('interrupt_pending', 'An immediate replacement must remain first.')
             reorder(db, ids)
             db.execute('UPDATE queued_messages SET updated=? WHERE id=?', (time.time(), message_id))
             changed(self.store, db, instance_id, 'moved', message_id)
@@ -124,11 +138,13 @@ class QueueStore:
                 return {'message_id': message_id, 'instance_id': instance_id, 'state': 'cancelled',
                         'replayed': True}
             queue_record(db, instance_id, expected_version)
-            require_pending(row)
+            require_pending(row, allow_replacement=True)
             db.execute("UPDATE queued_messages SET state='cancelled',updated=? WHERE id=?",
                        (time.time(), message_id))
             reorder(db, [item['id'] for item in pending(db, instance_id)])
             changed(self.store, db, instance_id, 'removed', message_id)
+            if row['delivery'] == 'interrupt':
+                set_paused(self.store, db, instance_id, True, 'replacement_cancelled')
         return {'message_id': message_id, 'instance_id': instance_id, 'state': 'cancelled',
                 'replayed': False}
 

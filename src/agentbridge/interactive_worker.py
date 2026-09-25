@@ -14,6 +14,7 @@ from .provider_channel import ProviderChannel
 from .native_sandbox import available as isolation_available
 from .security import Redactor
 from .store import Store
+from .queueing.steering import Steering
 
 
 def main():
@@ -58,7 +59,8 @@ def main():
                                      inputs_only=inputs_only,
                                      workspace_write=payload['options']['sandbox'] != 'read-only',
                                      mcp_enabled=payload.get('mcp_enabled') is True) as channel:
-                    CodexControl(channel, payload, emit, approve).execute()
+                    steering = Steering(broker.store, payload['turn_id'])
+                    CodexControl(channel, payload, emit, approve, steering).execute()
     except BridgeError as error:
         emit({'type': 'bridge_error', 'error': error.safe_data(),
               'outcome': 'not_started' if error.phase == 'launch' else 'unknown'})

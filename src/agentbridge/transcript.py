@@ -21,16 +21,24 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
             SELECT rowid AS position, 0 AS slot, id, message_id, prompt AS content,
                    created AS at, 'user' AS role,
                    (SELECT json_extract(data,'$.attachments') FROM events
-                    WHERE run_id=runs.id AND kind='user' ORDER BY seq LIMIT 1) AS attachments
+                    WHERE run_id=runs.id AND kind='user' ORDER BY seq LIMIT 1) AS attachments,
+                   NULL AS queue_options, NULL AS queue_state
                    FROM runs WHERE session_id=?
             UNION ALL
             SELECT rowid AS position, 1 AS slot, id, message_id, NULL AS content,
-                   updated AS at, 'assistant' AS role, NULL AS attachments FROM runs WHERE session_id=?
+                   updated AS at, 'assistant' AS role, NULL AS attachments,
+                   NULL AS queue_options, NULL AS queue_state FROM runs WHERE session_id=?
               AND EXISTS (SELECT 1 FROM events WHERE run_id=runs.id
                 AND kind IN ('assistant','text_delta') AND json_extract(data,'$.text') <> '')
+            UNION ALL
+            SELECT COALESCE((SELECT rowid FROM runs WHERE id=q.turn_id),
+                            (SELECT MAX(rowid)+1 FROM runs WHERE session_id=q.session_id),0),
+                   0.5, COALESCE(q.turn_id,q.id), q.id, q.content, q.created, 'user',
+                   NULL, q.options, q.state FROM queued_messages q
+              WHERE q.session_id=? AND q.state NOT IN ('dispatched','cancelled')
         ) SELECT * FROM transcript WHERE (? IS NULL OR role=?) AND (? IS NULL OR at>?)
-          ORDER BY position,slot LIMIT ? OFFSET ?''',
-                          (instance_id, instance_id, role, role, after, after, limit, cursor)).fetchall()
+          ORDER BY position,slot,at,message_id LIMIT ? OFFSET ?''',
+                          (instance_id, instance_id, instance_id, role, role, after, after, limit, cursor)).fetchall()
     result = []
     for row in rows:
         projection = bridge.run(row['id']).message if row['role'] == 'assistant' else None
@@ -39,6 +47,10 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
                  'content': row['content'] if projection is None else projection['text'],
                  'sequence': row['id'], 'created_at': row['at'],
                  'attachments': json.loads(row['attachments'] or '[]')}
+        if row['queue_options']:
+            from .attachments import descriptors
+            value['attachments'] = descriptors(json.loads(row['queue_options']).get('attachments', []))
+            value['delivery_state'] = row['queue_state']
         if projection is not None:
             value.update({key: projection[key] for key in ('incomplete', 'retracted', 'retracted_provider_message_ids')})
         result.append(value)

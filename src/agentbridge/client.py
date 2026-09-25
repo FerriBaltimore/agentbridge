@@ -22,7 +22,7 @@ from .transcript import messages as transcript_messages
 from .error_management import ErrorManagementMixin
 from .provider_contracts import ContractRegistry
 from .routing.service import RoutingService
-from .routing.reconfiguration import PROVIDER_UNSET
+from .routing.instances import InstanceRoutingMixin
 from .proxy.managed import ManagedProxyClient
 from .execution_context import verify
 from .evaluation.service import EvaluationMixin
@@ -31,9 +31,10 @@ from .workspace_policy import validate_execution_workspace, validate_workspace
 from .account_retirement import AccountRetirementMixin
 from .account_pause import AccountPauseMixin
 from .instance_deletion import InstanceDeletionMixin
+from .queueing.service import QueueMixin
 
 
-class Bridge(EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
+class Bridge(InstanceRoutingMixin, QueueMixin, EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
     def __init__(self, root=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
@@ -159,6 +160,8 @@ class Bridge(EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, Account
         result['routing_provider'] = routing.get('provider') if routing['mode'] == 'automatic' else None
         account = self.account(result['account_id'])
         result['account_ref'] = self.account_reference(account.id)
+        affinity = routing.get('affinity_account_id')
+        result['affinity_account_ref'] = self.account_reference(affinity) if affinity else None
         result['workspace_path'] = result['cwd']
         result['native_session_id'] = result.get('native_id')
         result['created_at'] = result['created']
@@ -172,6 +175,8 @@ class Bridge(EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, Account
                                                     evaluation=evaluation)
         if replayed:
             return {**self.get_session(replayed), 'replayed': True}
+        if self.store.retirement_status(account.id)['retired']:
+            raise BridgeError('account_removed', 'The selected proxy account has been removed.')
         if self.store.pause_status(account.id)['paused']:
             raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
         from .routing.admission import verify_proxy_model
@@ -183,39 +188,6 @@ class Bridge(EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, Account
         result = self.get_session(session_id)
         result['replayed'] = not created
         return result
-
-    def instance_create(self, *, engine=None, account_ref=None, provider=None,
-                        workspace_path=None, model=None,
-                        effort=None, context_window=None, permission_mode='dontAsk',
-                        sandbox_mode='read-only', allowed_tools=(), metadata=None,
-                        provider_options=None, continuity_mode=None, idempotency_key=None,
-                        evaluation=False, excluded_account_refs=()):
-        from .routing.admission import normalized_exclusions
-
-        excluded_account_refs = normalized_exclusions(excluded_account_refs)
-        if type(evaluation) is not bool:
-            raise BridgeError('invalid_request', 'evaluation must be a boolean.')
-        if provider_options or metadata or continuity_mode:
-            raise UnsupportedError('Provider-specific options, metadata and continuity require an adapter contract.')
-        if effort or context_window or permission_mode != 'dontAsk' or sandbox_mode != 'read-only' or allowed_tools:
-            raise UnsupportedError('Instance defaults are configured per turn by this adapter.')
-        if engine is not None:
-            raise BridgeError('unsupported_parameter', 'Execution always uses the routed Codex engine.')
-        if account_ref is not None and provider is not None:
-            raise BridgeError('unsupported_parameter',
-                              'provider filters automatic routing only.')
-        if account_ref is not None and excluded_account_refs:
-            raise BridgeError('invalid_request', 'Pinned accounts cannot use route exclusions.')
-        if account_ref is None:
-            from .routing.admission import create_automatic_instance
-            return create_automatic_instance(self, workspace_path=workspace_path, model=model,
-                                             idempotency_key=idempotency_key,
-                                             provider=provider, evaluation=evaluation,
-                                             excluded_account_refs=excluded_account_refs)
-        account = self.resolve_account(account_ref)
-        result = self.session(account.id, workspace_path or '.', model=model,
-                              request_key=idempotency_key, evaluation=evaluation)
-        return self._public_instance(result)
 
     def instance_get(self, instance_id, *, include_last_turn=False, include_usage=False):
         value = self._public_instance(self.get_session(instance_id))
@@ -239,24 +211,6 @@ class Bridge(EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, Account
             for row in selected:
                 row['last_turn'] = self.store.last_session_run(row['id'])
         return [self._public_instance(row) for row in selected]
-
-    def instance_update(self, instance_id, *, model=None, provider=PROVIDER_UNSET,
-                        effort=None, context_window=None,
-                        permission_mode=None, sandbox_mode=None, allowed_tools=None,
-                        expected_version=None, metadata=None, provider_options=None, state=None):
-        if any(value is not None for value in (effort, context_window, permission_mode,
-                                                sandbox_mode, allowed_tools, metadata, provider_options)):
-            raise UnsupportedError('Only model, provider and state updates are supported by this adapter.')
-        values = {}
-        if model is not None:
-            values['model'] = model
-        if state is not None:
-            values['state'] = state
-        if not values and provider is PROVIDER_UNSET:
-            raise BridgeError('invalid_request', 'At least one instance field must change.')
-        updated = self.store.update_session(instance_id, expected_version=expected_version,
-                                            routing_provider=provider, **values)
-        return self._public_instance(updated)
 
     def instance_archive(self, instance_id, *, expected_version=None):
         return self._public_instance(self.store.update_session(instance_id, expected_version=expected_version, state='archived'))
