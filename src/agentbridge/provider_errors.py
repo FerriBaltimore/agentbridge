@@ -70,6 +70,7 @@ CANONICAL = set(NATIVE_CODES.values()) | {
     'unsupported_parameter', 'provider_catalog_unsupported', 'unsupported',
     'invalid_context', 'mcp_required', 'context_mismatch',
     'skill_discovery_failed', 'skill_unavailable',
+    'native_session_missing', 'native_session_diverged',
 }
 UNKNOWN_OUTCOMES = {'provider_timeout', 'provider_connection_lost', 'provider_protocol_error',
                     'unknown_outcome', 'interrupted', 'worker_failed'}

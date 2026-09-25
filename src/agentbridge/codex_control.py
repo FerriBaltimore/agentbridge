@@ -4,6 +4,7 @@ from .errors import BridgeError
 from .provider_errors import normalize
 from .session_events import routing
 from .codex_skills import selected_config
+from .native_sessions import validate_native_id
 
 
 class CodexControl:
@@ -149,6 +150,8 @@ class CodexControl:
         if self.payload.get('model'):
             params['model'] = self.payload['model']
         native_id = self.payload.get('native_id')
+        if native_id is not None:
+            validate_native_id(native_id)
         execution_mode = (self.payload.get('context_package') or {}).get('execution_mode')
         if execution_mode == 'evaluation_inputs_only' and native_id:
             raise BridgeError('invalid_context', 'Evaluation context cannot resume a native thread.',
@@ -158,7 +161,12 @@ class CodexControl:
         if native_id:
             params['threadId'] = native_id
         result = self.rpc('thread/resume' if native_id else 'thread/start', params)
-        self.thread_id = result['thread']['id']
+        thread = result.get('thread')
+        self.thread_id = validate_native_id(thread.get('id') if isinstance(thread, dict) else None)
+        if native_id is not None and self.thread_id != native_id:
+            raise BridgeError('native_session_diverged',
+                              'Codex resumed a different native conversation.',
+                              phase='launch', outcome='not_started')
         self.emit({'type': 'thread.started', 'thread_id': self.thread_id})
         content = [{'type': 'text', 'text': self.payload['prompt']}]
         content.extend(self.payload.get('skill_inputs', []))

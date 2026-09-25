@@ -59,24 +59,30 @@ also rejects route edits atomically when pending queue work occupies the
 conversation; the playground retains the draft if that update is rejected.
 
 `affinity_account_ref` is the preferred next route. `account_ref` identifies
-the stored native-session owner or explicit manual selection. After a failed
-handoff these may differ: retaining the last completed native session does
-not revert affinity. Each turn reports its actual account separately.
+the selected or admitted account, including after a failed turn; it is not
+the owner of the native session. Each turn reports its actual account
+separately. The native session belongs to the conversation and is independent
+of both routing fields.
 
 ## Cache preservation
 
-Keeping the account, native thread, exact model and unchanged configuration
-stable allows Codex to resume its existing thread and preserve the reusable
-prompt prefix. AgentBridge does not add rotating cache keys, time stamps,
+Every conversation binds once to one immutable native Codex session. All
+later turns resume that session, including changes of model, account or
+upstream provider. Native history remains with Codex; routing changes never
+replace it with a bounded portable transcript. Native version checks and
+divergent-session protection still apply. Missing or divergent state blocks
+continuation explicitly, including after an interrupted or failed turn.
+
+Keeping the account, exact model and configuration stable may also preserve
+the reusable prompt prefix. AgentBridge does not add rotating cache keys, time stamps,
 per-turn route banners or quota data to that prompt. It does not rebalance
 because another account becomes cheaper or less used during a conversation.
 
-A genuine account change cannot reuse the old account's native thread.
-AgentBridge starts a new one with at most 128,000 bytes of portable evidence,
-including omissions and unknown outcomes. This sacrifices cache continuity
-to preserve correct account ownership and conversation context. A manual
-A → B → A change without an intervening turn can restore A's last completed
-native thread when its ownership and terminal state are established.
+An account change redirects the next turn's proxy route while retaining the
+same Codex session. A manual A → B → A change also retains that session,
+whether or not B executed a turn. Explicit export and transfer remain bounded
+operations for creating a separate conversation; they report omissions and
+never replace the source session.
 
 Native compaction, model changes and provider-side transformations can alter
 the prefix. Cache lifetime, eviction, cache-write pricing, quota accounting
@@ -96,9 +102,11 @@ Codex or a translator can synthesize zero for an absent provider counter.
 `upstream_verified` is false and monetary `cost` is unknown. Session totals
 and latest observations overlap and are never added together.
 
-Deterministic selector, SQLite, local subprocess and browser fixtures validate
-affinity and continuity. See the [affinity lab](../development/account-affinity-lab.md).
-They do not establish live provider cache acceptance or measured cost savings.
+Deterministic selector, SQLite, local subprocess and browser fixtures cover
+local affinity and continuity behavior. See the
+[affinity lab](../development/account-affinity-lab.md). They do not establish
+live provider continuation, hosted-tool availability, cache acceptance or
+measured cost savings.
 A future live acceptance run must record redacted request-prefix evidence,
 provider-reported cache reads and writes, their scope, model/product identity,
 and billed cost or consumed credits per completed task. Account quota and

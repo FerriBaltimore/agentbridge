@@ -48,10 +48,12 @@ other tool shapes and hosted tools that this lab did not exercise.
 Use CLIProxyAPI as the required local execution route. For AgentBridge v2, run
 **one proxy instance per upstream account**, each with a separate port and auth
 directory.
-AgentBridge sets a distinct Codex home per conversation, records the selected
-account before each turn and uses bounded portable context when a new account
-is selected. Keep the account fixed for the turn, including requests following
-a tool call. Do not treat the proxy's internal failover as an AgentBridge
+AgentBridge sets a distinct Codex home per conversation and records the selected
+account before each turn. The original integration used portable context after
+an account change; that continuity policy is superseded. The current contract
+binds each conversation once to one native Codex session across model and
+upstream route changes. Keep the account fixed for the turn, including requests
+following a tool call. Do not treat the proxy's internal failover as an AgentBridge
 account transfer: the 429 experiment shows that `request-retry: 0` does not
 prevent a credential change.
 
@@ -81,6 +83,10 @@ host.
 
 ## V2 fixture result
 
+This records the original fixture behavior, including a now-superseded
+portable-continuation policy. It is not acceptance evidence for the current
+immutable native-session contract.
+
 The v2 integration test `tests/test_v2_routing_integration.py` uses two local
 Management API fixtures and a deterministic Codex executable. It passed model
 discovery, automatic least-used selection, a quota-driven account change,
@@ -106,8 +112,9 @@ The synthetic OAuth file did not authenticate to a live provider, so this is
 local proxy-shape acceptance rather than provider acceptance.
 
 The next acceptance gate is a controlled live turn on one isolated OAuth
-account, followed by multi-turn continuation and account changes. Test quota
-exhaustion and provider-specific tools before enabling production selection.
+account, followed by multi-turn continuation and account/model/provider
+changes with the same native Codex session. Test quota exhaustion and
+provider-specific tools before enabling production selection.
 
 ## Sources
 

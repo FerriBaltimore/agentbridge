@@ -82,10 +82,12 @@ proxy client model API. The caller chooses a model, may restrict automatic
 routing to one provider, or may pin an account. Automatic routing keeps account
 affinity across turns, choosing another eligible account after verified quota
 exhaustion or an explicit eligibility change. A lower usage percentage on
-another account does not break affinity. A change between turns starts a
-fresh Codex thread with bounded portable context and explicit omissions. The
-selected proxy endpoint remains fixed for the complete turn, including tool
-calls. Missing or stale quota stays unknown, never zero.
+another account does not break affinity. Each conversation binds once to one
+native Codex session. Changing model, upstream provider or account resumes that
+same session and its native history through the selected proxy route. Missing
+or divergent session data blocks continuation; it never starts a replacement
+thread. The selected proxy endpoint remains fixed for the complete turn,
+including tool calls. Missing or stale quota stays unknown, never zero.
 
 Use `routing_mode="automatic", account_ref="Example"` to choose the initial
 account while retaining automatic affinity. `routing_mode="pinned"` keeps a

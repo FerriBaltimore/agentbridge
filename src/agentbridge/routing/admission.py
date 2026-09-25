@@ -2,9 +2,9 @@
 
 from uuid import uuid4
 
-from ..continuity import build
 from ..errors import BridgeError
 from ..models import identifier, model_id
+from ..native_sessions import require_native_session
 from ..transports import require_proxy_account
 from ..workspace_policy import validate_workspace
 
@@ -86,7 +86,9 @@ def create_automatic_instance(bridge, *, workspace_path, model, provider=None,
 
 
 def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
-    """Return the account, decision and bounded context for one whole turn."""
+    """Select a proxy route without replacing the instance's Codex history."""
+    with bridge.store.connect() as db:
+        require_native_session(db, session)
     routing = bridge.store.routing(session['id'])
     if routing['mode'] != 'automatic':
         if excluded_account_refs:
@@ -96,13 +98,6 @@ def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
             raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
         verify_proxy_model(bridge.routes, account, options.model or session['model'],
                            refresh=True, context_window=options.context_window)
-        prior = bridge.store.last_session_run(session['id'])
-        previous = routing['last_completed_account_id']
-        if prior is not None and (
-                prior['account_id'] != account.id
-                or (previous is not None and previous != account.id)
-                or (not session.get('native_id') and routing['last_native_id'])):
-            return _portable_turn(bridge, session['id'], account, None)
         return account, None, None, 0, None
     model = options.model or session['model']
     if model is None:
@@ -114,24 +109,4 @@ def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
     account = bridge.account(decision.account_id)
     verify_proxy_model(bridge.routes, account, model, refresh=False,
                        context_window=options.context_window)
-    previous = routing['last_completed_account_id']
-    prior = bridge.store.last_session_run(session['id'])
-    account_changed = (prior is not None and prior['account_id'] != account.id) or (
-        previous is not None and previous != account.id)
-    needs_portable_context = prior is not None and (
-        account_changed or not routing['last_native_id'] or not session.get('native_id')
-        or prior['state'] != 'completed')
-    if not needs_portable_context:
-        return account, decision, None, 0, None
-    return _portable_turn(bridge, session['id'], account, decision)
-
-
-def _portable_turn(bridge, session_id, account, decision):
-    for _ in range(3):
-        before = bridge.store.last_route_event_seq(session_id)
-        bundle = build(bridge.store, session_id, budget_bytes=128000)
-        after = bridge.store.last_route_event_seq(session_id)
-        if before == after:
-            return account, decision, bundle.text, len(bundle.omitted), after
-    raise BridgeError('context_stale', 'Conversation evidence changed while preparing portable context.',
-                      retryable=True)
+    return account, decision, None, 0, None

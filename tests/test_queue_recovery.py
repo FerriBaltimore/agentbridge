@@ -3,6 +3,10 @@
 import json
 import os
 import signal
+import subprocess
+import sys
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -13,7 +17,7 @@ from agentbridge.queueing.connection import request
 from agentbridge.queueing.persistence import QueueStore
 from agentbridge.store import Store
 from test_interactive_inputs import context_package, setup_proxy
-from test_message_queues import completed, queued, running, until
+from test_message_queues import completed, native_history, queued, running, until
 
 
 def shutdown(bridge, instance):
@@ -79,6 +83,8 @@ def test_failed_turn_pauses_tail_without_retrying_it(queued):
     bridge.queue_resume(instance)
     completed(bridge, second)
     assert len(bridge.runs()) == 2
+    assert native_history(bridge, instance) == {
+        'methods': ['thread/start', 'thread/resume'], 'prompts': ['fail', 'second']}
 
 
 def test_missing_private_binding_cannot_cancel_active_work(queued):
@@ -221,7 +227,24 @@ def test_queue_cli_uses_the_same_persistent_records(queued, capsys):
     assert json.loads(capsys.readouterr().out)['total'] == 0
 
 
-def test_v9_store_migration_keeps_existing_turns_and_is_idempotent(queued):
+def test_queue_executes_after_submitting_cli_processes_exit(queued):
+    bridge, instance = queued
+    from agentbridge.security import base_environment
+    environment = base_environment()
+    environment.update({key: os.environ[key] for key in ('FIXTURE_PROXY_KEY', 'FIXTURE_MANAGEMENT_KEY')})
+    environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1] / 'src')
+    command = [sys.executable, '-m', 'agentbridge', '--root', str(bridge.root), 'queues']
+    bridge.queue_pause(instance)
+    admission = subprocess.run([*command, 'add', instance, 'after client exit'],
+                               env=environment, capture_output=True, text=True, check=True, timeout=15)
+    item = json.loads(admission.stdout)
+    subprocess.run([*command, 'resume', instance], env=environment,
+                   capture_output=True, check=True, timeout=15)
+    completed(bridge, item)
+    assert len(bridge.runs()) == 1
+
+
+def test_v9_store_migration_is_safe_for_concurrent_clients(queued):
     bridge, instance = queued
     with bridge.store.connect() as db:
         latest = db.execute('SELECT version FROM metadata').fetchone()[0]
@@ -229,7 +252,9 @@ def test_v9_store_migration_keeps_existing_turns_and_is_idempotent(queued):
         db.execute('DROP TABLE queued_messages')
         db.execute('ALTER TABLE session_routing DROP COLUMN affinity_account_id')
         db.execute('UPDATE metadata SET version=9')
-    upgraded = Store(bridge.root)
+    with ThreadPoolExecutor(4) as executor:
+        stores = list(executor.map(lambda _: Store(bridge.root), range(4)))
+    upgraded = stores[0]
     with upgraded.connect() as db:
         assert db.execute('SELECT version FROM metadata').fetchone()[0] == latest
     assert QueueStore(upgraded).snapshot(instance)['total'] == 0

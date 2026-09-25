@@ -51,6 +51,11 @@ def completed(bridge, message):
     return bridge.message_get(message_id)
 
 
+def native_history(bridge, instance):
+    path = bridge.root / 'codex-runtime' / instance / 'fixture-queue-native.json'
+    return json.loads(path.read_text())
+
+
 def test_fifo_survives_client_restart_and_preserves_message_identity(queued, tmp_path):
     bridge, instance = queued
     first = bridge.queue_add(instance, 'hold:release')
@@ -69,6 +74,10 @@ def test_fifo_survives_client_restart_and_preserves_message_identity(queued, tmp
         first['message_id'], second['message_id'], third['message_id']]
     assert bridge.run(first_turn).status == 'completed'
     assert other.queue_list(instance)['total'] == 0
+    assert native_history(bridge, instance) == {
+        'methods': ['thread/start', 'thread/resume', 'thread/resume'],
+        'prompts': ['hold:release', 'second', 'third'],
+    }
     events = bridge.instance_events(instance)
     assert any(event['kind'] == 'queue.changed' and event['turn_id'] is None for event in events)
     assert any(event['message_id'] == second['message_id'] and event['kind'] == 'message.created'
@@ -168,6 +177,10 @@ def test_interrupt_stops_exact_turn_and_promotes_requested_message(queued):
     completed(bridge, later)
     assert bridge.run(turn).status == 'cancelled'
     assert [row['prompt'] for row in bridge.runs()] == ['hold:never', 'priority', 'later']
+    assert native_history(bridge, instance) == {
+        'methods': ['thread/start', 'thread/resume', 'thread/resume'],
+        'prompts': ['hold:never', 'priority', 'later'],
+    }
 
 
 def test_stop_pauses_pending_work_until_explicit_resume(queued):
@@ -180,6 +193,8 @@ def test_stop_pauses_pending_work_until_explicit_resume(queued):
     assert bridge.message_get(second['message_id'])['turn_id'] is None
     bridge.queue_resume(instance)
     completed(bridge, second)
+    assert native_history(bridge, instance) == {
+        'methods': ['thread/start', 'thread/resume'], 'prompts': ['hold:never', 'second']}
 
 
 def test_native_rejection_and_lost_ack_are_not_replayed(queued):
@@ -215,3 +230,20 @@ def test_rpc_queue_controls_and_credentials_redaction(queued):
     dispatch(bridge, 'queues.delete', {'instance_id': instance, 'message_id': item['message_id']})
     assert dispatch(bridge, 'queues.resume', {'instance_id': instance})['total'] == 0
     assert not bridge.runs()
+
+
+def test_new_live_input_inherits_settings_and_replays_after_completion(queued):
+    bridge, instance = queued
+    first = bridge.queue_add(instance, 'hold:never', permission_mode='default',
+                             sandbox_mode='workspace-write', effort='high')
+    turn = running(bridge, first)
+    with pytest.raises(BridgeError) as error:
+        bridge.message_create(instance, 'restrict this turn', delivery='steer', sandbox_mode='read-only')
+    assert error.value.code == 'steering_options_conflict'
+    assert bridge.queue_list(instance)['total'] == 0
+    addition = bridge.message_create(instance, 'finish', delivery='steer', idempotency_key='live-settings')
+    completed(bridge, first)
+    assert bridge.message_get(addition['message_id'])['state'] == 'delivered'
+    replay = bridge.message_create(instance, 'finish', delivery='steer', idempotency_key='live-settings')
+    assert replay['replayed'] and replay['turn_id'] == turn
+    assert len(bridge.runs()) == 1

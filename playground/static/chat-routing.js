@@ -69,6 +69,7 @@ export function requestedRoute(choice, instance) {
   const provider = choice.provider || 'All providers';
   const account = choice.account || (instance && choice.routingMode === 'pinned'
     ? selectedAccount(instance) : null);
-  const target = account || (instance ? 'keep preferred account' : 'least-used eligible account');
+  const target = account || (instance && choice.preferredEligible
+    ? 'keep preferred account' : 'least-used eligible account');
   return `${choice.routingMode === 'pinned' ? 'Pinned' : 'Automatic'} · ${provider} · ${target}`;
 }

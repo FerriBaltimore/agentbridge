@@ -32,13 +32,17 @@ fresh, verified proxy observations.
 `instances.create` selects an eligible account for an exact model ID, or pins
 the given `account_ref` after verifying it. Automatic routing can select a new
 account between turns. It does not change accounts or replay an unknown turn
-while the turn is running.
+while the turn is running. One conversation binds once to one native Codex
+session. Model and upstream route changes resume that session and its history;
+missing or divergent native state fails explicitly without a new thread.
 
 ## Records and evidence
 
 An `Account` identifies one upstream identity and one dedicated proxy route.
 A `Session` binds a conversation to a workspace, selected model, account and
-optional parent. A `Run` is an admitted turn with a distinct `message_id`.
+optional parent, with an immutable native Codex session after its initial
+binding. The model and upstream route may change between turns. A `Run` is an
+admitted turn with a distinct `message_id`.
 Request keys make admission idempotent across restarts. The SQLite store allows
 only one active run per session or account.
 
@@ -57,7 +61,7 @@ retains unresolved outcomes and lists omitted evidence explicitly.
 | `accounts.list/status/usage/usage_history` | Read configured references and persisted proxy observations. |
 | `accounts.login.start/status/check/complete/cancel` | Manage the single GrantBridge and local proxy account flow. |
 | `models.list` | List exact model IDs observed or configured for proxy routes. |
-| `instances.create/get/list/transfer/export` | Create model-routed conversations and bounded portable context. |
+| `instances.create/get/list/transfer/export` | Manage conversations bound to one Codex session; explicitly export or fork bounded portable context. |
 | `messages.create/list` | Submit and inspect messages. |
 | `turns.get/list/events/stop` | Inspect or explicitly cancel a turn. |
 | `recover` | Mark a lost worker interrupted without rerunning it. |

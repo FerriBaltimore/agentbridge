@@ -175,7 +175,7 @@ def select_route(model, candidates, *, now=None, quota_ttl=60, affinity_account_
         raise BridgeError("model_unavailable", "No account declares support for this model.")
     affinity = next((row for row in supported if row.account_id == affinity_account_id), None)
     if affinity is not None:
-        if affinity.health == "unhealthy":
+        if affinity.health != "healthy":
             raise BridgeError("proxy_binding_unverified", "The affinity account could not be verified.")
         affinity_quota, affinity_used = _quota_state(affinity, model, now, quota_ttl)
         if affinity_quota != "exhausted":

@@ -16,7 +16,7 @@ historical evidence and read-only data, not a second usable workflow.
 | Login binding | New sidecar must be empty; complete requires one active upstream identity and observed models; account is created atomically | Identity and inventory fixture checks; local observation is not live entitlement |
 | Proxy account routes | Codex Responses endpoint on loopback, key references, unique sidecar URL, identity binding and clean inventory check | One file-backed account per sidecar; config-key-only routes ineligible |
 | Model routing | Exact model support, fresh proxy observation, durable account affinity, full applicable quota windows, unknown fallback and persisted route decisions | Fixtures; provider/model acceptance and quota completeness pending |
-| Instances and turns | Automatic affinity or pinned proxy route; atomic model/provider/mode/account reconfiguration between turns; fixed route for a turn; portable context on a later account change | Reconfiguration and cross-account continuation have fixture evidence only |
+| Instances and turns | Automatic affinity or pinned proxy route; atomic model/provider/mode/account reconfiguration between turns; fixed route for a turn; one immutable native Codex session per instance | Deterministic continuation coverage is separate from pending live provider acceptance |
 | Instance deletion | `instances.delete` purges an ordinary local conversation, exported context archives and private Codex runtime data after its work ends, keeping a minimal replay fence | Deterministic local fixtures; no claim about upstream provider retention |
 | Account and model RPC | Safe account projection; exact configured IDs and separate observed accounts | Local catalogue presence is not provider entitlement |
 | Usage | Source and timestamp retained; missing or stale quota remains unknown; cache counters retain native scope and unverified upstream provenance | Upstream quota varies by provider and needs live acceptance |
@@ -45,6 +45,10 @@ as an execution engine or account onboarding route.
   acceptance.
 - Live login, refresh, model entitlement, provider-specific tools, quota
   accuracy and cross-account continuation remain unverified for the v2 path.
+- Existing chats already split across native sessions retain the currently
+  anchored session; their older threads are not merged retroactively. Stable
+  native identity does not establish hosted-tool availability or cache hits
+  across upstream providers.
 - PDFs and other binary attachments, persistent advanced defaults,
   provider_options and historical usage aggregation remain unsupported where
   not separately declared. Per-turn context-window override accepts a positive

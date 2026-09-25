@@ -34,18 +34,18 @@ def migrate_v5(db, version):
 def migrate_v11(db, version):
     if version != 10:
         return version
-    db.executescript('''
-        BEGIN IMMEDIATE;
-        ALTER TABLE session_routing ADD COLUMN affinity_account_id TEXT;
-        UPDATE session_routing
-           SET affinity_account_id = COALESCE(
-               (SELECT runs.account_id FROM runs
-                 WHERE runs.session_id = session_routing.session_id
-                 ORDER BY runs.rowid DESC LIMIT 1),
-               (SELECT sessions.account_id FROM sessions
-                 WHERE sessions.id = session_routing.session_id))
-         WHERE mode = 'automatic';
-        UPDATE metadata SET version=11;
-        COMMIT;
-    ''')
+    db.execute('BEGIN IMMEDIATE')
+    current = db.execute('SELECT version FROM metadata').fetchone()[0]
+    if current != 10:
+        return current
+    db.execute('ALTER TABLE session_routing ADD COLUMN affinity_account_id TEXT')
+    db.execute('''UPDATE session_routing
+                     SET affinity_account_id = COALESCE(
+                         (SELECT runs.account_id FROM runs
+                           WHERE runs.session_id = session_routing.session_id
+                           ORDER BY runs.rowid DESC LIMIT 1),
+                         (SELECT sessions.account_id FROM sessions
+                           WHERE sessions.id = session_routing.session_id))
+                   WHERE mode = 'automatic' ''')
+    db.execute('UPDATE metadata SET version=11')
     return 11

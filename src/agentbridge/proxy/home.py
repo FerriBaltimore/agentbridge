@@ -14,9 +14,9 @@ _DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_
 def session_home(store_root, session_id: str) -> str:
     """Create `<store_root>/codex-runtime/<session_id>` with mode 0700.
 
-    The directory is independent of a provider account. A same-account turn
-    may resume native state; a changed-account turn can start a separate native
-    thread while retaining the instance's isolated session files. It contains
+    The directory and native thread belong to the instance, independently of
+    the provider account. Every later turn resumes that thread even when the
+    proxy account or model changes. It contains
     no AgentBridge-created credentials or proxy configuration.
     """
     identifier(session_id)

@@ -22,6 +22,7 @@ def test_pause_is_durable_and_blocks_new_pinned_work(tmp_path):
     automatic = bridge.store.add_session('automatic', 'first', str(workspace),
                                          'fixture-model', routing_mode='automatic')[0]
     run_id = bridge.store.admit('active', session, 'hello', RunOptions(), None)[0]
+    bridge.store.emit(run_id, 'session', {'native_id': 'native-original'})
     paused = dispatch(bridge, 'accounts.pause', {'account_ref': 'first'})
     assert paused['routing']['paused'] is True
     assert dispatch(bridge, 'accounts.pause', {'account_ref': 'first'}) == paused

@@ -61,12 +61,20 @@ def needs_active_refresh(snapshot, model, *, now=None):
     """Refresh missing or stale evidence once per TTL, excluding fresh active reads."""
     now = time.time() if now is None else now
     windows = snapshot.get('quota_windows', ()) if isinstance(snapshot, dict) else ()
+    recent_active = []
     for window in windows if isinstance(windows, (list, tuple)) else ():
-        if not isinstance(window, dict) or window.get('source') != 'cliproxy_upstream_usage':
+        if (not isinstance(window, dict)
+                or window.get('source') != 'cliproxy_upstream_usage'
+                or _applies_to_model(window, model) is False):
             continue
         observed = timestamp(window.get('observed_at'))
         if observed is not None and 0 <= now - observed < ROUTE_QUOTA_TTL:
-            return False
+            recent_active.append(window)
+    if recent_active:
+        if any((reset := timestamp(window.get('resets_at'))) is not None and reset <= now
+               for window in recent_active):
+            return True
+        return False
     observations = route_quota(snapshot, model)
     if not observations:
         return True

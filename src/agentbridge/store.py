@@ -21,6 +21,7 @@ from .account_retirement import AccountRetirementStoreMixin, migrate_v7
 from .account_pause import AccountPauseStoreMixin, migrate_v8
 from .instance_deletion import InstanceDeletionStoreMixin, migrate_v9
 from .queueing.schema import migrate_v10
+from .native_sessions import bind_native_session, migrate_v12
 
 
 def dumps(value):
@@ -150,7 +151,8 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
             version = migrate_v9(db, version)
             version = migrate_v10(db, version)
             version = migrate_v11(db, version)
-            if version != 11:
+            version = migrate_v12(db, version)
+            if version != 12:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)
@@ -308,6 +310,15 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
                 route_values = {}
             session_values = {key: value for key, value in values.items() if key in {'model', 'native_id', 'context'}}
             session_values.update(route_values)
+            if 'native_id' in session_values:
+                native_id = session_values['native_id']
+                if native_id is None:
+                    if row['native_id'] is not None or db.execute(
+                            'SELECT 1 FROM native_session_bindings WHERE session_id=?', (id,)).fetchone():
+                        raise BridgeError('native_session_diverged',
+                                          'An instance cannot clear its native conversation identity.')
+                else:
+                    bind_native_session(db, id, native_id)
             if session_values:
                 db.execute(f"UPDATE sessions SET {','.join(key+'=?' for key in session_values)} WHERE id=?",
                            (*session_values.values(), id))
@@ -369,10 +380,11 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
 
     def emit(self, id, kind, data):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT session_id FROM runs WHERE id=?',(id,)).fetchone()
+            if kind == 'session':
+                bind_native_session(db, row[0], data.get('native_id'))
             self._event(db,id,row[0],kind,data)
-            if kind == 'session' and data.get('native_id'):
-                db.execute('UPDATE sessions SET native_id=? WHERE id=?',(data['native_id'],row[0]))
 
     @staticmethod
     def _event(db, run_id, session_id, kind, data):

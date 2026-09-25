@@ -109,6 +109,8 @@ class InstanceDeletionStoreMixin:
                 db.execute('DELETE FROM conversation_queues WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM runs WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM session_routing WHERE session_id=?', (instance_id,))
+                db.execute('DELETE FROM native_session_bindings WHERE session_id=?', (instance_id,))
+                db.execute('DELETE FROM native_session_launches WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM instance_metadata WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM sessions WHERE id=?', (instance_id,))
                 db.execute('UPDATE instance_requests SET payload=? WHERE session_id=?',

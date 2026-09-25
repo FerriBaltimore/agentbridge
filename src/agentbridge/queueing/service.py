@@ -92,18 +92,37 @@ class QueueMixin:
         return value
 
     def _queue_submit(self, instance_id, prompt, options, *, execution, exclusions,
-                      idempotency_key, position, expected_version, delivery, expected_turn_id):
+                      idempotency_key, position, expected_version, delivery, expected_turn_id,
+                      inherit_permissions, inherit_sandbox):
         identifier(instance_id)
         exclusions = normalized_exclusions(exclusions)
         raw = {'instance_id': instance_id, 'content': prompt, 'options': asdict(options),
                'exclusions': list(exclusions), 'position': position, 'delivery': delivery,
-               'expected_turn_id': expected_turn_id}
+               'expected_turn_id': expected_turn_id,
+               'inherit_permissions': inherit_permissions if delivery == 'steer' else False,
+               'inherit_sandbox': inherit_sandbox if delivery == 'steer' else False}
         digest = sha256(dumps(raw).encode()).hexdigest()
         queue = QueueStore(self.store)
         previous = queue.replay(idempotency_key, digest)
         if previous:
             return {**self.message_get(previous['id']), 'replayed': True}
         session = self.get_session(instance_id)
+        if delivery == 'steer':
+            from .records import active
+            from ..models import RunOptions
+            with self.store.connect() as db:
+                current = active(db, instance_id)
+            if current is None:
+                raise BridgeError('turn_not_active', 'Steering requires an active turn.')
+            active_options = RunOptions(**json.loads(current['options']))
+            options = replace(options,
+                model=options.model or active_options.model or session['model'],
+                effort=active_options.effort if options.effort is None else options.effort,
+                context_window=(active_options.context_window if options.context_window is None
+                                else options.context_window),
+                permission_mode=(active_options.permission_mode if inherit_permissions
+                                 else options.permission_mode),
+                sandbox=active_options.sandbox if inherit_sandbox else options.sandbox)
         validate_execution_workspace(session['cwd'], self.root,
                                      workspace_write=options.sandbox != 'read-only')
         account = self.account(session['account_id'])

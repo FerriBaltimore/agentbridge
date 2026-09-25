@@ -1,6 +1,7 @@
 """Deterministic Codex-shaped subprocess for queue and steering acceptance."""
 
 import json
+import os
 from pathlib import Path
 import select
 import sys
@@ -11,6 +12,7 @@ def send(value):
 
 
 def main():
+    history_path = Path(os.environ['CODEX_HOME']) / 'fixture-queue-native.json'
     while True:
         request = json.loads(sys.stdin.readline())
         method = request['method']
@@ -19,10 +21,20 @@ def main():
         if method == 'initialize':
             send({'id': request['id'], 'result': {}})
         elif method in ('thread/start', 'thread/resume'):
+            if method == 'thread/start':
+                assert not history_path.exists(), 'A queued turn replaced its Codex session.'
+                history = {'methods': [], 'prompts': []}
+            else:
+                assert request['params']['threadId'] == 'fixture-thread'
+                history = json.loads(history_path.read_text())
+            history['methods'].append(method)
+            history_path.write_text(json.dumps(history))
             send({'id': request['id'], 'result': {'thread': {'id': 'fixture-thread'}}})
         elif method == 'turn/start':
             break
     prompt = request['params']['input'][0]['text']
+    history['prompts'].append(prompt)
+    history_path.write_text(json.dumps(history))
     send({'id': request['id'], 'result': {'turn': {'id': 'fixture-turn'}}})
     send({'method': 'item/agentMessage/delta', 'params': {
         'threadId': 'fixture-thread', 'turnId': 'fixture-turn', 'delta': 'ready'}})

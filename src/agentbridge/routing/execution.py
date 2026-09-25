@@ -46,6 +46,7 @@ def admit_turn(bridge, session, prompt, options, request_key, message_id,
                 account_id=account.id,
                 route_decision=decision, route_context=context,
                 route_omissions=omissions, route_event_seq=event_seq,
+                expected_instance_version=session.get('version'),
                 excluded_account_refs=excluded_account_refs)
             return run_id, created, receipt, secrets
         except BusyError:
