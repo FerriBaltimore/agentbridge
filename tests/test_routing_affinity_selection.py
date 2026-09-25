@@ -181,9 +181,11 @@ def test_routing_refreshes_missing_quota_once_and_uses_complete_active_windows(m
             return {'binding_fingerprint': 'fixture-binding'}
 
         def usage_observation(self, account_id, source, scope, data, *, stale,
-                              expected_reset_generation=None):
+                              expected_reset_generation=None, expected_latest_id=None):
             assert expected_reset_generation == 0
-            self.active = {'source': source, 'data': data}
+            assert expected_latest_id == (self.active['id'] if self.active else None)
+            self.active = {'id': (self.active['id'] + 1 if self.active else 1),
+                           'source': source, 'data': data}
             return True
 
     class Routes(RoutingService):

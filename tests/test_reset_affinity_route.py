@@ -17,7 +17,7 @@ def _pending_reset(store):
     binding = store.proxy_binding('a')
     snapshot = store.save_reset_observation(
         'a', binding, {'status': 'available', 'available_count': 1, 'credits': None},
-        store.reset_generation('a'))
+        store.reset_generation('a'), None)
     store.begin_reset_attempt('a', 'fixture-reset-key', snapshot['observation_ref'],
                               None, binding)
 
