@@ -42,13 +42,33 @@ The skipped tests require an optional native sandbox acceptance binary or a
 local GrantBridge checkout. They are not evidence of live reset redemption.
 The ARM64 wheel was inspected on x86_64 and was not executed on ARM64.
 
-## Final integrated validation
+## Delivered v2 reset branch
 
-Final integration is still being verified. Record the final commit and schema
-version, the complete test result, both rebuilt platform wheel identities and
-hashes, and disposable and repository `.venv` install checks after that source
-is fixed. The historical results above cannot fill those entries. No live
-redemption has been accepted for either snapshot.
+The verified source is commit `1650b95` with schema v13: v9 conversation
+deletion, v10 queues, v11 account affinity, v12 native session binding and
+v13 reset observations, generations and attempts. The repository guard and
+`git diff --check` passed. The complete `python -m pytest -q` run passed with
+1116 tests and 3 optional skips in 381.87 seconds. It includes the reset SDK,
+transport, store, CLI, JSON-RPC and Playwright browser checks. The skipped
+tests require an optional native acceptance binary or a local GrantBridge
+checkout; no test discovered or used a real account.
+
+| Platform wheel | Size | SHA-256 |
+| --- | ---: | --- |
+| `ferran_agentbridge-2.3.4-py3-none-manylinux_2_28_x86_64.whl` | 179,773,334 bytes | `3c4017c431a41b4ed2b6f5c69f4b53328508976784a66156b3df5d212484a7d6` |
+| `ferran_agentbridge-2.3.4-py3-none-manylinux_2_28_aarch64.whl` | 167,767,551 bytes | `2d59d7119f054b897921fab9a815b6fc41331331b4a192dcbed46864f2c52c17` |
+
+Both wheels passed `tools/verify_bundle_wheel.py` with the pinned CLIProxyAPI,
+Codex, Node and GrantBridge resources. The x86_64 wheel was installed in a
+disposable environment and in the delivery worktree's `.venv`. From outside
+the checkout, the installed example, CLI version 2.3.4, reset command help,
+SDK methods and capability declarations passed without accounts. The ARM64
+wheel was inspected on x86_64; native ARM64 execution remains untested.
+
+Concurrent, uncommitted execution-access work in the shared checkout is not
+part of this artifact. Its separate schema-v13 candidate requires the tested
+v14 compatibility migration before it can be combined with this reset build.
+No live redemption has been accepted for either reset snapshot.
 
 ## Historical read-only provider check
 
