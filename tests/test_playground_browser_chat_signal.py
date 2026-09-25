@@ -1,5 +1,7 @@
 """Show conversation content and meaningful signals without routine event noise."""
 
+from pathlib import Path
+
 from test_playground_browser import _launch_browser, _page, local_playground, playwright_api
 
 
@@ -20,17 +22,9 @@ def _provider_events(path, *, gap='routine', failure=False):
                 'id': 'fixture-answer', 'type': 'agent_message', 'text': 'Hello from fixture'}},
             {'type': 'turn.completed'},
         ])
-    path.write_text(
-        '#!/usr/bin/python3\n'
-        'import json\n'
-        'import sys\n'
-        'if "--version" in sys.argv:\n'
-        '    print("codex-cli 0.0.0")\n'
-        '    sys.exit(0)\n'
-        'sys.stdin.read()\n'
-        f'for event in {events!r}:\n'
-        '    print(json.dumps(event), flush=True)\n'
-    )
+    protocol = (Path(__file__).parent / 'fixtures/test_playground_protocol.py').read_text()
+    path.write_text('#!/usr/bin/python3\n' + protocol + '\nstart()\n' +
+                    f'for event in {events!r}:\n    emit(event)\n')
     path.chmod(0o700)
 
 

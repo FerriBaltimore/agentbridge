@@ -17,7 +17,9 @@ function messageNode(message) {
   item.dataset.testid = 'chat-message';
   item.dataset.role = message.role;
   const label = message.role === 'user' ? 'You' : 'AgentBridge';
-  item.append(node('div', 'message-meta', `${label} · ${formatClock(message.created_at)}`),
+  const delivery = { delivered: 'Sent to active turn', rejected: 'Not delivered',
+    unknown: 'Delivery unconfirmed' }[message.delivery_state];
+  item.append(node('div', 'message-meta', `${label} · ${formatClock(message.created_at)}${delivery ? ` · ${delivery}` : ''}`),
     node('div', 'message-bubble', message.content || ''));
   return item;
 }

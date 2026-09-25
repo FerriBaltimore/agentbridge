@@ -11,7 +11,7 @@ work are in [implementation-status.md](implementation-status.md).
 - Provider discovery: proxy provider, versions, capabilities and parameters.
 - Accounts: one asynchronous proxy login, status, identity and cancellation.
 - Models: live catalog, cache, static fallback, deprecation and retirement.
-- Instances: create, inspect, list, update, archive and transfer.
+- Instances: create, inspect, list, update, archive, delete and transfer.
 - Messages: text, multimodal blocks, attachments, transcript pagination and
   idempotent admission.
 - Turns: asynchronous start, status, event following, stop, resume and recovery.
@@ -31,7 +31,8 @@ The Codex execution adapter and each upstream proxy provider must define:
 - Usage and quota source, scope and staleness.
 - Unknown provider fields as gap events.
 - Secret and private-reasoning redaction.
-- Whether continuation is native, portable or unavailable.
+- Immutable native Codex session binding across model and upstream route changes.
+- Explicit portable export or transfer into a separate instance.
 
 ## Required tests
 
@@ -44,6 +45,8 @@ claim needs a separate provider acceptance record. Tests must cover:
 - stop before launch, during execution and after completion;
 - authentication, quota, timeout and permission errors;
 - lost workers and unknown side effects;
+- model, provider and account changes preserving native session identity;
+- missing or divergent native state failing without a replacement thread;
 - stale usage and fallback model catalogs;
 - transcript and event pagination;
 - installed wheel CLI and JSON-RPC behavior.

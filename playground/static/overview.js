@@ -47,7 +47,7 @@ function accountHealth(account, status, routeRefs) {
 
 function quota(accountUsage) {
   const windows = usageWindows(accountUsage);
-  return { windows, fresh: windows.some((window) => !window.stale && window.used_percent !== null),
+  return { windows, fresh: windows.some((window) => window.used_percent !== null),
     unavailable: usageUnavailable(accountUsage) };
 }
 
@@ -72,12 +72,12 @@ function capacityRow(entry) {
       const item = node('div', 'capacity-window');
       const label = node('strong', '', window.display_label);
       label.title = window.display_label;
-      item.append(label, node('span', window.stale ? 'is-stale' : '', usageValue(window)));
+      item.append(label, node('span', '', usageValue(window)));
       quotaArea.append(item);
     }
     if (usage.windows.length > 2) quotaArea.append(node('small', '', `${usage.windows.length - 2} more windows in Accounts`));
   } else {
-    quotaArea.append(node('strong', 'capacity-unknown', 'Unknown usage'));
+    quotaArea.append(node('strong', 'capacity-unknown', 'Current usage unavailable'));
     quotaArea.title = usage.unavailable;
   }
   row.append(identity, condition, quotaArea);

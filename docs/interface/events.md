@@ -63,6 +63,7 @@ the method reads one available snapshot without waiting. The lower-level
     run.finished
     recovery.observed
     recovery.gap
+    queue.changed
     provider.event
 
 The existing legacy event names remain readable during migration. New methods
@@ -70,6 +71,9 @@ use these normalized names. `route.selected` records the account decision
 before execution and may include `account_changed`, `portable_context_used`
 and `context_omitted_count`. Read `messages.create.account_ref` or
 `turns.get.account_ref` for the selected public account reference.
+An account change does not imply a native session change or portable context:
+normal continuation resumes the instance's immutable Codex session. Portable
+omission fields remain available for explicit transfers and historical evidence.
 `context.compacting` is emitted when Codex reports that compaction has started;
 `context.compacted` confirms its completion. Providers that report only a
 completion boundary cannot supply the starting observation.
@@ -83,6 +87,12 @@ committed with the terminal turn state; `turns.get.state` is an authoritative
 snapshot. A lost worker emits a recovery event, marks unfinished tool results
 as unknown, and finishes as interrupted. No provider request is rerun
 automatically.
+
+Queue events are also part of `instances.events`. Before a queued message is
+admitted, its `turn_id` is null; queue-wide changes can also have a null
+`message_id`. `queue.changed.data` contains the durable queue `version` and
+`action`. Delivery acknowledgement is distinct from turn completion. See
+[message-queues.md](message-queues.md) for delivery states and recovery.
 
 ## Permissions
 

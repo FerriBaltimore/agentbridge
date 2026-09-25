@@ -4,11 +4,17 @@ import json
 
 from ..errors import BridgeError
 from ..models import Account, model_id
+from ..native_sessions import require_native_session
 from .binding import has_bound_proxy_login
 
 
 PROVIDER_UNSET = object()
 SUPPORTED_PROVIDERS = frozenset({'codex', 'claude', 'grok'})
+
+
+def validate_mode(mode):
+    if not isinstance(mode, str) or mode not in {'pinned', 'automatic'}:
+        raise BridgeError('invalid_routing_mode', 'routing_mode must be pinned or automatic.')
 
 
 def validate_provider(provider):
@@ -45,3 +51,32 @@ def require_declared_route(db, model, *, provider=None, account_id=None):
             return
     raise BridgeError('model_unavailable',
                       'No eligible proxy account declares support for this model and provider.')
+
+
+def configure_route(db, session, model, *, mode=PROVIDER_UNSET,
+                    provider=PROVIDER_UNSET, account_id=PROVIDER_UNSET):
+    """Change policy atomically while preserving native-session ownership."""
+    require_native_session(db, session)
+    routing = db.execute('SELECT * FROM session_routing WHERE session_id=?',
+                         (session['id'],)).fetchone()
+    if routing is None:
+        raise BridgeError('schema_version', 'Session routing metadata is missing.')
+    if mode is PROVIDER_UNSET:
+        mode = ('pinned' if account_id is not PROVIDER_UNSET else
+                'automatic' if provider is not PROVIDER_UNSET else routing['mode'])
+    current_account = (routing['affinity_account_id'] if routing['mode'] == 'automatic'
+                       else None) or session['account_id']
+    chosen = current_account if account_id is PROVIDER_UNSET else account_id
+    selected_provider = routing['provider'] if provider is PROVIDER_UNSET else provider
+    if mode == 'pinned':
+        if provider is not PROVIDER_UNSET and provider is not None:
+            raise BridgeError('unsupported_parameter', 'provider filters automatic routing only.')
+        selected_provider = None
+    require_declared_route(db, model, provider=selected_provider,
+                           account_id=chosen if mode == 'pinned' or account_id is not PROVIDER_UNSET else None)
+    db.execute('UPDATE session_routing SET mode=?,provider=?,affinity_account_id=? WHERE session_id=?',
+               (mode, selected_provider, chosen if mode == 'automatic' else None, session['id']))
+    if (mode == 'pinned' or account_id is not PROVIDER_UNSET) and chosen != session['account_id']:
+        # The proxy account is an upstream route; Codex owns the conversation.
+        return {'account_id': chosen}
+    return {}

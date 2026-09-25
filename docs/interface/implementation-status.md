@@ -1,6 +1,6 @@
 # Implementation inventory
 
-Reviewed 2026-09-24 against the AgentBridge and GrantBridge working trees.
+Reviewed 2026-09-25 against the AgentBridge and GrantBridge working trees.
 The v2 execution and onboarding contract has one route: Codex through a
 local CLIProxyAPI sidecar. Older direct adapters and their account records are
 historical evidence and read-only data, not a second usable workflow.
@@ -15,12 +15,14 @@ historical evidence and read-only data, not a second usable workflow.
 | Auth custody | GrantBridge coordinates the sidecar Management API browser flow; CLIProxyAPI owns upstream credential and refresh; the supervisor generates local keys and passes them to authorized local processes as needed | No credential values or raw provider errors in AgentBridge records; the client key reaches Codex but the management key does not; live refresh pending |
 | Login binding | New sidecar must be empty; complete requires one active upstream identity and observed models; account is created atomically | Identity and inventory fixture checks; local observation is not live entitlement |
 | Proxy account routes | Codex Responses endpoint on loopback, key references, unique sidecar URL, identity binding and clean inventory check | One file-backed account per sidecar; config-key-only routes ineligible |
-| Model routing | Exact model support, fresh proxy observation, quota-aware selector with unknown fallback and persisted route decisions | Fixtures; provider/model acceptance and quota completeness pending |
-| Instances and turns | Automatic account selection or pinned proxy route; atomic model/provider reconfiguration between turns; fixed route for a turn; portable context on a later account change | Reconfiguration and cross-account continuation have fixture evidence only |
+| Model routing | Exact model support, fresh proxy observation, durable account affinity, full applicable quota windows, unknown fallback and persisted route decisions | Fixtures; provider/model acceptance and quota completeness pending |
+| Instances and turns | Automatic affinity or pinned proxy route; atomic model/provider/mode/account reconfiguration between turns; fixed route for a turn; one immutable native Codex session per instance | Deterministic continuation coverage is separate from pending live provider acceptance |
+| Instance deletion | `instances.delete` purges an ordinary local conversation, exported context archives and private Codex runtime data after its work ends, keeping a minimal replay fence | Deterministic local fixtures; no claim about upstream provider retention |
 | Account and model RPC | Safe account projection; exact configured IDs and separate observed accounts | Local catalogue presence is not provider entitlement |
-| Usage | Source and timestamp retained; missing or stale quota remains unknown | Upstream quota varies by provider and needs live acceptance |
+| Usage | Source and timestamp retained; missing or stale quota remains unknown; cache counters retain native scope and unverified upstream provenance | Upstream quota varies by provider and needs live acceptance |
 | Stop and recovery | Explicit cancellation; lost workers classified without silent replay | Unknown effects stay unknown; no hidden account change |
-| Native isolation | Direct Codex and app-server subprocesses run under Landlock filesystem and seccomp process-inspection restrictions; private state, supervisor authority and procfs are outside their read scope | Deterministic synthetic-secret fixtures and offline Codex app-server startup passed; live provider acceptance pending |
+| Message queues | Persistent per-conversation ordering, add/list/move/delete, pause/resume, explicit steering and interruption through SDK, CLI and RPC | Deterministic subprocess and concurrency fixtures; live steering acceptance pending; private context needs rebinding after dispatcher loss |
+| Native isolation | Restricted shell execution uses filesystem/PID namespaces; selected context uses Landlock; all retain the process-inspection filter. Explicit full access uses host filesystem permissions | Synthetic-secret isolation and effective-access fixtures; live provider acceptance pending |
 | Account retirement | A tombstone fences new routes; managed sidecar success requires supervisor stop evidence and a durable store attestation | An unverified managed stop remains `unknown_outcome`; external proxy processes are not stopped, and read-only status exposes `retirement.managed_proxy` and `retirement.local_proxy_stopped` |
 | Selected context and MCP | Bounded v1/v2 context packages, separate Codex developer/skill/evidence channels and operation-bound private Unix-socket MCP forwarding | Deterministic subprocess fixtures; live app-server, provider and host-sandbox acceptance pending |
 | Historical direct records | Read-only status, events and earlier acceptance evidence | No new native login, account creation or turn execution |
@@ -43,6 +45,12 @@ as an execution engine or account onboarding route.
   acceptance.
 - Live login, refresh, model entitlement, provider-specific tools, quota
   accuracy and cross-account continuation remain unverified for the v2 path.
+- Existing chats whose stored native identity differs from their latest
+  observed thread fail with `native_session_diverged`, including legacy
+  restoration of an older thread after a later thread failed. They need
+  explicit review and recovery or a separate transfer; native histories are
+  not merged retroactively. Stable native identity does not establish
+  hosted-tool availability or cache hits across upstream providers.
 - PDFs and other binary attachments, persistent advanced defaults,
   provider_options and historical usage aggregation remain unsupported where
   not separately declared. Per-turn context-window override accepts a positive

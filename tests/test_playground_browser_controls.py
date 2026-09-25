@@ -4,7 +4,6 @@ from contextlib import ExitStack
 import json
 from pathlib import Path
 from threading import Thread
-import textwrap
 import time
 
 import pytest
@@ -127,7 +126,7 @@ def test_codex_catalog_models_shape_exposes_chat_effort_and_context(local_playgr
             calls = [json.loads(line) for line in local_playground['capture'].read_text().splitlines()]
             assert len(calls) == 1
             assert 'model_context_window=262144' in calls[0]['argv']
-            assert 'model_reasoning_effort="high"' in calls[0]['argv']
+            assert calls[0]['effort'] == 'high'
             assert errors == []
         finally:
             browser.close()
@@ -247,6 +246,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
             page.locator('#route-settings summary').click()
             route = page.get_by_test_id('chat-account')
             assert route.locator('option').count() == 2
+            page.get_by_test_id('chat-routing-mode').select_option('pinned')
             route.select_option('OpenAI Personal')
             page.get_by_test_id('chat-input').fill('Pinned OpenAI request')
             page.get_by_test_id('chat-send').click()
@@ -281,6 +281,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
                 'option').all_text_contents()
             page.get_by_test_id('chat-model').select_option('fixture/claude-model')
             page.locator('#route-settings summary').click()
+            page.get_by_test_id('chat-routing-mode').select_option('pinned')
             route.select_option('Claude Research')
             page.get_by_test_id('chat-input').fill('Pinned Claude request')
             page.get_by_test_id('chat-send').click()
@@ -300,7 +301,7 @@ def test_pinned_conversations_new_chat_navigation_and_refresh(local_playground):
                 'Pinned OpenAI request').wait_for()
             calls = [json.loads(line) for line in local_playground['capture'].read_text().splitlines()]
             assert len(calls) == 2
-            assert all(model in str(call['argv']) for model, call in zip(
+            assert all(model == call['model'] for model, call in zip(
                 ('fixture/openai-model', 'fixture/claude-model'), calls))
             page.reload(wait_until='networkidle')
             page.get_by_test_id('nav-chat').click()
@@ -355,25 +356,8 @@ def test_send_failure_keeps_message_for_safe_retry(local_playground):
 def test_stop_button_cancels_one_running_turn_without_rerouting(local_playground):
     executable = Path(local_playground['bridge'].accounts()[0].command[0])
     capture = local_playground['capture']
-    executable.write_text(textwrap.dedent('''\
-        #!/usr/bin/python3
-        import json
-        import os
-        from pathlib import Path
-        import sys
-        import time
-
-        if '--version' in sys.argv:
-            print('codex-cli 0.0.0')
-            sys.exit(0)
-        prompt = sys.stdin.read()
-        capture = Path(os.environ['CODEX_HOME']) / 'fixture-calls.jsonl'
-        with capture.open('a') as stream:
-            stream.write(json.dumps({'argv': sys.argv[1:], 'prompt': prompt}) + '\\n')
-        print(json.dumps({'type': 'thread.started', 'thread_id': 'fixture-slow'}),
-              flush=True)
-        time.sleep(30)
-    '''))
+    protocol = (Path(__file__).parent / 'fixtures/test_playground_protocol.py').read_text()
+    executable.write_text('#!/usr/bin/python3\n' + protocol + '\nstart()\nimport time\ntime.sleep(30)\n')
     executable.chmod(0o700)
     with playwright_api.sync_playwright() as playwright:
         browser = _launch_browser(playwright)

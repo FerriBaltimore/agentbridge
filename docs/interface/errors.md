@@ -24,7 +24,8 @@ stable AgentBridge code:
     model_unavailable, quota_exhausted, provider_timeout,
     provider_unavailable, provider_protocol_error, provider_failed,
     permission_required, permission_denied, continuity_unavailable,
-    native_session_missing, native_version_unverified, cancelled,
+    native_session_missing, native_session_diverged,
+    native_version_unverified, cancelled,
     interrupted, unknown_outcome, store_unavailable
 
 Authentication orchestration also uses `authentication_attempt_not_found`,
@@ -43,7 +44,17 @@ ceiling large enough for its requested context override. Account retirement may 
 `busy` when a turn is active; `account_unavailable` identifies an incompatible
 historical account record.
 Inputs and observations also use `invalid_attachment`, `invalid_permissions`,
+`invalid_execution_policy` (incompatible access and selected-input isolation),
 `permission_expired`, `provider_catalog_unsupported` and `rate_limited`.
+Queues additionally use `queue_full`, `invalid_position`, `message_not_found`,
+`message_not_pending`, `message_dispatching`, `interrupt_pending`,
+`queue_dispatcher_unavailable`, `queue_dispatch_failed`, `invalid_delivery`,
+`turn_conflict`, `turn_not_active`, `steering_unsupported`, `steering_rejected`,
+`steering_options_conflict`, `steering_context_unsupported` and
+`evaluation_queue_unsupported`. Lost private bindings use `context_required`;
+a lost live-input acknowledgement is `unknown_outcome`. Queue errors after a
+durable admission include `details.message_id` so callers can inspect or remove
+that exact saved input instead of submitting a duplicate.
 Execution adapters additionally distinguish `safety_blocked`, `billing_required`,
 `budget_exhausted`, `context_window_exceeded`, `output_limit_exceeded`,
 `max_turns_exceeded`, `structured_output_failed` and `provider_connection_lost`.
@@ -65,8 +76,14 @@ effect.
 The implemented envelope uses outcome=unknown for an uncertain result. It is
 never retryable. not_started identifies rejection before work; other outcomes
 are supplied by the operation. The code catalogue above also includes target
-and historical compatibility codes. `invalid_engine` and native-session codes
-describe old records; they do not enable a direct execution path.
+and historical compatibility codes. `invalid_engine` describes old records;
+it does not enable a direct execution path. V2 continuation also uses
+`native_session_missing` when the bound session is unavailable and
+`native_session_diverged` when its identity is replaced or mismatched. Neither
+error permits a replacement thread, portable reconstruction or automatic rerun.
+The mismatch check includes a legacy stored identity that differs from the
+latest observed native thread, even if the stored thread previously completed
+successfully. Explicit review and recovery or a separate transfer is required.
 Unknown provider stderr, tokens, prompts, private reasoning and unbounded
 response bodies are never included in the public error.
 

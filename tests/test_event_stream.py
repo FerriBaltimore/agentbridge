@@ -105,6 +105,26 @@ def test_follow_returns_one_available_page_without_waiting_for_terminal(stored_t
     assert bridge.store.get('runs', turn_id)['state'] == 'starting'
 
 
+def test_follow_drains_completion_committed_after_an_empty_event_read(stored_turn, monkeypatch):
+    bridge, turn_id = stored_turn
+    cursor = bridge.turn_events(turn_id)[-1]['seq']
+    original = bridge.store.events
+    first = True
+
+    def finish_after_read(**options):
+        nonlocal first
+        page = original(**options)
+        if first:
+            first = False
+            assert page == []
+            bridge.store.finish(turn_id, 'completed')
+        return page
+
+    monkeypatch.setattr(bridge.store, 'events', finish_after_read)
+    result = bridge.turn_events(turn_id, after_seq=cursor, follow=True, timeout_ms=1000)
+    assert [event['kind'] for event in result] == ['run.finished']
+
+
 def test_follow_waits_for_first_event_then_returns_before_turn_finishes(stored_turn):
     bridge, turn_id = stored_turn
     cursor = bridge.turn_events(turn_id)[-1]['seq']

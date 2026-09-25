@@ -20,15 +20,14 @@ def _send(page, prompt):
 
 
 def _streaming_command(path: Path):
-    path.write_text(textwrap.dedent('''\
-        #!/usr/bin/python3
+    protocol = (Path(__file__).parent / 'fixtures/test_playground_protocol.py').read_text()
+    path.write_text('#!/usr/bin/python3\n' + protocol + textwrap.dedent('''\
+
         import json
         import sys
         import time
 
-        sys.stdin.read()
-        def emit(value):
-            print(json.dumps(value), flush=True)
+        start()
         emit({'type': 'thread.started', 'thread_id': 'fixture-stream'})
         emit({'type': 'turn.started'})
         emit({'type': 'item.started', 'item': {'id': 'fixture-tool',

@@ -4,6 +4,7 @@ import sys
 from .errors import BridgeError, UnsupportedError
 from .attachments import images
 from .codex_executable import codex_argv
+from .native_sessions import validate_native_id
 
 
 def require_proxy_account(account):
@@ -13,7 +14,7 @@ def require_proxy_account(account):
 
 def duplex(account, options):
     return account.engine == 'codex' and bool(account.proxy_base_url) and (
-        bool(images(options.attachments)) or options.context_package_digest is not None
+        options.steerable or bool(images(options.attachments)) or options.context_package_digest is not None
         or options.mcp_binding_digest is not None
         or options.permission_mode not in {'dontAsk', 'bypassPermissions'})
 
@@ -21,9 +22,14 @@ def duplex(account, options):
 def command(account, session, options, *, native_transport=False, state_root=None):
     require_proxy_account(account)
     native=session.get('native_id')
+    if native is not None:
+        validate_native_id(native)
     model=options.model or session.get('model')
     from .proxy import ProxyRoute, codex_overrides
     route_args = list(codex_overrides(ProxyRoute(account.id, account.proxy_base_url, account.key_env)))
+    if options.sandbox == 'workspace-write':
+        # Only the private TMPDIR is writable in the projected filesystem.
+        route_args.extend(('-c', 'sandbox_workspace_write.exclude_slash_tmp=true'))
     if options.context_window is not None:
         if type(options.context_window) is not int or options.context_window <= 0:
             raise BridgeError('invalid_context_window', 'Choose a positive context window token count.')

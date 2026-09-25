@@ -24,7 +24,9 @@ def _chat_geometry(page, *, fill_messages=False):
         documentOverflowX: document.documentElement.scrollWidth - innerWidth,
         documentOverflowY: document.documentElement.scrollHeight - innerHeight,
         composer: rect('#chat-form'), send: rect('#chat-send'),
-        provider: rect('#chat-provider'), model: rect('#chat-model'),
+        routeControls: [...document.querySelectorAll('.route-primary-fields select')]
+          .filter((element) => element.getClientRects().length)
+          .map((element) => ({ id: element.id, ...rect(`#${element.id}`) })),
         rail: rect('.conversation-rail'), messages: rect('#chat-messages'),
         messagesOverflow: messages.scrollHeight - messages.clientHeight,
       };
@@ -59,13 +61,27 @@ def test_chat_keeps_route_rail_and_composer_visible_at_desktop_and_mobile(local_
                 geometry = _chat_geometry(page, fill_messages=True)
                 assert geometry['documentOverflowX'] <= 1, geometry
                 assert geometry['documentOverflowY'] <= 1, geometry
-                for key in ['composer', 'send', 'provider', 'model', 'rail', 'messages']:
+                for key in ['composer', 'send', 'rail', 'messages']:
                     _assert_in_viewport(geometry[key], geometry['viewport'])
                 assert geometry['messagesOverflow'] > 0, geometry
+                route_controls = geometry['routeControls']
+                assert [control['id'] for control in route_controls] == [
+                    'chat-provider', 'chat-routing-mode', 'chat-account', 'chat-model',
+                    'chat-effort', 'chat-context',
+                ]
+                assert max(control['top'] for control in route_controls) - min(
+                    control['top'] for control in route_controls) <= 1, geometry
+                for control in route_controls:
+                    page.locator(f"#{control['id']}").scroll_into_view_if_needed()
+                    current = _chat_geometry(page)
+                    visible_control = next(item for item in current['routeControls']
+                                           if item['id'] == control['id'])
+                    _assert_in_viewport(visible_control, current['viewport'])
+                    assert current['documentOverflowX'] <= 1, current
+                    assert current['documentOverflowY'] <= 1, current
 
                 page.locator('#route-settings summary').click()
-                account = page.get_by_test_id('chat-account')
-                assert account.is_visible()
+                assert page.get_by_test_id('chat-sandbox').is_visible()
                 _assert_in_viewport(_chat_geometry(page)['composer'], geometry['viewport'])
                 page.keyboard.press('Escape')
                 assert not page.locator('#route-settings').evaluate('(element) => element.open')

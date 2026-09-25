@@ -12,10 +12,13 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - capabilities.md: v2 proxy behavior, support and acceptance maturity.
 - events.md: event envelope and stream semantics.
 - interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
+- execution-access.md: persistent sandbox and approval defaults, overrides and effective access.
+- message-queues.md: persistent ordered input, queue editing and explicit immediate delivery.
 - context-and-mcp.md: bounded selected instructions, evidence and private execution tools.
 - errors.md: stable error envelope and retry behavior.
 - review.md: completeness checklist and acceptance evidence.
 - provider-acceptance.md: release matrix and live-provider gate.
+- account-affinity.md: sticky automatic routing, manual controls and cache evidence limits.
 - v2-model-routing.md: model-first Codex proxy routing and evidence limits.
 - fullbrain-integration.md: host integration principles.
 - fullbrain-v2-migration.md: Fullbrain v1 to v2 migration gates and data changes.
@@ -29,8 +32,12 @@ AgentBridge is an execution and observation layer. The host chooses the model,
 authorizes tools and external side effects, and owns product retry policy.
 For automatic proxy instances, AgentBridge selects an account before each
 turn and persists the route and its evidence. Pinned proxy instances keep an
-explicit account. Historical direct instances remain readable but cannot
-execute. AgentBridge never silently retries an
+explicit account. Codex is the sole execution engine. Each instance binds once
+to one native Codex session, which remains unchanged across model, provider
+and account changes. Its native history stays with the conversation; normal
+continuation never substitutes a portable transcript or a new thread. Missing
+or divergent native state blocks continuation explicitly. Historical direct
+instances remain readable but cannot execute. AgentBridge never silently retries an
 unknown provider outcome or changes accounts during a turn.
 
 The AgentBridge contract is the only public contract. Provider protocols,

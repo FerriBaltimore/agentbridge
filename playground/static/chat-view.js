@@ -1,10 +1,23 @@
 import { byId, clear, emptyState, formatClock, node } from './ui.js';
 import { appendTimeline } from './chat-timeline.js';
+import { appliedRoute, requestedRoute, routingMode, selectedAccount } from './chat-routing.js';
 
 const emptyConversation = byId('chat-messages')?.firstElementChild?.cloneNode(true);
 
-export function renderConversations(instances, selectedId, activeTurn, onSelect) {
-  const rows = Array.isArray(instances) ? [...instances] : [];
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#icon-${name}`);
+  svg.setAttribute('aria-hidden', 'true');
+  svg.append(use);
+  return svg;
+}
+
+export function renderConversations(instances, selectedId, activeTurn, onSelect, onDelete,
+  busy, pendingRows, onRetry) {
+  const pendingIds = new Set(pendingRows.map((row) => row.id));
+  const rows = Array.isArray(instances) ? instances.filter((item) =>
+    !pendingIds.has(item.instance_id || item.id)) : [];
   const time = (instance) => {
     const value = instance.updated_at || instance.updated || instance.created_at || instance.created;
     if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
@@ -13,23 +26,49 @@ export function renderConversations(instances, selectedId, activeTurn, onSelect)
   rows.sort((a, b) => time(b) - time(a));
   byId('conversation-count').textContent = String(rows.length);
   const list = clear(byId('conversation-list'));
-  if (!rows.length) {
+  if (!rows.length && !pendingRows.length) {
     list.append(node('p', 'conversation-empty', 'Your conversations will appear here.'));
     return;
   }
   for (const instance of rows) {
     const id = instance.instance_id || instance.id;
+    const row = node('div', 'conversation-row');
     const button = node('button', `conversation-item${id === selectedId ? ' is-selected' : ''}`);
     button.type = 'button';
     button.disabled = !!activeTurn && id !== selectedId;
     button.dataset.testid = 'conversation-item';
     button.setAttribute('aria-current', id === selectedId ? 'true' : 'false');
-    const route = instance.routing_mode === 'pinned'
-      ? instance.account_ref : instance.routing_provider || 'All providers';
+    const route = routingMode(instance) === 'pinned'
+      ? `Pinned · ${instance.account_ref}`
+      : `Automatic · ${selectedAccount(instance) || 'no account yet'}`;
     button.append(node('strong', '', instance.model || 'Untitled conversation'),
       node('small', '', `${route} · ${formatClock(instance.updated_at || instance.updated || instance.created_at || instance.created)}`));
     button.addEventListener('click', () => onSelect(id));
-    list.append(button);
+    const remove = node('button', 'conversation-delete');
+    remove.type = 'button';
+    remove.disabled = !!activeTurn || !!busy;
+    remove.dataset.testid = 'delete-conversation';
+    remove.setAttribute('aria-label', `Delete conversation ${instance.model || id}`);
+    remove.title = 'Delete conversation';
+    remove.append(icon('trash'));
+    remove.addEventListener('click', () => onDelete(id));
+    row.append(button, remove);
+    list.append(row);
+  }
+  for (const pending of pendingRows) {
+    const row = node('div', 'conversation-pending');
+    row.dataset.testid = 'pending-conversation-delete';
+    row.append(node('strong', '', pending.label), node('small', '', 'Cleanup needs retry'));
+    const retry = node('button', 'conversation-delete conversation-retry');
+    retry.type = 'button';
+    retry.disabled = !!activeTurn || !!busy;
+    retry.dataset.testid = 'retry-conversation-delete';
+    retry.setAttribute('aria-label', `Retry cleanup for ${pending.label}`);
+    retry.title = 'Retry cleanup';
+    retry.append(icon('refresh'));
+    retry.addEventListener('click', () => onRetry(pending.id));
+    row.append(retry);
+    list.append(row);
   }
 }
 
@@ -110,10 +149,8 @@ export function renderEvents(events, instance, onPermission) {
     .map((event) => event.turn_id).filter(Boolean));
   byId('event-count').textContent = `${visible.length} event${visible.length === 1 ? '' : 's'}`;
   byId('activity-title').textContent = instance?.model || 'No conversation selected';
-  const route = instance?.routing_mode === 'pinned'
-    ? `Pinned to ${instance.account_ref}` : instance?.routing_provider || 'All providers';
   byId('activity-subtitle').textContent = instance
-    ? `Instance ${instance.instance_id || instance.id} · ${route}`
+    ? `Instance ${instance.instance_id || instance.id} · ${appliedRoute(instance)}`
     : 'Open a conversation in Chat to inspect its events.';
   for (const id of ['chat-event-list', 'activity-list']) {
     const list = clear(byId(id));
@@ -129,14 +166,16 @@ export function renderEvents(events, instance, onPermission) {
   }
 }
 
-export function renderChatHeader(instance, activeTurn, selected, pending) {
+export function renderChatHeader(instance, activeTurn, selected, pending, activeRouteRef = null) {
   byId('chat-conversation-title').textContent = instance?.model || 'New conversation';
-  const applied = instance?.routing_mode === 'pinned'
-    ? `Pinned to ${instance.account_ref}`
-    : `${instance?.routing_provider || 'All providers'} · automatic`;
-  const next = `${selected?.provider || 'All providers'} · ${selected?.model || 'Choose a model'} · ${selected?.account || 'automatic'}`;
+  const applied = appliedRoute(instance);
+  const running = activeRouteRef
+    ? routingMode(instance) === 'pinned' ? `Pinned to ${activeRouteRef}`
+      : `Automatic · ${instance?.routing_provider || 'All providers'} · running on: ${activeRouteRef}`
+    : applied;
+  const next = `${selected?.model || 'Choose a model'} · ${requestedRoute(selected, instance)}`;
   byId('chat-conversation-subtitle').textContent = activeTurn
-    ? `A turn is running · ${applied}` : pending
+    ? `A turn is running · ${running}` : pending
       ? `Pending: ${next} · Applied: ${instance.model} · ${applied}`
       : instance ? applied : 'Ready when you are';
   byId('stop-turn').hidden = !activeTurn;

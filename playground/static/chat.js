@@ -1,43 +1,15 @@
+import { lastViewedInstance, rememberInstance, forgetInstance, instanceTime, retainTimelineEvents, instanceId, key } from './chat-history.js';
+import { setupChatQueue } from './chat-queue.js';
 import { api } from './api.js';
 import { setupChatCatalog } from './chat-catalog.js';
+import { setupChatDeletion } from './chat-deletion.js';
+import { createRoute } from './chat-routing.js';
 import { createChatStream } from './chat-stream.js';
 import { renderChatHeader, renderConversations, renderEvents, renderMessages } from './chat-view.js';
 import { byId, describeError, toast } from './ui.js';
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted', 'incomplete']);
-const LAST_INSTANCE_KEY = 'agentbridge.playground.last_instance_id';
 const POLL_INTERVAL_MS = 2000;
-
-function lastViewedInstance() {
-  try { return localStorage.getItem(LAST_INSTANCE_KEY); } catch { return null; }
-}
-
-function rememberInstance(id) {
-  try { localStorage.setItem(LAST_INSTANCE_KEY, id); } catch { /* Storage is optional. */ }
-}
-
-function instanceTime(instance) {
-  const value = instance.updated_at || instance.updated || instance.created_at || instance.created;
-  if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
-  return Date.parse(value) || 0;
-}
-
-function retainTimelineEvents(rows) {
-  const latestDelta = new Map();
-  for (const event of rows) {
-    if (event.kind === 'message.delta') latestDelta.set(event.turn_id, event.seq);
-  }
-  return rows.filter((event) => event.kind !== 'message.delta'
-    || latestDelta.get(event.turn_id) === event.seq).slice(-2000);
-}
-
-function instanceId(instance) {
-  return instance?.instance_id || instance?.id || null;
-}
-
-function key() {
-  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 export function setupChat({ onDataChanged }) {
   const form = byId('chat-form');
@@ -63,11 +35,17 @@ export function setupChat({ onDataChanged }) {
   let events = [];
   let eventCursor = 0;
   let activeTurn = null;
+  let activeRouteRef = null;
   let pendingSend = null;
   let timer = null;
   let busy = false;
   let refreshPromise = null;
   let restorePending = true;
+  const queue = setupChatQueue({
+    getState: () => ({ id: instanceId(current), activeTurn, busy }),
+    refresh: async () => { await refreshConversation(); await refreshCurrentState(); render(); },
+    changed: updateControls,
+  });
   const stream = createChatStream((event) => {
     if (event.turn_id !== activeTurn) return;
     if (!events.some((item) => item.seq === event.seq)) {
@@ -89,6 +67,27 @@ export function setupChat({ onDataChanged }) {
       timer = setTimeout(pollTurn, 0);
     }
   });
+  const deletion = setupChatDeletion({
+    getInstance: (id) => instances.find((item) => instanceId(item) === id),
+    canDelete: () => !activeTurn && !busy && !queue.occupied,
+    setBusy(value) { busy = value; render(); },
+    onPending(id) {
+      forgetInstance(id);
+      if (instanceId(current) === id) resetConversation();
+      else render();
+    },
+    async onDeleted(id) {
+      instances = instances.filter((item) => instanceId(item) !== id);
+      forgetInstance(id);
+      if (instanceId(current) === id) resetConversation();
+      else render();
+      toast('Conversation deleted.');
+      try { await onDataChanged(); }
+      catch (error) {
+        toast(`Conversation deleted, but the view could not refresh: ${describeError(error)}`, true);
+      }
+    },
+  });
 
   function stopPolling() {
     if (timer) clearTimeout(timer);
@@ -96,17 +95,21 @@ export function setupChat({ onDataChanged }) {
   }
 
   function updateControls() {
-    catalog.setBusy(busy || !!activeTurn);
-    sendButton.disabled = busy || !!activeTurn || !catalog.canSend();
+    catalog.setBusy(busy || !!activeTurn || queue.occupied);
+    sendButton.disabled = busy || queue.editing || !catalog.canSend();
     stopButton.hidden = !activeTurn;
-    newButton.disabled = !!activeTurn || busy;
+    newButton.disabled = !!activeTurn || busy || queue.editing || queue.waiting;
     byId('activity-refresh').disabled = !current;
-    renderChatHeader(current, activeTurn, catalog.selected(), catalog.hasPendingRoute());
+    renderChatHeader(current, activeTurn, catalog.selected(), catalog.hasPendingRoute(), activeRouteRef);
+    queue.render();
   }
 
   function render() {
-    renderConversations(instances, instanceId(current), activeTurn, selectConversation);
-    renderMessages(messages, events, activeTurn, answerPermission);
+    renderConversations(instances, instanceId(current), activeTurn,
+      selectConversation, deletion.open, busy || queue.occupied || queue.editing,
+      deletion.pendingRows(), deletion.retry);
+    renderMessages(messages.filter((item) => !['staged', 'queued', 'blocked', 'steering', 'delivering']
+      .includes(item.delivery_state)), events, activeTurn, answerPermission);
     renderEvents(events, current, answerPermission);
     updateControls();
   }
@@ -116,11 +119,12 @@ export function setupChat({ onDataChanged }) {
     if (refreshPromise) return refreshPromise;
     const id = instanceId(current);
     refreshPromise = (async () => {
-      const [messageRows, firstEvents] = await Promise.all([
-        api.messages(id), api.instanceEvents(id, eventCursor),
+      const [messageRows, firstEvents, pending] = await Promise.all([
+        api.messages(id), api.instanceEvents(id, eventCursor), api.queue(id),
       ]);
       if (instanceId(current) !== id) return;
       messages = Array.isArray(messageRows) ? messageRows : [];
+      queue.set(pending);
       let newEvents = firstEvents;
       for (let page = 0; page < 10 && Array.isArray(newEvents); page += 1) {
         let advanced = false;
@@ -142,31 +146,33 @@ export function setupChat({ onDataChanged }) {
   }
 
   async function pollTurn() {
-    if (!activeTurn) return;
-    const turnId = activeTurn;
+    if (!current) return;
+    const id = instanceId(current);
+    const previous = current.last_turn;
     try {
-      const [turn] = await Promise.all([api.turn(turnId), refreshConversation()]);
-      if (turnId !== activeTurn) return;
-      if (TERMINAL.has(turn.state)) {
-        activeTurn = null;
-        stream.close();
-        stopPolling();
-        await refreshConversation().catch((error) => toast(describeError(error), true));
-        render();
+      await refreshConversation();
+      await refreshCurrentState();
+      if (instanceId(current) !== id) return;
+      render();
+      const turn = current.last_turn;
+      if (turn && TERMINAL.has(turn.state) && (turn.turn_id !== previous?.turn_id
+        || turn.state !== previous?.state)) {
         if (turn.state === 'completed') toast('Turn completed.');
         else toast(`Turn ended: ${turn.state}${turn.error ? ` (${turn.error})` : ''}.`, true);
         await onDataChanged();
-      } else {
-        timer = setTimeout(pollTurn, POLL_INTERVAL_MS);
       }
     } catch (error) {
       toast(describeError(error), true);
-      if (activeTurn) timer = setTimeout(pollTurn, 4000);
+    } finally {
+      if (instanceId(current) === id) {
+        stopPolling();
+        timer = setTimeout(pollTurn, POLL_INTERVAL_MS);
+      }
     }
   }
 
   async function selectConversation(id) {
-    if (activeTurn || busy || id === instanceId(current)) return;
+    if (activeTurn || busy || queue.editing || deletion.hasPending(id) || id === instanceId(current)) return;
     busy = true;
     stream.close();
     updateControls();
@@ -177,17 +183,17 @@ export function setupChat({ onDataChanged }) {
       const lastTurn = current.last_turn;
       activeTurn = lastTurn && !TERMINAL.has(lastTurn.state)
         ? lastTurn.turn_id : null;
+      activeRouteRef = activeTurn ? lastTurn.account_ref || null : null;
       catalog.lock(current);
       messages = [];
       events = [];
       eventCursor = 0;
       pendingSend = null;
+      queue.set(null);
       await refreshConversation();
-      if (activeTurn) {
-        stream.open(activeTurn, eventCursor);
-        stopPolling();
-        timer = setTimeout(pollTurn, 300);
-      }
+      if (activeTurn) stream.open(activeTurn, eventCursor);
+      stopPolling();
+      timer = setTimeout(pollTurn, 300);
     } catch (error) {
       toast(describeError(error), true);
     } finally {
@@ -205,32 +211,40 @@ export function setupChat({ onDataChanged }) {
     instances = [latest, ...instances.filter((item) => instanceId(item) !== id)];
     catalog.refreshInstance(latest);
     const lastTurn = latest.last_turn;
+    const previousTurn = activeTurn;
     activeTurn = lastTurn && !TERMINAL.has(lastTurn.state) ? lastTurn.turn_id : null;
-    if (activeTurn) {
-      stream.open(activeTurn, eventCursor);
-      stopPolling();
-      timer = setTimeout(pollTurn, 300);
+    activeRouteRef = activeTurn ? lastTurn.account_ref || null : null;
+    if (activeTurn !== previousTurn) {
+      if (activeTurn) stream.open(activeTurn, eventCursor);
+      else stream.close();
     }
   }
 
-  function newConversation() {
-    if (activeTurn || busy) return;
+  function resetConversation() {
     restorePending = false;
     stream.close();
     stopPolling();
     current = null;
+    activeTurn = null;
+    activeRouteRef = null;
     messages = [];
     events = [];
     eventCursor = 0;
     pendingSend = null;
+    queue.set(null);
     catalog.reset();
     render();
     input.focus();
   }
 
+  function newConversation() {
+    if (activeTurn || busy || queue.editing || queue.waiting) return;
+    resetConversation();
+  }
+
   async function send(event) {
     event.preventDefault();
-    if (activeTurn || busy) return;
+    if (busy || queue.editing) return;
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     if (!catalog.canSend()) {
@@ -239,25 +253,23 @@ export function setupChat({ onDataChanged }) {
     }
     routeSettings.open = false;
     const choice = catalog.selected();
-    const route = choice.account
-      ? { account: choice.account, model: choice.model }
-      : { provider: choice.provider, model: choice.model };
+    const delivery = queue.mode;
+    const target = delivery !== 'queue' ? activeTurn : null;
+    const route = { mode: choice.routingMode, account: choice.account,
+      provider: choice.provider, model: choice.model };
     const fingerprint = JSON.stringify({ text, route, effort: choice.effort,
-      context: choice.context, permission: choice.permission, workspace: choice.workspace });
+      context: choice.context, permission: choice.permission, sandbox: choice.sandbox,
+      workspace: choice.workspace, delivery });
     if (!pendingSend || pendingSend.fingerprint !== fingerprint) {
-      pendingSend = { fingerprint, createKey: key(), messageKey: key() };
+      pendingSend = { fingerprint, createKey: key(), messageKey: key(), target };
     }
     busy = true;
     updateControls();
     try {
       if (!current) {
-        const values = {
-          model: choice.model,
-          idempotency_key: pendingSend.createKey,
-        };
+        const values = { ...createRoute(choice), permission_mode: choice.permission,
+          sandbox_mode: choice.sandbox, idempotency_key: pendingSend.createKey };
         if (choice.workspace) values.workspace_path = choice.workspace;
-        if (choice.account) values.account_ref = choice.account;
-        else if (choice.provider) values.provider = choice.provider;
         current = await api.createInstance(values);
         restorePending = false;
         rememberInstance(instanceId(current));
@@ -276,23 +288,25 @@ export function setupChat({ onDataChanged }) {
           }
         }
       }
-      const values = { content: text, idempotency_key: pendingSend.messageKey };
-      if (choice.effort) values.effort = choice.effort;
-      if (choice.context) values.context_window = Number(choice.context);
-      if (choice.permission) values.permission_mode = choice.permission;
+      const values = { content: text, idempotency_key: pendingSend.messageKey, delivery };
+      if (pendingSend.target) values.expected_turn_id = pendingSend.target;
+      if (delivery !== 'steer' && choice.effort) values.effort = choice.effort;
+      if (delivery !== 'steer' && choice.context) values.context_window = Number(choice.context);
       const result = await api.sendMessage(instanceId(current), values);
-      activeTurn = result.turn_id;
+      if (result.turn_id) activeTurn = result.turn_id;
+      activeRouteRef = result.account_ref || activeRouteRef;
       pendingSend = null;
       input.value = '';
+      queue.resetMode();
       render();
-      stream.open(activeTurn, eventCursor);
+      if (activeTurn) stream.open(activeTurn, eventCursor);
       stopPolling();
       timer = setTimeout(pollTurn, 300);
       try {
         await refreshConversation();
         await onDataChanged();
       } catch (error) {
-        toast(`Turn started, but the local view could not refresh: ${describeError(error)}`, true);
+        toast(`Message saved, but the view could not refresh: ${describeError(error)}`, true);
       }
     } catch (error) {
       toast(describeError(error), true);
@@ -318,6 +332,26 @@ export function setupChat({ onDataChanged }) {
     }
   }
 
+  async function saveAccessSettings() {
+    if (!current || activeTurn || busy) return;
+    const values = catalog.accessPayload();
+    if (!values) return;
+    busy = true;
+    updateControls();
+    try {
+      current = await api.updateInstance(instanceId(current), values);
+      instances = [current, ...instances.filter((item) => instanceId(item) !== instanceId(current))];
+      catalog.refreshInstance(current);
+      toast('Access settings saved for this conversation.');
+    } catch (error) {
+      toast(describeError(error), true);
+      await refreshCurrentState().catch(() => {});
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
   async function answerPermission(event, decision) {
     try {
       await api.answerPermission(event.turn_id, event.data.permission_id, decision);
@@ -336,6 +370,7 @@ export function setupChat({ onDataChanged }) {
     }
   });
   stopButton.addEventListener('click', stopTurn);
+  byId('save-access-settings').addEventListener('click', saveAccessSettings);
   newButton.addEventListener('click', newConversation);
   byId('activity-refresh').addEventListener('click', async () => {
     try { await refreshConversation(); } catch (error) { toast(describeError(error), true); }
@@ -345,11 +380,12 @@ export function setupChat({ onDataChanged }) {
     updateData({ models, accounts, capabilities, workspacePath, instanceRows }) {
       instances = Array.isArray(instanceRows) ? instanceRows : [];
       catalog.update({ models, accountRows: accounts, capabilityData: capabilities, workspacePath });
-      if (restorePending && !current && !busy && instances.length) {
+      const available = instances.filter((item) => !deletion.hasPending(instanceId(item)));
+      if (restorePending && !current && !busy && available.length) {
         restorePending = false;
         const preferred = lastViewedInstance();
-        const latest = [...instances].sort((a, b) => instanceTime(b) - instanceTime(a))[0];
-        const chosen = instances.find((instance) => instanceId(instance) === preferred) || latest;
+        const latest = [...available].sort((a, b) => instanceTime(b) - instanceTime(a))[0];
+        const chosen = available.find((instance) => instanceId(instance) === preferred) || latest;
         void selectConversation(instanceId(chosen));
       }
       render();

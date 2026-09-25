@@ -12,19 +12,24 @@ from .models import Event, RunOptions
 from .auth_store import AuthStoreMixin
 from .routing.persistence import RoutingStoreMixin
 from .routing.binding import ProxyBindingStoreMixin
-from .routing.schema import migrate_v4, migrate_v5
-from .routing.reconfiguration import PROVIDER_UNSET, require_declared_route, validate_provider
+from .routing.schema import migrate_v4, migrate_v5, migrate_v11
+from .routing.reconfiguration import (PROVIDER_UNSET, configure_route, validate_mode,
+                                      validate_provider)
 from .evaluation.schema import migrate_v6
 from .evaluation.persistence import EvaluationStoreMixin
 from .account_retirement import AccountRetirementStoreMixin, migrate_v7
 from .account_pause import AccountPauseStoreMixin, migrate_v8
+from .instance_deletion import InstanceDeletionStoreMixin, migrate_v9
+from .queueing.schema import migrate_v10
+from .native_sessions import bind_native_session, migrate_v12
+from .execution_policy import migrate_v13, read_policy, write_policy
 
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
+class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
             RoutingStoreMixin, AuthStoreMixin):
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
@@ -144,10 +149,16 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
             version = migrate_v6(db, version)
             version = migrate_v7(db, version)
             version = migrate_v8(db, version)
-            if version != 8:
+            version = migrate_v9(db, version)
+            version = migrate_v10(db, version)
+            version = migrate_v11(db, version)
+            version = migrate_v12(db, version)
+            version = migrate_v13(db, version)
+            if version != 13:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)
+        self.recover_deleting_instances()
 
     @contextmanager
     def connect(self):
@@ -181,6 +192,7 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
 
     @staticmethod
     def _decorate_session(db, row):
+        row.update(read_policy(db, row['id']))
         metadata = db.execute('SELECT state,version,updated FROM instance_metadata WHERE session_id=?',
                               (row['id'],)).fetchone()
         row.update(dict(metadata) if metadata else {'state': 'active', 'version': 1, 'updated': row['created']})
@@ -257,15 +269,23 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
         raise BridgeError('authentication_required', 'Reauthenticate through the proxy login flow.')
 
     def update_session(self, id, *, expected_version=None,
-                       routing_provider=PROVIDER_UNSET, **values):
-        allowed = {'model', 'native_id', 'context', 'state'}
-        if (not values and routing_provider is PROVIDER_UNSET) or not values.keys() <= allowed:
+                       routing_provider=PROVIDER_UNSET, routing_mode=PROVIDER_UNSET,
+                       routing_account_id=PROVIDER_UNSET, **values):
+        allowed = {'model', 'native_id', 'context', 'state', 'permission_mode', 'sandbox_mode'}
+        routing_change = any(value is not PROVIDER_UNSET for value in
+                             (routing_provider, routing_mode, routing_account_id))
+        if (not values and not routing_change) or not values.keys() <= allowed:
             raise ValueError('Invalid session update fields')
         if 'state' in values and values['state'] not in {'active', 'archived'}:
             raise BridgeError('invalid_state', 'Instance state must be active or archived.')
+        if expected_version is not None and (type(expected_version) is not int or expected_version < 1):
+            raise BridgeError('invalid_request', 'Expected instance version must be positive.')
         if routing_provider is not PROVIDER_UNSET:
             validate_provider(routing_provider)
-        route_changed = 'model' in values or routing_provider is not PROVIDER_UNSET
+        if routing_mode is not PROVIDER_UNSET:
+            validate_mode(routing_mode)
+        route_changed = 'model' in values or routing_change
+        policy_changed = bool(values.keys() & {'permission_mode', 'sandbox_mode'})
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM sessions WHERE id=?', (id,)).fetchone()
@@ -277,9 +297,11 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
                 raise BridgeError('version_conflict', 'Instance changed since it was read.')
             active = db.execute("SELECT 1 FROM runs WHERE session_id=? AND state IN ('starting','running','stopping')",
                                 (id,)).fetchone()
-            if active and (route_changed or values.get('state') == 'archived'):
+            from .queueing.records import occupied
+            active = active or occupied(db, id)
+            if active and (route_changed or policy_changed or values.get('state') == 'archived'):
                 raise BusyError()
-            if route_changed:
+            if route_changed or policy_changed:
                 if current['state'] != 'active' or values.get('state') == 'archived':
                     raise BridgeError('instance_archived',
                                       'An archived instance cannot change its route.')
@@ -287,23 +309,30 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
                               (id,)).fetchone():
                     raise BridgeError('evaluation_immutable',
                                       'Evaluation instances cannot change their route.')
-                routing = db.execute('SELECT mode,provider FROM session_routing WHERE session_id=?',
-                                     (id,)).fetchone()
-                if routing is None:
-                    raise BridgeError('schema_version', 'Session routing metadata is missing.')
-                automatic = routing['mode'] == 'automatic' or routing_provider is not PROVIDER_UNSET
-                provider = (routing['provider'] if routing_provider is PROVIDER_UNSET
-                            else routing_provider)
-                require_declared_route(db, values.get('model', row['model']),
-                                       provider=provider if automatic else None,
-                                       account_id=None if automatic else row['account_id'])
+            if policy_changed:
+                policy = read_policy(db, id)
+                policy.update({key: values[key] for key in policy if key in values})
+                write_policy(db, id, policy)
+            if route_changed:
+                route_values = configure_route(
+                    db, row, values.get('model', row['model']), mode=routing_mode,
+                    provider=routing_provider, account_id=routing_account_id)
+            else:
+                route_values = {}
             session_values = {key: value for key, value in values.items() if key in {'model', 'native_id', 'context'}}
+            session_values.update(route_values)
+            if 'native_id' in session_values:
+                native_id = session_values['native_id']
+                if native_id is None:
+                    if row['native_id'] is not None or db.execute(
+                            'SELECT 1 FROM native_session_bindings WHERE session_id=?', (id,)).fetchone():
+                        raise BridgeError('native_session_diverged',
+                                          'An instance cannot clear its native conversation identity.')
+                else:
+                    bind_native_session(db, id, native_id)
             if session_values:
                 db.execute(f"UPDATE sessions SET {','.join(key+'=?' for key in session_values)} WHERE id=?",
                            (*session_values.values(), id))
-            if routing_provider is not PROVIDER_UNSET:
-                db.execute("UPDATE session_routing SET mode='automatic',provider=? WHERE session_id=?",
-                           (routing_provider, id))
             state = values.get('state', current['state'])
             version = current['version'] + 1
             db.execute('INSERT OR REPLACE INTO instance_metadata(session_id,state,version,updated) VALUES (?,?,?,?)',
@@ -362,10 +391,11 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
 
     def emit(self, id, kind, data):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT session_id FROM runs WHERE id=?',(id,)).fetchone()
+            if kind == 'session':
+                bind_native_session(db, row[0], data.get('native_id'))
             self._event(db,id,row[0],kind,data)
-            if kind == 'session' and data.get('native_id'):
-                db.execute('UPDATE sessions SET native_id=? WHERE id=?',(data['native_id'],row[0]))
 
     @staticmethod
     def _event(db, run_id, session_id, kind, data):
@@ -378,18 +408,25 @@ class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStore
         clause, value = ('e.run_id', run_id) if run_id else ('e.session_id', session_id)
         with self.connect() as db:
             rows = db.execute(f'''SELECT e.*, r.message_id FROM events e
-                JOIN runs r ON r.id=e.run_id
+                LEFT JOIN runs r ON r.id=e.run_id
                 WHERE {clause}=? AND e.seq>? ORDER BY e.seq LIMIT ?''',
                               (value, after, limit)).fetchall()
         result = []
         for row in rows:
             data = json.loads(row['data'])
             data.setdefault('message_id', row['message_id'])
-            result.append(Event(seq=row['seq'], run_id=row['run_id'],
+            result.append(Event(seq=row['seq'], run_id=row['run_id'] or None,
                                 session_id=row['session_id'], kind=row['kind'],
                                 at=row['at'], data=data))
         return result
 
     def stop(self, id):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute("SELECT session_id FROM runs WHERE id=? "
+                             "AND state IN ('starting','running','stopping')", (id,)).fetchone()
+            if row:
+                from .queueing.records import occupied, set_paused
+                if occupied(db, row['session_id']):
+                    set_paused(self, db, row['session_id'], True, 'user_stop')
             db.execute("UPDATE runs SET stop_requested=1, updated=? WHERE id=? AND state IN ('starting','running','stopping')",(time.time(),id))

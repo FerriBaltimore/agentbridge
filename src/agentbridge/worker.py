@@ -29,7 +29,8 @@ from .routing.service import RoutingService
 from .native_sandbox import wrap
 from .workspace_policy import validate_execution_workspace
 from .execution_context import (MCP_CAPABILITY_ENV, PRIVATE_EXECUTION_KEY,
-                                mcp_environment, verify)
+                                mcp_environment, validate_access, verify)
+from .native_sessions import mark_native_launch, require_native_session
 
 MAX_LINE=8*1024*1024
 
@@ -54,8 +55,11 @@ def main():
         if not claimed:return
         run=store.get('runs',run_id)
         session=store.get('sessions',run['session_id'])
+        with store.connect() as db:
+            require_native_session(db, session)
         account=Account(**json.loads(store.get('accounts',run['account_id'])['config']))
         options=RunOptions(**json.loads(run['options']))
+        validate_access(options)
         require_proxy_account(account)
         # The management key arrives on the private pipe and is removed before
         # any provider environment or duplex payload is assembled.
@@ -72,7 +76,7 @@ def main():
         # upgrade. Consume private input, then reject an unsafe workspace
         # before any native process starts.
         validate_execution_workspace(session['cwd'], store.root,
-                                     workspace_write=options.sandbox != 'read-only')
+                                     workspace_write=options.sandbox == 'workspace-write')
         management_name=account.management_key_env
         management_key=secrets.pop(management_name, None)
         if not management_key:
@@ -90,7 +94,12 @@ def main():
         ContractRegistry(store).verify_run(account,run_id)
         mcp_env = mcp_environment(execution['mcp']) if execution else {}
         redactor=Redactor((*secrets.values(), management_key, mcp_env.get(MCP_CAPABILITY_ENV, '')))
-        emit=lambda kind,data:store.emit(run_id,kind,redactor.clean(data))
+        native_confirmed=False
+        def emit(kind, data):
+            nonlocal native_confirmed
+            store.emit(run_id, kind, redactor.clean(data))
+            if kind == 'session':
+                native_confirmed=True
         observe_error = ErrorObserver(store, account, run_id)
         parser=Parser(account.engine,emit,error_handler=observe_error)
         env=base_environment()
@@ -118,17 +127,22 @@ def main():
             payload=prompt
             native_temp=tempfile.mkdtemp(prefix='agentbridge-native-')
             env['TMPDIR']=native_temp
-            cmd=wrap(cmd, workspace_write=options.sandbox != 'read-only')
+            cmd=wrap(cmd, workspace_write=options.sandbox == 'workspace-write',
+                     full_access=options.sandbox == 'danger-full-access')
         if run['stop_requested'] or stopped[0]:
             store.finish(run_id,'cancelled','user_stop');return
+        mark_native_launch(store, run_id)
         try:
             child=subprocess.Popen(cmd,cwd=session['cwd'],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE,start_new_session=True)
         except OSError:
+            mark_native_launch(store, run_id, not_started=True)
             raise BridgeError('provider_unavailable', 'The native provider could not be started.',
                               phase='launch', outcome='not_started') from None
         store.update(run_id,child_pid=child.pid,child_identity=identity(child.pid),updated=time.time())
-        emit('run_started',{'engine':account.engine,'account_id':account.id})
+        emit('run_started',{'engine':account.engine,'account_id':account.id,
+                           'sandbox_mode': options.sandbox,
+                           'permission_mode': options.permission_mode})
         writer_error=[]
         def write_input():
             try:
@@ -190,6 +204,10 @@ def main():
         if stderr_bytes:emit('diagnostic',{'stderr_bytes':stderr_bytes,'content_stored':False})
         state, failure, issue = finish(parser, reason=reason, exit_code=code, unresolved=unresolved,
                                        stderr=stderr_tail.decode('utf-8', errors='replace'))
+        if state == 'completed' and not native_confirmed:
+            raise BridgeError('native_session_missing',
+                              'Codex completed without confirming the native conversation.',
+                              phase='execution', outcome='unknown')
         if issue:
             issue = observe_error(issue)
             failure = issue['code']

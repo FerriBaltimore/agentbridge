@@ -7,6 +7,10 @@ live acceptance. Earlier direct-provider results are historical evidence in
 
 ## Permissions
 
+Permission and sandbox settings can be saved per instance and overridden per
+turn. See [execution access](execution-access.md) for inheritance, full access
+and the selected-context boundary.
+
 Codex turns with permission_mode=default use its supervised duplex protocol.
 A provider
 request is persisted before permission.required becomes visible through

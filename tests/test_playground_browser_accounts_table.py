@@ -119,7 +119,7 @@ def test_accounts_table_usage_models_and_row_actions(local_playground):
             openai = _account_row(page, 'OpenAI Personal')
             claude = _account_row(page, 'Claude Research')
             openai.get_by_text('58% used').wait_for()
-            claude.get_by_text('Unknown usage').wait_for()
+            claude.get_by_text('Current usage unavailable').wait_for()
             assert openai.get_by_text('0% used').count() == 0
             assert claude.get_by_text('0% used').count() == 0
 
@@ -137,7 +137,7 @@ def test_accounts_table_usage_models_and_row_actions(local_playground):
             claude.get_by_test_id('account-models-open').click()
             dialog.get_by_role('heading', name='Models for Claude Research').wait_for()
             dialog.get_by_text('fixture/claude-model', exact=True).wait_for()
-            dialog.get_by_text('Usage unknown').wait_for()
+            dialog.get_by_text('Observed model').wait_for()
             assert dialog.get_by_text('fixture/openai-model').count() == 0
             page.keyboard.press('Escape')
             dialog.wait_for(state='hidden')
@@ -183,12 +183,12 @@ def test_accounts_table_keeps_missing_usage_unknown(unknown_playground):
             page, errors = _observed_page(browser, unknown_playground)
             page.get_by_test_id('nav-accounts').click()
             row = _account_row(page, 'Unknown Signals')
-            row.get_by_text('Unknown usage').wait_for()
+            row.get_by_text('Current usage unavailable').wait_for()
             assert row.get_by_text('0% used').count() == 0
             row.get_by_test_id('account-models-open').click()
             dialog = page.get_by_test_id('account-models-dialog')
             dialog.get_by_text('fixture/unknown-metadata', exact=True).wait_for()
-            dialog.get_by_text('Usage unknown').wait_for()
+            dialog.get_by_text('Observed model').wait_for()
             assert dialog.get_by_text('Effort:', exact=False).count() == 0
             assert dialog.get_by_text('Context:', exact=False).count() == 0
             assert errors == []
@@ -196,7 +196,7 @@ def test_accounts_table_keeps_missing_usage_unknown(unknown_playground):
             browser.close()
 
 
-def test_accounts_table_marks_old_quota_as_stale(local_playground):
+def test_accounts_table_hides_old_quota(local_playground):
     entry = local_playground['openai']['/v0/management/auth-files'][1]['files'][0]
     entry['quota']['observed_at'] = (
         datetime.now(timezone.utc) - timedelta(hours=2)
@@ -208,8 +208,12 @@ def test_accounts_table_marks_old_quota_as_stale(local_playground):
             page.get_by_test_id('nav-accounts').click()
             row = _account_row(page, 'OpenAI Personal')
             row.get_by_test_id('account-models-open').wait_for()
-            assert 'stale' in row.inner_text().lower()
-            assert row.get_by_text('0% used').count() == 0
+            row.get_by_text('Current usage unavailable').wait_for()
+            assert row.get_by_text('58% used').count() == 0
+            row.get_by_test_id('account-models-open').click()
+            dialog = page.get_by_test_id('account-models-dialog')
+            dialog.get_by_text('Observed model').wait_for()
+            assert dialog.get_by_text('58% used', exact=False).count() == 0
             assert errors == []
         finally:
             browser.close()
@@ -247,7 +251,7 @@ def test_same_named_providers_keep_independent_account_actions(local_playground)
             codex = rows.filter(has_text='codex')
             claude = rows.filter(has_text='claude')
             codex.get_by_text('58% used').wait_for()
-            claude.get_by_text('Unknown usage').wait_for()
+            claude.get_by_text('Current usage unavailable').wait_for()
 
             dialog = page.get_by_test_id('account-models-dialog')
             codex.get_by_test_id('account-models-open').click()

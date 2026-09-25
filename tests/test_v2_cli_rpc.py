@@ -36,6 +36,10 @@ class RecordingBridge:
                 'account_ref': options.get('account_ref') or 'Least Used',
                 'replayed': False}
 
+    def instance_update(self, instance_id, **options):
+        self.calls.append(('update', instance_id, options))
+        return {'instance_id': instance_id, **options}
+
     def account_login(self, **options):
         self.calls.append(('login', options))
         return {'account': {'name': options['name'], 'provider': options['provider']},
@@ -88,12 +92,18 @@ def test_instance_cli_uses_model_and_auto_account_unless_pinned(monkeypatch, cap
     assert 'Engine:' not in output
     assert bridge.calls[-1] == ('create', {'model': 'provider/model',
         'workspace_path': '/workspace', 'account_ref': None,
-        'provider': None, 'idempotency_key': 'create-1'})
+        'provider': None, 'routing_mode': None, 'idempotency_key': 'create-1'})
 
     cli.main(['instances', 'create', '--model', 'provider/model',
               '--account-ref', 'Pinned', '--json'])
     assert json.loads(capsys.readouterr().out)['account_ref'] == 'Pinned'
     assert bridge.calls[-1][1]['account_ref'] == 'Pinned'
+
+    cli.main(['instances', 'create', '--model', 'provider/model',
+              '--account-ref', 'Preferred', '--routing-mode', 'automatic', '--json'])
+    capsys.readouterr()
+    assert bridge.calls[-1][1]['account_ref'] == 'Preferred'
+    assert bridge.calls[-1][1]['routing_mode'] == 'automatic'
 
     cli.main(['instances', 'create', '--model', 'provider/model',
               '--provider', 'claude', '--json'])
@@ -115,6 +125,29 @@ def test_v2_rpc_forwards_model_and_automatic_account_choice():
     assert responses[1]['result']['account_ref'] == 'Least Used'
     assert bridge.calls[0][0:2] == ('models', None)
     assert bridge.calls[1][1] == {'model': 'provider/model', 'workspace_path': '/workspace'}
+
+
+def test_instance_cli_and_rpc_forward_execution_policy(monkeypatch, capsys):
+    bridge = RecordingBridge()
+    monkeypatch.setattr(cli, 'Bridge', lambda _root: bridge)
+    cli.main(['instances', 'create', '--model', 'provider/model', '--permission-mode', 'default',
+              '--sandbox-mode', 'danger-full-access', '--json'])
+    capsys.readouterr()
+    assert bridge.calls[-1][1]['permission_mode'] == 'default'
+    assert bridge.calls[-1][1]['sandbox_mode'] == 'danger-full-access'
+    cli.main(['instances', 'update', 'fixture-instance', '--permission-mode', 'dontAsk',
+              '--sandbox-mode', 'read-only', '--expected-version', '2', '--json'])
+    assert json.loads(capsys.readouterr().out)['sandbox_mode'] == 'read-only'
+    assert bridge.calls[-1] == ('update', 'fixture-instance', {
+        'permission_mode': 'dontAsk', 'sandbox_mode': 'read-only', 'expected_version': 2})
+    request = {'jsonrpc': '2.0', 'id': 1, 'method': 'instances.update', 'params': {
+        'instance_id': 'fixture-instance', 'permission_mode': 'default',
+        'sandbox_mode': 'workspace-write', 'expected_version': 3}}
+    output = io.StringIO()
+    rpc(bridge, io.StringIO(json.dumps(request) + '\n'), output)
+    assert json.loads(output.getvalue())['result']['sandbox_mode'] == 'workspace-write'
+    assert bridge.calls[-1] == ('update', 'fixture-instance', {
+        'permission_mode': 'default', 'sandbox_mode': 'workspace-write', 'expected_version': 3})
 
 
 def test_accounts_rpc_exposes_provider_and_models_without_proxy_configuration(tmp_path):

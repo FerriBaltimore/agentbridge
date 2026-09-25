@@ -138,44 +138,67 @@ provider observation.
 
 ## Instances
 
-    instances.create(model, account_ref?, provider?, workspace_path?, effort?,
+    instances.create(model, account_ref?, provider?, routing_mode?, workspace_path?, effort?,
                      context_window?, permission_mode?, sandbox_mode?,
                      allowed_tools?, continuity_mode?, provider_options?,
                      metadata?, idempotency_key?, evaluation?)
     instances.get(instance_id, include_last_turn?, include_usage?)
     instances.list(account_ref?, state?, limit?, cursor?, include_last_turn?)
-    instances.update(instance_id, model?, provider?, effort?, context_window?,
+    instances.update(instance_id, model?, provider?, routing_mode?, account_ref?, effort?, context_window?,
                      permission_mode?, sandbox_mode?, allowed_tools?,
                      expected_version?, metadata?)
     instances.archive(instance_id, expected_version?)
+    instances.delete(instance_id, expected_version?)
     instances.discard_evaluation(instance_id, account_ref?)
 
-Without `account_ref`, AgentBridge chooses an eligible proxy account for the
-exact model after fresh local Management API verification. An optional
-`provider` limits that automatic choice to accounts of the named provider on
-every turn. A supplied `account_ref` pins the route, cannot be combined with
-`provider`, and requires the same verification and management key. The route
-must have one active credential, a stable identity, the model
-in the local catalogue and an available client key. Historical direct accounts
-cannot create executable instances. Creation validates declared support before
-writing durable state; it does not prove live entitlement or spend a model turn.
-`idempotency_key` makes lost-response retries safe.
-The signature above includes target optional controls. The current v2 adapter
-rejects nondefault effort, context-window, permission, sandbox and tool
-controls on `instances.create`; send supported controls with each
-`messages.create` call instead. `instances.update` changes model, automatic
-routing provider or state; its listed advanced defaults are unsupported.
-Changing model and provider in one call validates their combination and saves
-both with one version change. Omitting `provider` preserves the existing filter;
-passing `provider: null` clears it. Supplying any `provider` value to a pinned
-instance explicitly converts it to automatic routing, including a value equal
-to that account's provider. The last selected account remains visible until a
-new turn is admitted. No update converts an automatic instance back to pinned.
-Route changes require an active, non-evaluation instance with no active turn.
-They check that a non-retired, login-bound proxy account declares the chosen
-model and provider; each later turn still requires fresh local proxy evidence.
-Use `expected_version` to reject a competing change. Effort and context window
-remain per-turn `messages.create` controls.
+Without a mode, an omitted `account_ref` selects automatic routing and a
+supplied account pins it. Explicit `routing_mode: automatic` accepts an initial
+`account_ref` and keeps it as durable affinity. `provider` restricts automatic
+routing on every turn; it must match an explicitly selected initial account.
+Pinned creation requires an account and cannot use a provider filter.
+Every route needs fresh local Management API verification: one active
+credential, stable identity, model in the catalogue and available client key.
+Creation does not prove live entitlement or spend a model turn.
+`idempotency_key` includes an explicitly chosen initial account so a replay
+cannot silently change that choice.
+
+`instances.update` changes model, provider, routing mode, account, access defaults or state.
+`permission_mode` and `sandbox_mode` are durable instance defaults with per-turn
+overrides; see [execution access](execution-access.md). Omitted message values
+inherit those defaults. Access changes retain the native session and require
+an idle instance without pending queue work.
+An account alone pins the instance. `routing_mode: automatic` with an account
+sets a new affinity; without an account it retains the current preference.
+`routing_mode: pinned` without an account pins that preference. Omitting
+`provider` preserves an automatic filter; `null` clears it. A provider change
+without an explicit mode or account converts a pinned instance to automatic.
+Pinned mode clears the filter. Changes are atomic and `expected_version`
+rejects competing edits. Active turns, pending queue work, archived instances
+and evaluation instances prevent route changes. Declared support is checked
+on update; admission repeats fresh identity and model verification.
+
+`account_ref` identifies the selected or admitted account, including after a
+failed turn, or the manually selected account. In automatic mode,
+`affinity_account_ref` identifies the preferred route for the next turn.
+Neither field owns the native session: its immutable binding belongs to the
+instance. A turn's `account_ref` identifies its actual route. See
+[account affinity](account-affinity.md) for selection and continuity.
+
+The signature includes target optional controls. This adapter rejects
+nondefault effort, context window, permission, sandbox and tool controls on
+creation and update; send supported values with each `messages.create` call.
+
+`instances.delete` permanently removes an ordinary conversation and its local
+turns, messages, events, exported context archives and private Codex runtime
+home. It requires that no
+turn or owned process is running. A minimal deletion receipt remains so an old
+creation key cannot recreate the conversation; the same instance ID can be
+retried safely. `expected_version` can reject a competing change before the
+first deletion. This operation does not remove upstream provider records or
+account credentials. A complete cleanup returns `{instance_id, deleted: true,
+pending: false}`. A blocked database checkpoint returns `deleted: false,
+pending: true`; retry with the same ID to finish cleanup. Evaluation instances
+use `instances.discard_evaluation`.
 
 `evaluation: true` marks a fresh, disposable instance. Such an instance accepts
 one turn through `messages.create` with a validated context package whose
@@ -194,7 +217,8 @@ recreate or rerun that evaluation. `instances.get` then returns `not_found`.
                     context_window?, permission_mode?, sandbox_mode?,
                     allowed_tools?, max_turns?, max_budget?, timeout_ms?,
                     context_package?, mcp?, provider_options?, metadata?,
-                    idempotency_key?)
+                    idempotency_key?, delivery?, position?, expected_version?, expected_turn_id?)
+    messages.get(message_id)
     messages.list(instance_id, after?, before?, role?, limit?, cursor?)
     instances.events(instance_id, after_seq?, limit?, follow?, timeout_ms?)
     turns.list(instance_id?, state?, limit?, cursor?)
@@ -206,10 +230,21 @@ recreate or rerun that evaluation. `instances.get` then returns `not_found`.
 
 `messages.create` continues a conversation. On an automatic instance, the
 account may change before a new turn. The selected route stays fixed through
-the turn and its tool calls. A change starts a fresh Codex thread with bounded
-portable context and explicit omissions. Historical direct instances remain
-readable but cannot submit another turn. `turns.resume` is explicit recovery;
-it never replays an uncertain side effect or changes account silently.
+the turn and its tool calls. The instance binds once to a native Codex session;
+model, upstream provider and account changes resume that session with its
+native history. A route change never constructs a replacement thread from
+portable context. Missing or divergent native state blocks continuation.
+Historical direct instances remain readable but cannot submit another turn.
+`turns.resume` is explicit recovery; it never replays an uncertain side effect,
+changes account silently or replaces an already bound native session.
+
+`delivery="queue"` persists input until it can execute. `steer` introduces input
+to an active interactive turn; `interrupt` explicitly replaces the active turn
+after cancellation. The compatibility default remains `reject`.
+`queues.list/add/move/delete/dispatch/pause/resume` expose the persistent queue.
+Queued responses can have a null `turn_id` and `account_ref` until admission;
+use `messages.get` or conversation events to follow them. See
+[message-queues.md](message-queues.md) for ordering, concurrency and recovery.
 
 `instances.events` is the incremental conversation feed. Clients should
 page with `after_seq` and persist their cursor after consuming the page.
@@ -233,10 +268,13 @@ permission responses.
                      include_unknowns?)
     recover(instance_id?, turn_id?)
 
-Transfer uses bounded portable context between proxy accounts and keeps the
-source independent. Native cross-account transfer is unavailable. Execution
-at the destination still requires a verified proxy account. A repeated
-`idempotency_key` returns the previously created destination.
+Transfer explicitly creates a separate destination instance using bounded
+portable context and keeps the source and its native session independent.
+It is a fork, not the mechanism for changing a conversation's model or route.
+Native cross-account copying for this fork is unavailable. Execution at the
+destination still requires a verified proxy account and establishes its own
+native session. A repeated `idempotency_key` returns the previously created
+destination. Export and transfer retain explicit context omissions.
 
 ## Shared response and concurrency rules
 
@@ -247,5 +285,4 @@ value is marked unsupported or stale, never invented.
 
 A second active turn for an instance is rejected unless the capability
 explicitly allows it. Updates use `expected_version`. Archived instances
-remain readable until the host's retention policy removes them; archive does
-not delete data.
+remain readable until explicitly deleted; archive does not delete data.

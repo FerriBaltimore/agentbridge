@@ -118,9 +118,11 @@ pagination. A page therefore contains only models served by that provider;
 
 For a pinned route, add `"account_ref":"team-codex-1"` to
 `instances.create`. For automatic routing within one provider, add
-`"provider":"codex"` instead. Do not combine them. Creation returns
-`instance_id`, `routing_mode`, `routing_provider`, `account_ref`, `model` and
-other instance fields; its initial account may change before a later turn.
+`"provider":"codex"`. Explicit `"routing_mode":"automatic"` may combine
+an initial `account_ref` with a matching provider filter. Creation returns
+`instance_id`, `routing_mode`, `routing_provider`, `affinity_account_ref`,
+`account_ref`, `model` and other instance fields. Automatic routing keeps its
+preferred account until confirmed exhaustion or ineligibility.
 `messages.create` returns `turn_id`, `message_id`, `instance_id`, `state`,
 `replayed` and the account actually selected for that turn in `account_ref`.
 For an automatic route, `instances.create` and `messages.create` also accept
@@ -138,7 +140,10 @@ deletion is pending; it does not silently switch a pinned route.
 `final`. The event `engine` is `codex` for new v2 turns; provider is route
 evidence. Persist the largest committed `seq` and request the next page with
 `after_seq`. The `route.selected` data can include `account_changed`,
-`portable_context_used` and `context_omitted_count`. `final: true` on
+`portable_context_used` and `context_omitted_count`. A normal account or model
+change retains the same native Codex session; it does not use portable context.
+Keep the same `instance_id` for that chat across `instances.update` calls.
+`final: true` on
 `message.completed` does not finish a turn; wait for `run.finished` or check
 `turns.get.state`. `instances.events` does not support `follow: true`.
 
@@ -162,10 +167,14 @@ inputs-only mode is separate.
 Per-turn `context_window` is a positive numeric token count. Enable that UI
 control only when the observed model metadata provides a maximum, and accept
 that the provider may still reject it. Set per-turn `effort` only to a value
-reported for the selected model and route. Per-turn `permission_mode` supports
+reported for the selected model and route. Instance and per-turn `permission_mode` supports
 `dontAsk` and `default`; with `default`, process `permission.required` and
 respond through `permissions.respond` for the exact request. There is no
-implicit approval for selected tools. `messages.create` accepts bounded
+implicit approval for selected tools. `sandbox_mode` supports read-only,
+workspace-write and explicit full access. Save defaults with `instances.update`
+and omit message overrides to inherit them; see [execution access](execution-access.md).
+Full access cannot be combined with selected context or MCP isolation.
+`messages.create` accepts bounded
 `context_package` and private Unix-socket `mcp` parameters. Follow the
 [context and MCP contract](context-and-mcp.md); its deterministic fixture
 coverage does not establish live provider or host-sandbox acceptance.

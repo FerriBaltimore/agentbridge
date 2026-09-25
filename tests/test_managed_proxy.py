@@ -129,7 +129,8 @@ def test_managed_proxy_reattaches_after_supervisor_restart(managed):
     assert os.environ[route["management_key_env"]] == management_key
 
 
-def test_native_provider_cannot_read_proxy_credential_or_authorize_supervisor(managed):
+@pytest.mark.parametrize('selected_context', [False, True], ids=['projection', 'selected-context'])
+def test_native_provider_cannot_read_proxy_credential_or_authorize_supervisor(managed, selected_context):
     """A normal same-UID Codex child has no authority over the local proxy."""
     with tempfile.TemporaryDirectory(prefix='agentbridge-security-') as temporary:
         root = Path(temporary)
@@ -137,6 +138,14 @@ def test_native_provider_cannot_read_proxy_credential_or_authorize_supervisor(ma
         client = ManagedProxyClient(state)
         try:
             route = client.provision('fixture-account')
+            with _socket_address(client.directory) as address:
+                with socket.socket(socket.AF_UNIX) as connection:
+                    connection.connect(address)
+                    supervisor_pid, _, _ = struct.unpack('3i', connection.getsockopt(
+                        socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                    connection.sendall(b'{"action":"auth_info"}\n')
+                    auth_fd = json.loads(connection.makefile('rb').readline())['result']['auth_fd']
+            assert Path(f'/proc/{supervisor_pid}/fd/{auth_fd}').exists()
             auth = state / 'managed-proxies/accounts/fixture-account/auth'
             (auth / 'canary.json').write_text('synthetic credential marker')
             home = state / 'codex-runtime' / 'instance'
@@ -155,23 +164,28 @@ def test_native_provider_cannot_read_proxy_credential_or_authorize_supervisor(ma
 
                 root = Path(os.environ['TEST_ROOT'])
                 endpoint = str(root / 'state/managed-proxies/supervisor.sock')
-                with socket.socket(socket.AF_UNIX) as connection:
-                    connection.connect(endpoint)
-                    pid, _, _ = struct.unpack('3i', connection.getsockopt(
-                        socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
-                    connection.sendall(b'{"action":"auth_info"}\\n')
-                    descriptor = json.loads(connection.makefile('rb').readline())['result']['auth_fd']
+                pid = int(os.environ['TEST_SUPERVISOR_PID'])
+                descriptor = int(os.environ['TEST_AUTH_FD'])
                 try:
                     Path(f'/proc/{pid}/fd/{descriptor}').read_bytes()
                     proc_denied = False
                 except OSError:
                     proc_denied = True
-                with socket.socket(socket.AF_UNIX) as connection:
-                    connection.connect(endpoint)
-                    request = {'action': 'ensure', 'account_id': 'fixture-account',
-                               'base_url': os.environ['TEST_BASE_URL'], 'auth': 'A' * 64}
-                    connection.sendall((json.dumps(request) + '\\n').encode())
-                    rejected = json.loads(connection.makefile('rb').readline())
+                socket_blocked = False
+                supervisor_rejected = False
+                try:
+                    with socket.socket(socket.AF_UNIX) as connection:
+                        connection.connect(endpoint)
+                        actual_pid, _, _ = struct.unpack('3i', connection.getsockopt(
+                            socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                        assert actual_pid == pid
+                        request = {'action': 'ensure', 'account_id': 'fixture-account',
+                                   'base_url': os.environ['TEST_BASE_URL'], 'auth': 'A' * 64}
+                        connection.sendall((json.dumps(request) + '\\n').encode())
+                        rejected = json.loads(connection.makefile('rb').readline())
+                        supervisor_rejected = rejected.get('error', {}).get('code') == 'managed_proxy_auth_required'
+                except (FileNotFoundError, PermissionError):
+                    socket_blocked = True
                 try:
                     (root / 'state/managed-proxies/accounts/fixture-account/auth/canary.json').read_text()
                     auth_denied = False
@@ -181,8 +195,8 @@ def test_native_provider_cannot_read_proxy_credential_or_authorize_supervisor(ma
                 ptrace_denied = libc.ptrace(0, 0, 0, 0) == -1 and ctypes.get_errno() == 1
                 print(json.dumps({
                     'auth_denied': auth_denied, 'proc_denied': proc_denied,
-                    'supervisor_rejected': rejected.get('error', {}).get('code')
-                        == 'managed_proxy_auth_required',
+                    'supervisor_rejected': supervisor_rejected,
+                    'socket_blocked': socket_blocked,
                     'ptrace_denied': ptrace_denied,
                     'workspace_readable': (root / 'workspace/selected.txt').read_text()
                         == 'selected input',
@@ -194,11 +208,17 @@ def test_native_provider_cannot_read_proxy_credential_or_authorize_supervisor(ma
                    if not name.startswith('AGENTBRIDGE_PROXY_')}
             env.update(CODEX_HOME=str(home), TMPDIR=str(native_temp), HOME=str(home),
                        TEST_ROOT=str(root), TEST_BASE_URL=route['proxy_base_url'],
+                       TEST_SUPERVISOR_PID=str(supervisor_pid), TEST_AUTH_FD=str(auth_fd),
                        PYTHONPATH=str(Path(__file__).resolve().parents[1] / 'src'))
-            result = subprocess.run(wrap(['/usr/bin/python3', '-c', script]), cwd=workspace,
+            result = subprocess.run(wrap(['/usr/bin/python3', '-c', script],
+                                         selected_context=selected_context), cwd=workspace,
                                     env=env, capture_output=True, text=True, timeout=15)
             assert result.returncode == 0, result.stderr
-            assert all(json.loads(result.stdout).values())
+            assert json.loads(result.stdout) == {
+                'auth_denied': True, 'proc_denied': True,
+                'supervisor_rejected': selected_context, 'socket_blocked': not selected_context,
+                'ptrace_denied': True, 'workspace_readable': True, 'management_env_absent': True,
+            }
         finally:
             client.shutdown()
 

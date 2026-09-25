@@ -22,6 +22,14 @@ isolated local proxy connection for each account and uses GrantBridge to
 coordinate browser authorization. Its generated keys and local endpoint are
 never entered in the browser form.
 
+After updating the playground or its installed SDK, restart the playground
+server and reload the page. Python handlers stay loaded until the server
+restarts, while browser assets are read from disk. Chat mutations check the
+HTTP API revision before submission and at admission, preserving the draft
+when the page and server are incompatible. Stop and approval responses remain
+available during an update. Bump `API_REVISION` in both `server.py` and
+`static/api.js` when changing the chat request contract incompatibly.
+
 The default state is `${XDG_STATE_HOME:-~/.local/state}/agentbridge`, outside
 the project workspace. An explicit `--root` must also be outside the workspace.
 If this project already has `.agentbridge/bridge.sqlite3`, stop active turns and
@@ -32,11 +40,19 @@ default. AgentBridge does not silently import or discard the old accounts.
 
 - Add a provider account through the GrantBridge browser flow, then inspect
   status, exact observed models and usage. Missing usage stays unknown.
-- Choose a provider and model in Chat. Automatic routing balances eligible
-  accounts within the selected provider; an account can also be pinned.
-- Change the provider and model between turns within the same conversation.
-  A pinned account can be switched to automatic routing; its next turn uses
-  portable context if the account changes.
+- In a new Chat conversation, choose a provider, routing mode, optional
+  observed account and model. Automatic routing starts with the least-used
+  eligible account unless one is selected, then keeps that account until
+  confirmed exhaustion or ineligibility. Pinned routing stays on the selected
+  account. Route selectors share one row with widths adapted to each field;
+  narrower screens scroll the row horizontally. The information button beside
+  Routing mode explains both choices, account affinity and session continuity.
+  Open it with a click, tap or keyboard, and dismiss it with Escape, Close or
+  a click outside.
+- Change the provider, model, routing mode or preferred account between turns
+  within the same conversation. These changes retain the same native Codex
+  session and history. Inspect route evidence for the selected account; a
+  missing or divergent native session blocks continuation explicitly.
 - Chat restores the last viewed conversation. Its inline timeline displays
   observed tools, permissions, partial responses and compaction progress while
   a turn runs; private reasoning is not displayed. A local SSE connection
@@ -46,9 +62,24 @@ default. AgentBridge does not silently import or discard the old accounts.
   reports them. Context choices use observed default and maximum values that
   are safe for the selected route; Default leaves the override unset. The SDK
   rejects a requested override if fresh route metadata cannot support it.
-- The permission selector follows SDK capabilities. Choose "Ask before actions"
-  to test an interactive provider request, then allow or deny it from Activity.
+- More settings offers Read-only, Workspace write and Full access, plus
+  No approval prompts or Ask when required. Full access allows host file and
+  network access. Save access settings while idle, or send the next message
+  to apply pending choices. The choices belong to the conversation, survive
+  reloads and retain the same native Codex session across route changes.
+  With Ask when required, respond to a native approval request from the chat
+  timeline or Activity.
 - Send a message, inspect recorded events, stop a turn, and review its output.
+- Keep sending while a turn runs: messages enter the persistent queue. Open
+  Queue above the composer to move pending messages up or down, remove them,
+  or pause and resume automatic execution. Reloading restores the saved order.
+  Send now introduces a pending message into the active turn; Stop & send
+  cancels the active turn and runs that message next. The composer also offers
+  these delivery choices while a turn is active. Stop pauses pending work;
+  review the result and resume explicitly. Route and access settings remain
+  locked while messages are pending. The SDK owns scheduling and persistence.
+- Delete a conversation from the Chat list after confirming. Its local history
+  and private runtime data are removed once its turn and owned processes end.
 - Remove an account to retire its local route. AgentBridge preserves historical
   conversations; this action does not revoke the upstream OAuth credential.
 
@@ -58,6 +89,7 @@ or model acceptance. Run them with `python -m pytest tests/test_playground_brows
 when Playwright Chromium or Chrome is installed. CI installs Chromium and
 requires it to launch before running the test suite. The playground itself is
 kept in this repository; it is not included in the AgentBridge runtime wheel.
+See the [queue UI acceptance record](../docs/development/playground-queues-acceptance.md).
 See the [2.3.1 acceptance record](../docs/development/playground-2-3-1-acceptance.md),
 the [2.3.0 playground acceptance record](../docs/development/playground-2-3-acceptance.md),
 the [2.2.0 record](../docs/development/playground-2-2-acceptance.md),

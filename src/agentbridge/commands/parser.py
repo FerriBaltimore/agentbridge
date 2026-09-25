@@ -4,6 +4,7 @@ import argparse
 from .. import __version__
 from .error_actions import add_errors
 from .contract_actions import add_contracts
+from .queue_actions import add_queues
 from .help import PrettyHelpFormatter, add_parser
 
 
@@ -27,6 +28,7 @@ def build_parser():
     sub=parser.add_subparsers(dest='action')
     add_errors(sub)
     add_contracts(sub)
+    add_queues(sub)
     add_parser(sub, 'capabilities',help='Show implemented capabilities')
     add_parser(sub, 'rpc',help='Serve JSON-RPC 2.0 on stdin/stdout; no network listener')
     models = add_parser(sub, 'models', help='List available models')
@@ -44,11 +46,27 @@ def build_parser():
     create = add_parser(instance_sub, 'create', help='Create a conversation for a selected model')
     create.add_argument('--model', required=True, help='Model shown by models list')
     create.add_argument('--workspace-path', default='.', help='Existing workspace directory')
-    create.add_argument('--account-ref', help='Pin a configured account instead of automatic selection')
+    create.add_argument('--account-ref', help='Select a configured account; pinned unless routing mode is automatic')
+    create.add_argument('--routing-mode', choices=('automatic', 'pinned'),
+                        help='Keep account affinity automatically or pin the selected account')
     create.add_argument('--provider', choices=('codex', 'claude', 'grok'),
-                        help='Balance among accounts for this provider')
+                        help='Limit automatic routing to accounts for this provider')
     create.add_argument('--idempotency-key', help='Reuse this key to reconcile a lost response')
     create.add_argument('--json', action='store_true')
+    update = add_parser(instance_sub, 'update', help='Update conversation routing or execution defaults')
+    update.add_argument('instance_id')
+    update.add_argument('--model')
+    update.add_argument('--account-ref')
+    update.add_argument('--routing-mode', choices=('automatic', 'pinned'))
+    update.add_argument('--provider', choices=('codex', 'claude', 'grok'))
+    update.add_argument('--expected-version', type=int)
+    update.add_argument('--json', action='store_true')
+    for command_parser in (create, update):
+        command_parser.add_argument('--permission-mode', choices=('dontAsk', 'default'),
+                                    help='Default tool approval policy for this conversation')
+        command_parser.add_argument('--sandbox-mode',
+            choices=('read-only', 'workspace-write', 'danger-full-access'),
+            help='Default filesystem access for this conversation')
     accounts=add_parser(sub, 'accounts',help='Authenticate accounts and inspect identity, quota and usage')
     account_sub=accounts.add_subparsers(dest='accounts_command')
     list_command=add_parser(account_sub, 'list',help='List configured accounts')

@@ -60,12 +60,8 @@ def _fake_command(path, mode):
         "    output.write(json.dumps({'argv': sys.argv[1:]}) + '\\n')\n"
     )
     if mode == 'slow':
-        script = bootstrap + (
-            'import time\n'
-            "print(json.dumps({'type': 'thread.started',\n"
-            "                  'thread_id': 'fixture-slow-native'}), flush=True)\n"
-            'time.sleep(30)\n'
-        )
+        protocol = (Path(__file__).parent / 'fixtures/test_playground_protocol.py').read_text()
+        script = '#!/usr/bin/python3\n' + protocol + '\nstart()\nimport time\ntime.sleep(30)\n'
     else:
         # The sandbox grants this executable, not a second fixture source file.
         script = bootstrap + NATIVE_FIXTURE.read_text()
@@ -158,6 +154,8 @@ def test_reopen_running_turn_then_stop_without_retry_or_account_change(local_pla
             page.get_by_test_id('chat-input').fill('Wait so I can stop this turn')
             page.get_by_test_id('chat-send').click()
             page.get_by_test_id('chat-stop').wait_for(state='visible', timeout=15000)
+            assert page.get_by_test_id('chat-routing-mode').is_disabled()
+            assert page.get_by_test_id('chat-account').is_disabled()
             _wait_for_launch(capture)
             assert len(bridge.runs()) == 1
             turn_id = bridge.runs()[0]['id']

@@ -1,7 +1,8 @@
 """Stable error codes and safe JSON-RPC error metadata."""
 
 
-RETRYABLE = {"busy", "provider_timeout", "provider_unavailable", "grantbridge_timeout", "store_unavailable"}
+RETRYABLE = {"busy", "provider_timeout", "provider_unavailable", "grantbridge_timeout",
+             "store_unavailable", "quota_unknown"}
 ACTION = {
     "authentication_required": "login",
     "credential_unavailable": "login",
@@ -10,6 +11,7 @@ ACTION = {
     "identity_missing": "login",
     "authentication_interrupted": "inspect",
     "quota_exhausted": "wait",
+    "quota_unknown": "wait",
     "rate_limited": "wait",
     "model_not_found": "change_model",
     "model_unavailable": "change_model",
@@ -33,6 +35,8 @@ ACTION = {
     "provider_contract_unverified": "inspect",
     "provider_contract_changed": "inspect",
     "provider_contract_invalid": "inspect",
+    "native_session_missing": "inspect",
+    "native_session_diverged": "inspect",
 }
 
 
@@ -56,7 +60,7 @@ class BridgeError(Exception):
                     "activation_unsupported", "login_timeout", "oauth_callback_port_busy",
                     "oauth_callback_unavailable"}):
             category = "auth"
-        elif self.code in {"quota_exhausted", "rate_limited"}:
+        elif self.code in {"quota_exhausted", "quota_unknown", "rate_limited"}:
             category = "quota"
         elif self.code == 'safety_blocked':
             category = 'safety'
@@ -66,7 +70,8 @@ class BridgeError(Exception):
                            'output_limit_exceeded',
                            'budget_exhausted', 'max_turns_exceeded', 'structured_output_failed'}:
             category = 'limit'
-        elif self.code in {'unknown_outcome', 'managed_proxy_stop_unverified'}:
+        elif self.code in {'unknown_outcome', 'managed_proxy_stop_unverified',
+                           'native_session_missing', 'native_session_diverged'}:
             category = 'execution'
         elif self.code == 'provider_catalog_unsupported':
             category = 'capability'

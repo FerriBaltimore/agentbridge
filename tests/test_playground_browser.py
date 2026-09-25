@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 import shutil
 from threading import Thread
-import textwrap
 
 import pytest
 
@@ -68,26 +67,11 @@ class NativeCapture:
 
 
 def _fake_codex(path):
-    path.write_text(textwrap.dedent('''\
-        #!/usr/bin/python3
-        import json
-        import os
-        from pathlib import Path
-        import sys
-
-        if '--version' in sys.argv:
-            print('codex-cli 0.0.0')
-            sys.exit(0)
-        prompt = sys.stdin.read()
-        capture = Path(os.environ['CODEX_HOME']) / 'fixture-calls.jsonl'
-        with capture.open('a') as stream:
-            stream.write(json.dumps({'argv': sys.argv[1:], 'prompt': prompt}) + '\\n')
-        print(json.dumps({'type': 'thread.started', 'thread_id': 'fixture-native-session'}), flush=True)
-        print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message',
-            'text': 'Browser fixture answer'}}), flush=True)
-        print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 12,
-            'output_tokens': 4}}), flush=True)
-    '''))
+    protocol = (Path(__file__).parent / 'fixtures/test_playground_protocol.py').read_text()
+    path.write_text('#!/usr/bin/python3\n' + protocol + '\nstart()\n' +
+        "emit({'type': 'item.completed', 'item': {'type': 'agent_message', "
+        "'text': 'Browser fixture answer'}})\n" +
+        "emit({'type': 'turn.completed', 'usage': {'input_tokens': 12, 'output_tokens': 4}})\n")
     path.chmod(0o700)
 
 
@@ -268,7 +252,7 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             openai_row = accounts.get_by_test_id('account-row').filter(has_text='OpenAI Personal')
             openai_row.get_by_text('OpenAI Personal').wait_for()
             accounts.get_by_text('Claude Research').wait_for()
-            accounts.get_by_text('Unknown usage').wait_for()
+            accounts.get_by_text('Current usage unavailable').wait_for()
             openai_row.get_by_text('active', exact=True).wait_for()
             page.locator('#accounts-summary').get_by_text(
                 '2 with an active or usable observation').wait_for()
@@ -324,10 +308,10 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             calls = [json.loads(line) for line in local_playground['capture'].read_text().splitlines()]
             assert len(calls) == 1
             assert 'Hello from the browser fixture' in calls[0]['prompt']
-            assert '--model' in calls[0]['argv']
-            assert 'fixture/openai-model' in calls[0]['argv']
+            assert 'app-server' in calls[0]['argv']
+            assert calls[0]['model'] == 'fixture/openai-model'
             assert 'model_context_window=131072' in calls[0]['argv']
-            assert 'model_reasoning_effort="high"' in calls[0]['argv']
+            assert calls[0]['effort'] == 'high'
             page.locator('#toast-region').get_by_text('Turn completed.').wait_for(
                 timeout=15000)
             page.locator('#toast-region .toast').first.wait_for(

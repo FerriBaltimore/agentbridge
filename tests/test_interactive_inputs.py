@@ -361,13 +361,13 @@ def test_malformed_attachment_collection_rejected(setup_proxy, value):
 
 
 def test_stop_kills_codex_child_that_outlives_duplex_wrapper(setup_proxy):
-    from agentbridge.process import alive, identity
+    from agentbridge.process import alive
+    from fixtures.test_process_descendants import kill_owned, owned_descendant
     bridge, instance = setup_proxy(native_args=('--ignore-term',))
     turn = bridge.message_create(instance, 'fixture', permission_mode='default')['turn_id']
     pending(bridge, turn)
     data = next(e['data'] for e in bridge.turn_events(turn) if e['kind'] == 'permission.required')
-    pid = int(data['input']['reason'])
-    started = identity(pid)
+    pid, started = owned_descendant(bridge.run(turn), int(data['input']['reason']))
     assert alive(pid, started)
     try:
         assert bridge.turn_stop(turn, wait=True)['state'] == 'cancelled'
@@ -376,7 +376,4 @@ def test_stop_kills_codex_child_that_outlives_duplex_wrapper(setup_proxy):
             time.sleep(.02)
         assert not alive(pid, started)
     finally:
-        if alive(pid, started):
-            import os
-            import signal
-            os.kill(pid, signal.SIGKILL)
+        kill_owned(pid, started)

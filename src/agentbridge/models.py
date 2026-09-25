@@ -127,15 +127,18 @@ class RunOptions:
     attachments: tuple[dict, ...] = ()
     context_package_digest: str | None = None
     mcp_binding_digest: str | None = None
+    steerable: bool = False
 
     def __post_init__(self):
+        if type(self.steerable) is not bool:
+            raise BridgeError('invalid_request', 'steerable must be a boolean.')
         if (not finite_number(self.timeout) or not finite_number(self.stop_grace)
                 or not 0 < self.timeout <= 86400 or not 0 <= self.stop_grace <= 60):
             raise BridgeError("invalid_timeout", "Timeout must be in (0, 86400], stop grace in [0, 60].")
         if self.sandbox not in ("read-only", "workspace-write", "danger-full-access"):
             raise BridgeError("invalid_sandbox", "Unknown sandbox policy.")
         if self.permission_mode not in ("dontAsk", "default", "acceptEdits", "plan", "bypassPermissions"):
-            raise BridgeError("invalid_permissions", "Unknown Claude permission mode.")
+            raise BridgeError("invalid_permissions", "Unknown permission mode.")
         if self.max_turns is not None and (type(self.max_turns) is not int or self.max_turns < 1):
             raise BridgeError("invalid_budget", "max_turns must be positive.")
         if self.max_budget_usd is not None and (not finite_number(self.max_budget_usd) or self.max_budget_usd <= 0):

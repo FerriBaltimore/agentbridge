@@ -204,7 +204,7 @@ def test_real_codex_starts_in_isolation_without_credentials(tmp_path, inputs_onl
         _directory(tmp_path / path)
     if not inputs_only:
         (tmp_path / 'cwd' / 'selected.txt').write_text('selected input')
-    mode = ['--inputs-only' if inputs_only else '--normal', '--']
+    mode = ['--inputs-only' if inputs_only else '--normal', '--no-native-shell', '--']
     args = _bwrap_args(tmp_path) + [
         '--ro-bind', str(binary), '/opt/provider/codex',
         '--chdir', '/workspace/isolated', '--', '/usr/bin/python3', '-P', '-m',

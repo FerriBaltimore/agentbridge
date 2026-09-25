@@ -84,7 +84,15 @@ def test_dashboard_views_fit_without_document_scroll(local_playground, width, he
                 assert geometry['overflowY'] <= 1, (view, width, height, geometry)
                 assert geometry['scroll'] == {'x': 0, 'y': 0}, (view, geometry)
                 for selector in ['#refresh-button', f'#view-{view}', *controls]:
-                    _assert_in_viewport(geometry, selector)
+                    if view == 'chat' and selector in ('#chat-provider', '#chat-model'):
+                        page.locator(selector).scroll_into_view_if_needed()
+                        route_geometry = _geometry(page, [selector])
+                        _assert_in_viewport(route_geometry, selector)
+                        assert route_geometry['overflowX'] <= 1, route_geometry
+                        assert route_geometry['overflowY'] <= 1, route_geometry
+                        assert route_geometry['scroll'] == {'x': 0, 'y': 0}, route_geometry
+                    else:
+                        _assert_in_viewport(geometry, selector)
                 surface = page.locator(WIDE_SURFACES[view]).bounding_box()
                 workspace = page.locator('.workspace').bounding_box()
                 assert surface and workspace

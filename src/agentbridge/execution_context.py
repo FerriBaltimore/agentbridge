@@ -59,6 +59,7 @@ def prepare(context_package, mcp):
 
 
 def verify(options, execution):
+    validate_access(options)
     if not isinstance(execution, dict) or set(execution) != {'context_package', 'mcp'}:
         raise BridgeError('context_required', 'Fresh execution context is required for this turn.')
     prepared, package_digest, binding_digest = prepare(
@@ -67,6 +68,15 @@ def verify(options, execution):
             or options.mcp_binding_digest != binding_digest):
         raise BridgeError('context_mismatch', 'Execution context does not match the admitted turn.')
     return prepared
+
+
+def validate_access(options):
+    """Selected host inputs keep their isolation boundary in every transport."""
+    if (options.sandbox == 'danger-full-access'
+            and (options.context_package_digest or options.mcp_binding_digest)):
+        raise BridgeError('invalid_execution_policy',
+                          'Full access cannot be combined with selected context or MCP isolation. '
+                          'Use a restricted sandbox for selected execution inputs.')
 
 
 def mcp_environment(descriptor):

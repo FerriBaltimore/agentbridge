@@ -72,7 +72,9 @@ tools and output, so they are not promised user-prompt token budgets.
 An instance is a durable conversation. An automatic instance may move to
 another proxy account between turns. The selected account remains fixed during
 one turn, and the actual account is recorded with that turn. A pinned instance
-stays on its selected account. Historical direct instances are read only.
+stays on its selected account. Every instance binds once to one native Codex
+session, independently of its upstream account, provider or model. Historical
+direct instances are read only.
 
     instance_id, account_ref, routing_mode, workspace_path, model, effort,
     context_window, permission_mode, sandbox_mode, allowed_tools,
@@ -80,10 +82,26 @@ stays on its selected account. Historical direct instances are read only.
     created_at, updated_at, metadata
 
 `routing_mode` is `automatic` or `pinned`. On an automatic instance,
-`account_ref` identifies the last completed route, or its initial candidate
-before the first turn. The native session ID is optional and must not be
-required for portable continuity. Switching accounts creates a new native
-Codex thread from bounded portable context and reports omitted context.
+`account_ref` identifies the selected or admitted route, including after a
+failed turn, or its initial candidate before the first turn. `native_session_id`
+can be absent before Codex creates the initial thread; once bound, it is
+immutable. Switching model, account or provider retains that thread and its
+native history. Missing or divergent
+native state is an explicit continuation failure. Bounded portable export
+belongs to an explicit transfer into a separate instance, not a route change.
+
+`permission_mode` and `sandbox_mode` are persistent execution defaults.
+Their values, inheritance and effective boundaries are specified in
+[execution access](execution-access.md).
+
+For existing records, migration anchors the stored native session or the
+latest observed historical session ID when the stored binding is absent.
+Admission compares that binding with the latest observed session identity.
+If an older implementation restored thread A after a later thread B failed,
+the differing observation returns `native_session_diverged`; it cannot
+silently resume A and omit B. Continuing requires explicit review and recovery
+or an explicit transfer into a separate conversation. Migration does not
+select a different thread to resolve the ambiguity or merge native histories.
 
 ## Message and turn
 
@@ -93,6 +111,10 @@ Codex thread from bounded portable context and reports omitted context.
 
 messages.create adds conversation input. turns.resume recovers a known turn.
 They are intentionally different operations.
+Queued input has its own durable `message_id` before a `turn_id` or account is
+assigned. A steering message shares the active `turn_id` while retaining its
+own message identity. Read [message-queues.md](message-queues.md) for queue
+records, positions, states and delivery controls.
 The accepted message and `turns.get` identify the actual account selected for
 their run. Route events carry safe selection evidence: account ID, model,
 quota state, selection reason and count of omitted context items. They contain

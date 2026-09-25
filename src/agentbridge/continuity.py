@@ -55,10 +55,10 @@ def unresolved(events):
     return list(pending.values())+list(tasks.values())
 
 
-def atomic_private(path,data):
+def atomic_private(path,data, *, staging_prefix='.staged-'):
     path=Path(path)
     path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-    fd,tmp=tempfile.mkstemp(prefix='.staged-',dir=path.parent)
+    fd,tmp=tempfile.mkstemp(prefix=staging_prefix,dir=path.parent)
     try:
         with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
         os.replace(tmp,path)
@@ -76,7 +76,12 @@ def build(store,session_id,budget_bytes=128000):
     archive=b''.join((dumps(asdict(e))+'\n').encode() for e in events)
     digest=hashlib.sha256(archive).hexdigest()
     path=store.root/'archives'/f'{session_id}-{digest[:16]}.jsonl'
-    atomic_private(path,archive)
+    atomic_private(path,archive,staging_prefix=f'.staged-{session_id}~')
+    try:
+        store.get('sessions', session_id)
+    except BridgeError:
+        path.unlink(missing_ok=True)
+        raise
     unknown=unresolved(events)
     # Preserve all owner instructions, unresolved results and referenced tool calls.
     mandatory={e.seq for e in events if e.kind=='user'} | {u['seq'] for u in unknown}

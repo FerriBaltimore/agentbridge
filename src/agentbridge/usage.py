@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 from . import usage_rollouts
 from .quota_windows import project, timestamp
+from .cache_observations import project as cache_observation
 
 
 def snapshot(account, *, oauth_token=None, allow_network=False):
@@ -45,6 +46,7 @@ def _snapshot(account, *, oauth_token=None, allow_network=False):
 
 def summarize(events):
     """Return observations without adding cumulative totals or overlapping scopes."""
-    observations=[{'at':e.at,**e.data} for e in events if e.kind=='usage']
+    observations=[{'at':e.at, **e.data, 'cache': cache_observation(e.data)}
+                  for e in events if e.kind=='usage']
     return {'supported':bool(observations),'observations':observations,
             'reason':None if observations else 'not_reported'}

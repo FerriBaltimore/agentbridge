@@ -10,8 +10,11 @@ OPERATIONS = (
     "accounts.login.complete", "accounts.login.cancel", "accounts.login.callback",
     "models.list", "usage.get", "usage.history", "accounts.quota.reset",
     "instances.create", "instances.get",
-    "instances.list", "instances.update", "instances.archive", "instances.discard_evaluation",
+    "instances.list", "instances.update", "instances.archive", "instances.delete",
+    "instances.discard_evaluation",
     "instances.events", "messages.create",
+    "messages.get", "queues.list", "queues.add", "queues.move", "queues.delete",
+    "queues.dispatch", "queues.pause", "queues.resume",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
     "error_cases.list", "error_cases.get", "error_cases.diagnose", "error_diagnoses.get",
@@ -46,12 +49,18 @@ def proxy_payload(*, include_parameters=True):
             item['limitations'] = ['schema_audit_only', 'execution_engine_is_codex']
         elif operation == 'models.list':
             item['limitations'] = ['local_catalog_is_not_provider_entitlement']
+        elif operation.startswith('queues.'):
+            item['limitations'] = ['conversation_local_order', 'private_context_rebind_after_dispatcher_loss',
+                                   'live_provider_acceptance_pending']
         elif operation == 'instances.transfer':
             item['support'] = 'portable'
             item['limitations'] = ['bounded_context', 'explicit_omissions']
         elif operation == 'instances.discard_evaluation':
             item['limitations'] = ['explicit_evaluation_instances_only',
                                    'terminal_processes_required', 'live_provider_acceptance_pending']
+        elif operation == 'instances.delete':
+            item['limitations'] = ['local_evidence_only', 'terminal_processes_required',
+                                   'evaluation_instances_use_discard_evaluation']
         operations[operation] = item
     value = {'contract_version': 'v2',
              'declaration_scope': 'adapter_implementation',
@@ -62,6 +71,14 @@ def proxy_payload(*, include_parameters=True):
              'operations': operations}
     if include_parameters:
         value['parameters'] = {
+            'routing_mode': {'support': 'adapter', 'maturity': 'fixture_tested',
+                             'values': ['automatic', 'pinned'],
+                             'limitations': ['between_turns_only', 'automatic_account_affinity',
+                                             'provider_cache_savings_unverified']},
+            'delivery': {'support': 'adapter', 'maturity': 'fixture_tested',
+                         'values': ['reject', 'queue', 'steer', 'interrupt'],
+                         'limitations': ['steer_requires_interactive_turn',
+                                         'legacy_default_rejects_busy', 'live_provider_acceptance_pending']},
             'model': {'support': 'adapter', 'maturity': 'fixture_tested'},
             'effort': {'support': 'adapter', 'maturity': 'fixture_tested',
                        'limitations': ['provider_model_may_ignore_effort']},
@@ -76,10 +93,24 @@ def proxy_payload(*, include_parameters=True):
                     'limitations': ['private_unix_socket', 'live_provider_acceptance_pending']},
             'permission_mode': {'support': 'adapter', 'maturity': 'fixture_tested',
                                 'values': [
-                                    {'value': 'dontAsk', 'display_name': 'No prompts'},
-                                    {'value': 'default', 'display_name': 'Ask before actions'},
+                                    {'value': 'dontAsk', 'display_name': 'No approval prompts'},
+                                    {'value': 'default', 'display_name': 'Ask when required'},
                                 ],
-                                'limitations': ['interactive_codex_transport']},
+                                'scopes': ['instance_default', 'turn_override'],
+                                'limitations': ['approvals_require_interactive_codex_transport',
+                                                'approval_does_not_remove_host_isolation']},
+            'sandbox_mode': {'support': 'adapter', 'maturity': 'fixture_tested',
+                             'values': [
+                                 {'value': 'read-only', 'display_name': 'Read only'},
+                                 {'value': 'workspace-write', 'display_name': 'Workspace write'},
+                                 {'value': 'danger-full-access', 'display_name': 'Full access'},
+                             ],
+                             'scopes': ['instance_default', 'turn_override'],
+                             'limitations': ['full_access_uses_host_permissions',
+                                             'full_access_incompatible_with_selected_context_or_mcp',
+                                             'native_shell_requires_linux_user_namespaces',
+                                             'selected_context_requires_linux_landlock',
+                                             'native_process_inspection_filter_remains']},
             'allowed_tools': {'support': 'unsupported', 'maturity': 'unsupported'},
             'max_budget': {'support': 'unsupported', 'maturity': 'unsupported'},
             'provider_options': {'support': 'unsupported', 'maturity': 'unsupported'},

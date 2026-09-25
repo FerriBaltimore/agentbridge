@@ -20,6 +20,7 @@ def test_removal_preserves_old_records_and_blocks_new_work(tmp_path):
     register_verified_proxy_account(bridge.store, 'first', 18301)
     session = bridge.store.add_session('old-session', 'first', str(tmp_path), 'fixture-model')[0]
     run_id = bridge.store.admit('old-turn', session, 'hello', RunOptions(), None)[0]
+    bridge.store.emit(run_id, 'session', {'native_id': 'native-original'})
     bridge.store.finish(run_id, 'completed')
 
     result = bridge.account_delete('first')

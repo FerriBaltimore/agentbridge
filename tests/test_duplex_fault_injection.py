@@ -106,7 +106,7 @@ def test_permission_persistence_failure_closes_codex_channel_and_reports_unknown
         def __enter__(self): return self
         def __exit__(self, *_): closed.append(True)
     class Broker:
-        def __init__(self, *_): pass
+        def __init__(self, store): self.store = store
         def request(self, *_, **kwargs):
             if operation == 'request':
                 raise sqlite3.OperationalError('PRIVATE REQUEST BODY')
@@ -115,7 +115,7 @@ def test_permission_persistence_failure_closes_codex_channel_and_reports_unknown
         def delivered(self, *_):
             raise sqlite3.OperationalError('PRIVATE DELIVERY BODY')
     class Control:
-        def __init__(self, channel, value, emit, approve):
+        def __init__(self, channel, value, emit, approve, steering=None):
             self.approve = approve
         def execute(self):
             self.approve({'operation': 'fixture'}, lambda value: delivered.append(value))

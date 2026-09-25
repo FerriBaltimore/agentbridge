@@ -7,7 +7,7 @@ from threading import Thread
 import pytest
 
 from agentbridge import BridgeError
-from playground.server import create_server
+from playground.server import API_REVISION, create_server
 
 
 class PublicBridgeStub:
@@ -81,6 +81,10 @@ class PublicBridgeStub:
     def instance_create(self, **options):
         self._record('instance_create', **options)
         return {'instance_id': 'instance-1', 'model': options['model']}
+
+    def instance_delete(self, instance_id):
+        self._record('instance_delete', instance_id)
+        return {'instance_id': instance_id, 'deleted': True, 'pending': False}
 
     def instance_get(self, instance_id, *, include_last_turn):
         self._record('instance_get', instance_id, include_last_turn=include_last_turn)
@@ -189,6 +193,7 @@ def request(server, method, path, *, body=None, headers=None, csrf=True):
         headers.setdefault('Content-Type', 'application/json')
     if method != 'GET' and csrf:
         headers.setdefault('X-AgentBridge-Playground', '1')
+        headers.setdefault('X-AgentBridge-API-Revision', str(API_REVISION))
     connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
     try:
         connection.request(method, path, body=payload, headers=headers)
@@ -213,7 +218,7 @@ def test_default_playground_uses_private_state_and_serves_sdk_routes(tmp_path, m
     try:
         assert server.bridge.root == tmp_path / 'state-home/agentbridge'
         assert request(server, 'GET', '/api/meta') == (
-            200, {'result': {'workspace_path': str(workspace)}})
+            200, {'result': {'workspace_path': str(workspace), 'api_revision': API_REVISION}})
         assert request(server, 'GET', '/api/accounts') == (200, {'result': []})
     finally:
         server.shutdown()
@@ -226,7 +231,7 @@ def test_read_routes_expose_safe_account_projection_and_polling(local_server, tm
     server, bridge = local_server
     assert request(server, 'GET', '/')[1] == '<h1>Playground</h1>'
     assert request(server, 'GET', '/api/meta')[1] == {
-        'result': {'workspace_path': str(tmp_path)}}
+        'result': {'workspace_path': str(tmp_path), 'api_revision': API_REVISION}}
     assert request(server, 'GET', '/api/capabilities')[1]['result']['execution']['engine'] == 'codex'
     account = request(server, 'GET', '/api/accounts')[1]['result'][0]
     assert account == {'account_ref': 'Personal', 'name': 'Personal',
@@ -291,6 +296,18 @@ def test_login_and_removal_only_call_public_sdk(local_server):
     assert ('account_delete', ('Personal',), {}) in bridge.calls
 
 
+def test_delete_conversation_uses_public_sdk_and_mutation_guard(local_server):
+    server, bridge = local_server
+    status, rejected = request(server, 'DELETE', '/api/instances/instance-1', csrf=False)
+    assert status == 403 and rejected['error']['code'] == 'forbidden'
+    assert not any(call[0] == 'instance_delete' for call in bridge.calls)
+    status, payload = request(server, 'DELETE', '/api/instances/instance-1')
+    assert status == 200
+    assert payload['result'] == {'instance_id': 'instance-1', 'deleted': True,
+                                 'pending': False}
+    assert ('instance_delete', ('instance-1',), {}) in bridge.calls
+
+
 def test_login_start_opens_isolated_browser_once_and_forwards_email(browser_server):
     server, bridge, auth_browser = browser_server
     values = {'provider': 'claude', 'name': 'Work', 'email': 'work@example.test'}
@@ -337,9 +354,11 @@ def test_chat_routes_forward_optional_turn_controls(local_server, tmp_path):
     server, bridge = local_server
     assert request(server, 'POST', '/api/instances',
                    body={'model': 'fixture-model', 'provider': 'codex',
+                         'permission_mode': 'default', 'sandbox_mode': 'workspace-write',
                          'idempotency_key': 'create-1'})[1][
                        'result']['instance_id'] == 'instance-1'
-    update = {'expected_version': 2, 'provider': 'claude', 'model': 'fixture-claude'}
+    update = {'expected_version': 2, 'provider': 'claude', 'model': 'fixture-claude',
+              'permission_mode': 'dontAsk', 'sandbox_mode': 'danger-full-access'}
     assert request(server, 'POST', '/api/instances/instance-1', body=update)[1][
         'result']['routing_provider'] == 'claude'
     assert ('instance_update', ('instance-1',), update) in bridge.calls
@@ -358,6 +377,7 @@ def test_chat_routes_forward_optional_turn_controls(local_server, tmp_path):
                    body={'wait': False})[1]['result']['state'] == 'cancelled'
     assert ('instance_create', (), {'model': 'fixture-model', 'provider': 'codex',
                                     'workspace_path': str(tmp_path),
+                                    'permission_mode': 'default', 'sandbox_mode': 'workspace-write',
                                     'idempotency_key': 'create-1'}) in bridge.calls
     assert ('message_create', ('instance-1',), message) in bridge.calls
 

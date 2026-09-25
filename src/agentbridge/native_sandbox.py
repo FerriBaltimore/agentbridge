@@ -1,9 +1,10 @@
-"""Restrict an inputs-only Codex subprocess to its selected input paths.
+"""Select the native isolation boundary without changing execution policy.
 
-The AgentBridge worker must keep its database and proxy account state mounted.
-This launcher applies Landlock *after* the worker has prepared Codex state, so
-the native provider cannot read the worker's other files. A kernel without the
-required Landlock rights fails closed before launching the provider.
+Normal restricted turns use a private filesystem and PID namespace compatible
+with Codex's own command sandbox. Selected inputs disable native shell tools
+and use Landlock, including hosts which disable nested user namespaces.
+Full access keeps the process inspection filter but uses host file permissions;
+it is not a selected-input or tenant isolation boundary.
 """
 
 import ctypes
@@ -14,7 +15,8 @@ import struct
 import sys
 
 from .native_process_guard import restrict_process_inspection
-from .workspace_policy import overlaps_private_state, writable_runtime_in_workspace
+from .workspace_policy import (overlaps_private_state, validate_private_state_root,
+                               writable_runtime_in_workspace)
 from .errors import BridgeError
 
 
@@ -94,6 +96,7 @@ def restrict(*, cwd, home, temporary, executable, inputs_only=True,
     if home.parent.name != 'codex-runtime' or home.name in ('', '.', '..'):
         raise ValueError('Codex state must be scoped to one instance')
     state_root = home.parent.parent
+    validate_private_state_root(state_root)
     if any(executable.is_relative_to(path)
            for path in (cwd, temporary, home)):
         raise ValueError('Native executable must be outside writable runtime paths')
@@ -149,13 +152,21 @@ def restrict(*, cwd, home, temporary, executable, inputs_only=True,
         os.close(ruleset_fd)
 
 
-def wrap(command, *, inputs_only=False, workspace_write=False, mcp_enabled=False):
+def wrap(command, *, inputs_only=False, workspace_write=False, mcp_enabled=False,
+         full_access=False, selected_context=False):
     """Run Codex through this policy before either native transport starts."""
+    if full_access and (inputs_only or mcp_enabled or selected_context):
+        raise BridgeError('invalid_execution_policy',
+                          'Full access cannot disable selected input isolation.')
     flags = ['--inputs-only' if inputs_only else '--normal']
+    if full_access:
+        flags.append('--full-access')
     if workspace_write:
         flags.append('--write-workspace')
     if mcp_enabled:
         flags.append('--mcp')
+    if inputs_only or mcp_enabled or selected_context:
+        flags.append('--no-native-shell')
     return [sys.executable, '-P', '-m', 'agentbridge.native_sandbox',
             *flags, '--', *command]
 
@@ -165,7 +176,8 @@ def main():
     if not arguments:
         raise SystemExit(2)
     inputs_only = True
-    workspace_write = mcp_enabled = False
+    workspace_write = mcp_enabled = full_access = False
+    native_shell = True
     if arguments[0] in {'--inputs-only', '--normal'}:
         inputs_only = arguments.pop(0) == '--inputs-only'
         while arguments and arguments[0] != '--':
@@ -174,6 +186,10 @@ def main():
                 workspace_write = True
             elif flag == '--mcp':
                 mcp_enabled = True
+            elif flag == '--full-access':
+                full_access = True
+            elif flag == '--no-native-shell':
+                native_shell = False
             else:
                 raise SystemExit(2)
         if not arguments or arguments.pop(0) != '--' or not arguments:
@@ -184,10 +200,22 @@ def main():
         raise SystemExit(1)
     executable = str(Path(selected).resolve(strict=True))
     try:
-        restrict(cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
-                 temporary=os.environ['TMPDIR'], executable=executable,
-                 inputs_only=inputs_only, workspace_write=workspace_write,
-                 mcp_enabled=mcp_enabled)
+        if not inputs_only and not full_access and native_shell:
+            from .native_namespace import reexec
+            reexec(command, home=os.environ['CODEX_HOME'], temporary=os.environ['TMPDIR'],
+                   workspace_write=workspace_write, mcp_enabled=mcp_enabled)
+            raise RuntimeError('The native namespace launcher returned without execution')
+        if full_access:
+            if inputs_only or mcp_enabled:
+                raise ValueError('Full access conflicts with selected input isolation')
+            # Explicit trusted execution uses host filesystem permissions.
+            # This filter remains defense in depth, not tenant isolation.
+            restrict_process_inspection()
+        else:
+            restrict(cwd=os.getcwd(), home=os.environ['CODEX_HOME'],
+                     temporary=os.environ['TMPDIR'], executable=executable,
+                     inputs_only=inputs_only, workspace_write=workspace_write,
+                     mcp_enabled=mcp_enabled)
         os.execvpe(executable, command, os.environ)
     except (OSError, ValueError, KeyError, RuntimeError, BridgeError):
         # Stderr belongs to the private native channel and is never persisted.

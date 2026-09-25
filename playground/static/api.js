@@ -1,4 +1,6 @@
-const MUTATION_HEADER = { 'X-AgentBridge-Playground': '1' };
+const API_REVISION = 2;
+const MUTATION_HEADER = { 'X-AgentBridge-Playground': '1',
+  'X-AgentBridge-API-Revision': String(API_REVISION) };
 
 export class PlaygroundError extends Error {
   constructor(code, message, status = 0, data = {}) {
@@ -11,6 +13,14 @@ export class PlaygroundError extends Error {
 }
 
 async function request(path, { method = 'GET', body, timeout = 30000 } = {}) {
+  if (method !== 'GET' && (path === '/api/instances' || path.startsWith('/api/instances/'))) {
+    const meta = await request('/api/meta');
+    if (meta?.api_revision !== API_REVISION) {
+      throw new PlaygroundError('playground_update_required',
+        'The playground page and server are incompatible. '
+        + 'Restart the playground server and reload this page before trying again.');
+    }
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   const headers = method === 'GET' ? {} : { ...MUTATION_HEADER };
@@ -70,6 +80,9 @@ export const api = {
   instances: () => request('/api/instances'),
   instance: (id) => request(`/api/instances/${ref(id)}`),
   messages: (id) => request(`/api/instances/${ref(id)}/messages`),
+  queue: (id) => request(`/api/instances/${ref(id)}/queue`),
+  editQueue: (id, action, values) => request(`/api/instances/${ref(id)}/queue/${ref(action)}`,
+    { method: 'POST', body: values }),
   instanceEvents: (id, afterSeq = 0) => request(`/api/instances/${ref(id)}/events${query({ after_seq: afterSeq })}`),
   turn: (id) => request(`/api/turns/${ref(id)}`),
   turnEvents: (id, afterSeq = 0) => request(`/api/turns/${ref(id)}/events${query({ after_seq: afterSeq })}`),
@@ -86,6 +99,7 @@ export const api = {
   pauseAccount: (account) => request(`/api/accounts/${ref(account)}/pause`, { method: 'POST', body: {} }),
   resumeAccount: (account) => request(`/api/accounts/${ref(account)}/resume`, { method: 'POST', body: {} }),
   createInstance: (values) => request('/api/instances', { method: 'POST', body: values }),
+  deleteInstance: (id) => request(`/api/instances/${ref(id)}`, { method: 'DELETE' }),
   updateInstance: (id, values) => request(`/api/instances/${ref(id)}`,
     { method: 'POST', body: values }),
   sendMessage: (id, values) => request(`/api/instances/${ref(id)}/messages`, { method: 'POST', body: values }),

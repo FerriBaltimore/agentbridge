@@ -9,6 +9,16 @@ from .errors import BridgeError
 
 _HOST_PRIVATE_ROOTS = (Path('/proc'), Path('/run'), Path('/dev'), Path('/sys'))
 _BROAD_ROOTS = (Path('/'), Path('/home'), Path('/tmp'))
+_EXPOSED_SYSTEM_ROOTS = tuple(Path(name).resolve() for name in
+                              ('/usr', '/lib', '/lib64', '/bin', '/sbin'))
+
+
+def validate_private_state_root(state_root):
+    """System dependencies must never grant incidental access to bridge state."""
+    root = Path(state_root).resolve()
+    if any(root.is_relative_to(system) for system in _EXPOSED_SYSTEM_ROOTS):
+        raise BridgeError('unsafe_store',
+                          'Private AgentBridge state must be outside system runtime directories.')
 
 
 def overlaps_private_state(workspace, state_root):
@@ -24,6 +34,7 @@ def validate_workspace(path, state_root):
     workspace = Path(path).expanduser().resolve()
     if not workspace.is_dir():
         raise BridgeError('invalid_workspace', 'Workspace must be an existing directory.')
+    validate_private_state_root(state_root)
     if overlaps_private_state(workspace, Path(state_root).resolve()):
         raise BridgeError('invalid_workspace',
                           'Workspace must not include private AgentBridge or host state.')

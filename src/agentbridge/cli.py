@@ -8,8 +8,9 @@ from .commands.account_output import print_account_human
 from .commands.error_actions import error_command
 from .commands.contract_actions import contract_command
 from .commands.help import PrettyHelpFormatter  # Compatibility for existing callers.
-from .commands.instance_actions import create_instance, print_instance
+from .commands.instance_actions import create_instance, print_instance, update_instance
 from .commands.model_actions import model_command, print_models
+from .commands.queue_actions import queue_command
 from .commands.parser import build_parser
 from .commands.usage_output import print_usage, print_consumption
 from .rpc import dispatch, rpc, serial
@@ -41,9 +42,10 @@ def main(argv=None):
         return
     with Bridge(args.root) as bridge:
         if args.action=='rpc':rpc(bridge,sys.stdin,sys.stdout)
-        elif args.action in {'errors', 'contracts'}:
+        elif args.action in {'errors', 'contracts', 'queues'}:
             try:
-                result = (error_command if args.action == 'errors' else contract_command)(bridge, args)
+                action = {'errors': error_command, 'contracts': contract_command, 'queues': queue_command}
+                result = action[args.action](bridge, args)
                 print(json.dumps(result, default=serial, indent=2, ensure_ascii=False))
             except (BridgeError, ValueError, TypeError, KeyError) as error:
                 print(json.dumps(error_payload(error), ensure_ascii=False), file=sys.stderr)
@@ -73,7 +75,8 @@ def main(argv=None):
                 raise SystemExit(1) from None
         elif args.action=='instances':
             try:
-                print_instance(create_instance(bridge,args), args.json)
+                action = create_instance if args.instances_command == 'create' else update_instance
+                print_instance(action(bridge,args), args.json)
             except (BridgeError,ValueError,TypeError,KeyError) as error:
                 print(json.dumps(error_payload(error),ensure_ascii=False),file=sys.stderr)
                 raise SystemExit(1) from None

@@ -92,27 +92,28 @@ numeric context override becomes Codex's `model_context_window` setting. This
 path is covered by proxy and browser
 fixtures; live provider acceptance of each effort or override remains unverified.
 
-`instances.create(model, workspace_path?, account_ref?, provider?, idempotency_key?)`
-selects an eligible proxy account when `account_ref` is omitted. `provider`
-restricts automatic selection to accounts of that provider and is persisted
-for every later turn. A supplied `account_ref` pins that account and still
-requires fresh Management API verification; it cannot be combined with
-`provider`. `messages.create` may reselect an account **between** automatic
-turns. The chosen endpoint remains fixed during a complete turn, including
-tool calls. A change starts a fresh Codex thread with bounded portable context
-and explicit omissions. No new turn can execute through an older direct
-Codex or Claude Code account.
+`instances.create(model, workspace_path?, account_ref?, provider?, routing_mode?,
+idempotency_key?)` creates an automatically routed conversation by default.
+An account without an explicit mode pins the route. Explicit automatic mode
+accepts an initial account and preserves its affinity. Provider filters apply
+at creation and on every later turn. Pinned mode requires an account.
 
-`instances.update(instance_id, model?, provider?, expected_version?)` can
-change the default model and provider filter together between turns. Omitting
-`provider` keeps the current filter; an explicit `null` clears it. Setting a
-provider on a pinned instance, including `null`, explicitly converts it to
-automatic routing. This does not rerun an earlier turn. If the next selected
-account differs, admission builds bounded portable context and records the
-change and omissions in route evidence. A route change is rejected while a
-turn is active and on archived or evaluation instances. The update checks
-declared, login-bound proxy account support; turn admission repeats the fresh
-proxy and model checks. `expected_version` protects concurrent edits.
+`instances.update` can change the model, provider, mode and account atomically
+between turns, protected by `expected_version`. Changing the account alone
+pins it; specifying automatic mode and an account changes the preference.
+Route changes are rejected for active turns, pending queue work, archived
+instances and evaluation instances. Every later turn repeats fresh local
+identity and model checks. See [account affinity](account-affinity.md) for the
+full transition rules, cache rationale and evidence limits.
+
+The chosen endpoint stays fixed during a complete turn, including tool calls.
+Every conversation binds once to one native Codex session. Model, account and
+upstream provider changes resume that same session through the new route,
+preserving its native history. They do not export or reconstruct a bounded
+transcript. Native Codex compaction remains observable. Missing, incompatible
+or divergent native session state blocks continuation rather than creating a
+replacement thread. No turn can execute through a historical direct Codex or
+Claude Code account.
 
 Every selected route must have one active upstream auth file, a clean inventory
 with no hidden API-key or plugin credential route, a stable provider identity,
@@ -125,11 +126,14 @@ part of the account login flow. Missing, changed or duplicate identities
 block selection. CLIProxyAPI config-key-only routes are ineligible until the
 proxy exposes a complete attributable inventory.
 
-The scheduler excludes known unavailable or cooling-down accounts and compares
-fresh, applicable quota by used percentage. Known capacity takes priority
-over unknown capacity. If quota cannot be compared, persisted turn counts
-provide a deterministic fairness tie-breaker, not a quota claim. Missing or
-stale usage never means zero.
+Automatic routing keeps the existing eligible account, including when its
+quota is unknown. It changes after fresh, applicable quota proves exhaustion,
+or explicit configuration makes that account ineligible. Busy accounts,
+temporary cooldowns and failed identity verification preserve the preference
+and return a visible error. At initial selection or failover, known capacity
+is compared by the most constrained applicable quota window. Unknown remains
+unknown; assigned turn counts only break otherwise equal choices. The router
+and usage API use the same full quota-window evidence.
 
 The account decision and evidence are persisted before execution. An unknown
 outcome, Stop or quota error never authorizes an implicit rerun through another

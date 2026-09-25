@@ -79,11 +79,22 @@ state directory outside the writable workspace.
 fresh local proxy observations for each ID. When available, it also reports
 per-account reasoning levels, input modalities and context maximums from the
 proxy client model API. The caller chooses a model, may restrict automatic
-routing to one provider, or may pin an account. AgentBridge then selects an
-eligible account before each turn. A change between turns starts a
-fresh Codex thread with bounded portable context and explicit omissions. The
-selected proxy endpoint remains fixed for the complete turn, including tool
-calls. Missing or stale quota stays unknown, never zero.
+routing to one provider, or may pin an account. Automatic routing keeps account
+affinity across turns, choosing another eligible account after verified quota
+exhaustion or an explicit eligibility change. A lower usage percentage on
+another account does not break affinity. Each conversation binds once to one
+native Codex session. Changing model, upstream provider or account resumes that
+same session and its native history through the selected proxy route. Missing
+or divergent session data blocks continuation; it never starts a replacement
+thread. The selected proxy endpoint remains fixed for the complete turn,
+including tool calls. Missing or stale quota stays unknown, never zero.
+
+Use `routing_mode="automatic", account_ref="Example"` to choose the initial
+account while retaining automatic affinity. `routing_mode="pinned"` keeps a
+selected account without automatic failover. `instances.update` can change
+the mode and account between turns. Temporary rate limits and busy accounts
+preserve affinity. See [account affinity and cache](docs/interface/account-affinity.md)
+for routing rules and the limits of native cache telemetry.
 
 Records predating v2 remain readable but cannot create accounts or start turns.
 Their evidence does not establish acceptance of the proxy path.
@@ -92,6 +103,9 @@ AgentBridge records requests, normalized events, usage evidence and unknown
 outcomes in SQLite. Stop is explicit cancellation. Recovery never silently
 replays work or changes accounts. Credentials, raw provider errors and private
 reasoning are not persisted. The package is independent of Fullbrain.
+`bridge.instance_delete(instance_id)` removes an ordinary conversation's local
+history, exported context archives and private runtime data after its turn and
+owned processes have ended.
 
 ## Local playground
 
@@ -113,8 +127,18 @@ resumed and removed from AgentBridge. Removal retires the local route and preser
 history; it does not revoke or delete the upstream CLIProxyAPI credential.
 Model, provider, reasoning and context controls appear when the local proxy
 reports them. Unknown usage and unavailable controls stay visible as unknown.
+Chat lets you delete a conversation from its list after confirmation.
 
 ## Interface and development
+
+AgentBridge provides [persistent conversation queues](docs/interface/message-queues.md)
+through the SDK, JSON-RPC and `agentbridge queues`. Add, list, remove and reorder
+pending messages; pause or resume dispatch; send a pending message immediately
+with explicit steering or interruption. Use `messages.create(delivery="queue")`
+or `Bridge.queue_add` to enable queued delivery. The compatibility default for
+`messages.create` remains immediate admission with a busy error when occupied.
+Queued turns run independently of the client, and their message IDs survive
+reconnection. Live provider acceptance remains separate from fixture coverage.
 
 The [interface contract](docs/interface/README.md) describes accounts, models,
 instances, messages, turns, usage and events. The Python SDK, CLI and JSON-RPC

@@ -4,8 +4,8 @@ from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from pathlib import Path
 from threading import Thread
-import textwrap
 
 import pytest
 
@@ -24,9 +24,10 @@ def management_server(state):
     class Handler(BaseHTTPRequestHandler):
         def handle_get(self):
             if self.path == "/v0/management/auth-files":
-                body = {"files": [{"name": "one.json", "provider": "codex",
+                body = {"files": [{"name": "one.json", "provider": state.get("provider", "codex"),
                     "auth_index": state["identity"], "account_type": "oauth",
                     "id_token": {"chatgpt_account_id": state["identity"]},
+                    "email": state["identity"] + "@fixture.invalid",
                     "source": "file", "runtime_only": False,
                     "status": "active", "disabled": False, "unavailable": False,
                     "cooldowns": [],
@@ -38,7 +39,7 @@ def management_server(state):
                     "vertex-api-key", "openai-compatibility")}
                 body["plugins"] = {"enabled": False}
             elif self.path == "/v0/management/auth-files/models?name=one.json":
-                body = {"models": [{"id": "lab-model"}]}
+                body = {"models": [{"id": model} for model in state.get("models", ["lab-model"])]}
             else:
                 self.send_error(404)
                 return
@@ -63,21 +64,8 @@ def management_server(state):
 
 
 def _fake_codex(path):
-    path.write_text(textwrap.dedent('''\
-        #!/usr/bin/env python3
-        import json
-        import os
-        import sys
-        prompt = sys.stdin.read()
-        account = 'alpha' if 'LAB_PROXY_ALPHA' in os.environ else 'beta'
-        resumed = 'resume' in sys.argv
-        portable = prompt.startswith('Historical conversation evidence')
-        print(json.dumps({'type': 'thread.started', 'thread_id': 'native-' + account}), flush=True)
-        print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message',
-            'text': json.dumps({'account': account, 'resumed': resumed, 'portable': portable})}}), flush=True)
-        print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1,
-            'output_tokens': 1}}), flush=True)
-    '''))
+    source = Path(__file__).parent / 'fixtures/test_codex_session_provider.py'
+    path.write_text('#!/usr/bin/env python3\n' + source.read_text())
     path.chmod(0o700)
 
 
@@ -114,25 +102,46 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
         first = bridge.message_create(instance["id"], "first")
         assert bridge.run(first["turn_id"]).wait(10)["state"] == "completed"
         assert json.loads(bridge.run(first["turn_id"]).text) == {
-            "account": "beta", "resumed": False, "portable": False}
+            "account": "beta", "resumed": False, "portable": False,
+            "model": "lab-model", "native_id": "native-beta", "previous_prompts": []}
 
         alpha["used"], beta["used"] = 5, 90
         bridge.routes.observe(bridge.account("alpha"))
+        bridge.routes.observe(bridge.account("beta"))
+        steady = bridge.message_create(instance["id"], "stay on the warm account")
+        assert bridge.run(steady["turn_id"]).wait(10)["state"] == "completed"
+        assert steady["account_ref"] == "Beta"
+        assert json.loads(bridge.run(steady["turn_id"]).text) == {
+            "account": "beta", "resumed": True, "portable": False,
+            "model": "lab-model", "native_id": "native-beta", "previous_prompts": ["first"]}
+        steady_route = [event for event in bridge.turn_events(steady["turn_id"])
+                        if event["kind"] == "route.selected"][0]["data"]
+        assert steady_route["reason"] == "affinity"
+
+        beta["used"] = 100
         bridge.routes.observe(bridge.account("beta"))
         second = bridge.message_create(instance["id"], "second")
         assert bridge.run(second["turn_id"]).wait(10)["state"] == "completed"
         assert second["account_ref"] == "Alpha"
         assert json.loads(bridge.run(second["turn_id"]).text) == {
-            "account": "alpha", "resumed": False, "portable": True}
+            "account": "alpha", "resumed": True, "portable": False,
+            "model": "lab-model", "native_id": "native-beta",
+            "previous_prompts": ["first", "stay on the warm account"]}
         selected = [event for event in bridge.turn_events(second["turn_id"])
                     if event["kind"] == "route.selected"]
         assert selected[0]["data"]["account_changed"] is True
-        assert selected[0]["data"]["portable_context_used"] is True
+        assert selected[0]["data"]["portable_context_used"] is False
+        assert bridge.instance_get(instance["id"])["native_session_id"] == "native-beta"
+        assert selected[0]["data"]["affinity_break_reason"] == "quota_exhausted"
 
+        beta["used"] = 0
+        bridge.routes.observe(bridge.account("beta"))
         third = bridge.message_create(instance["id"], "third")
         assert bridge.run(third["turn_id"]).wait(10)["state"] == "completed"
         assert json.loads(bridge.run(third["turn_id"]).text) == {
-            "account": "alpha", "resumed": True, "portable": False}
+            "account": "alpha", "resumed": True, "portable": False,
+            "model": "lab-model", "native_id": "native-beta",
+            "previous_prompts": ["first", "stay on the warm account", "second"]}
 
         original_admit = bridge.store.admit
         contested = {"occurred": False}
@@ -146,11 +155,13 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
             return original_admit(*args, **kwargs)
 
         bridge.store.admit = admit_with_competing_turn
-        fourth = bridge.message_create(instance["id"], "fourth")
+        with pytest.raises(BridgeError) as busy:
+            bridge.message_create(instance["id"], "fourth")
         bridge.store.admit = original_admit
-        assert bridge.run(fourth["turn_id"]).wait(10)["state"] == "completed"
+        assert busy.value.code == "account_busy"
         assert contested["occurred"] is True
-        assert fourth["account_ref"] == "Beta"
+        assert bridge.store.routing(instance["id"])["affinity_account_id"] == "alpha"
+        assert bridge.store.session_run_count(instance["id"]) == 4
         bridge.store.finish("blocking-turn", "cancelled")
 
         pinned = bridge.instance_create(model="lab-model", account_ref="Alpha",

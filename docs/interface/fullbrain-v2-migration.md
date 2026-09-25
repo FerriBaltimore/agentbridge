@@ -15,8 +15,8 @@ not evidence that every listed optional parameter is usable.
 | --- | --- | --- |
 | `contract_version == "v1"`; pass `engine` to discovery | Require `"v2"`; `execution_engine` is always `codex`; discovery rejects `engine` | Replace the version gate and request builder; keep provider as upstream account data |
 | Choose among execution engines | Choose an exact model from `models.list`; upstream providers are `codex`, `claude`, `grok` | Replace engine tabs and engine-specific settings with model controls returned by the SDK |
-| Bind every chat to `engine_account_ref` | Create an automatic instance by model, optionally filtered by `provider`; `account_ref` explicitly pins an account | Store routing policy separately from the actual account selected for each turn |
-| A chat's account never changes | Automatic routing can change account between turns | Render the actual `messages.create.account_ref`, `turns.get.account_ref` and `route.selected` evidence; preserve a stable route during one turn |
+| Bind every chat to `engine_account_ref` | Create an automatic instance by model, optionally filtered by `provider`; an account alone pins, while `routing_mode="automatic"` plus `account_ref` sets initial affinity | Store routing policy separately from the actual account selected for each turn |
+| A chat's account never changes | Automatic routing keeps affinity until confirmed exhaustion or ineligibility; the native Codex session stays fixed across account changes | Keep the same `instance_id`; render each turn's actual account and `route.selected` evidence |
 | Request per-engine model catalogue | `models.list` aggregates exact IDs and candidate/observed account refs | Remove `engine` from the API call; treat configured and observed models as routing evidence, not entitlement |
 | Native account login, device or callback relay | One GrantBridge-mediated local CLIProxyAPI browser flow for every new account | Use `accounts.login.start/status/check/complete/cancel`; no direct provider login |
 | Codex-specific quota parser | `accounts.usage`/`usage.get` return source, support, staleness, reason and optional `quota_windows` | Show missing usage as unknown; keep turn tokens separate from account quota |
@@ -48,10 +48,12 @@ identify work to review, not instructions for AgentBridge to edit that repo.
    evidence as historical data. Do not reinterpret a v1 `engine_account_ref`
    as a v2 proxy account or silently resume a v1 instance on another account.
 2. Add a v2 conversation routing policy: exact model, automatic or pinned mode,
-   optional provider filter, and optional pinned `account_ref`. Keep the
-   selected account as **turn evidence**, not the conversation's immutable
-   owner. A provider filter applies when the instance is created; changing that
-   policy requires a new instance or an explicit linked successor.
+   optional provider filter, and optional preferred or pinned `account_ref`.
+   Keep the actual account as **turn evidence**, separate from the automatic
+   affinity. Routing mode, account, model and provider filter can change on an
+   existing instance between turns through `instances.update`.
+   Keep one `instance_id` per chat; its native Codex session binding is
+   immutable after the initial thread is established.
 3. Keep the Fullbrain tenant boundary around one private AgentBridge state root
    and worker. Do not share that root, its supervisor or its local sidecars
    across Fullbrain users. Keep Fullbrain's user-visible account authorization
@@ -110,12 +112,17 @@ authorization URL by itself does not verify or create an account.
 ## Turn behavior and recovery
 
 Create a v2 instance with `model` and `workspace_path`. Omit `account_ref` for
-automatic routing; optionally set `provider` to limit candidates. A pinned
-instance supplies `account_ref` and cannot also supply `provider`. The routing
-policy can change through `instances.update(model?, provider?, expected_version?)`
+automatic least-used initial selection; optionally set `provider` to limit
+candidates. Supplying an account alone pins it. Explicit
+`routing_mode="automatic"` plus `account_ref` sets initial affinity; the
+provider filter must match. Pinned creation cannot also supply `provider`.
+The routing policy can change through
+`instances.update(model?, provider?, routing_mode?, account_ref?, expected_version?)`
 between turns. Omitting `provider` preserves the filter, while explicit `null`
-clears it; supplying it on a pinned instance converts that instance to
-automatic routing. Automatic selection occurs before every admitted turn.
+clears it; supplying a provider on a pinned instance converts it to automatic
+routing unless a mode is explicit. An account alone pins; explicit automatic
+mode plus an account changes affinity. Automatic selection occurs before every
+admitted turn but keeps the eligible affinity until confirmed exhaustion.
 Send supported effort, numeric `context_window`, permissions,
 sandbox and timeout **per turn** with `messages.create`. Advanced instance
 defaults, `allowed_tools`, `max_budget`, `provider_options` and arbitrary
@@ -123,16 +130,24 @@ metadata are not usable in the current adapter.
 
 Record the accepted turn's actual account. `route.selected` contains route
 evidence including `account_changed`, `portable_context_used` and
-`context_omitted_count`. Surface omissions when account changes. A model shown
-as `proxy_observed` only has local catalogue evidence; live entitlement is
-still unverified. A missing quota window is unknown capacity, never free
-capacity.
+`context_omitted_count`. Account changes retain the same native Codex session;
+they do not require portable context. Surface explicit transfer omissions
+separately. A model shown as `proxy_observed` only has local catalogue
+evidence; live entitlement is still unverified. A missing quota window is
+unknown capacity, never free capacity.
 
 After a disconnect, inspect the same instance, turn and event cursor. Reuse
 the original idempotency key when resubmitting a request whose acceptance is
 uncertain. Do not automatically rerun a turn with an unknown outcome, transfer
 it to another account, or replay its tools. Stop is an explicit cancellation.
 The host decides whether a new turn is appropriate after inspecting recovery.
+Native session errors must stay visible: the host must not replace the chat's
+instance or session to hide missing or divergent history. If an older chat
+restored thread A after a later thread B failed, the stored and latest
+observed identities differ and admission returns `native_session_diverged`.
+Keep that failure visible pending explicit review and recovery or a separate
+transfer; do not choose either thread automatically. The SDK does not merge
+split histories or reconstruct their native state retroactively.
 
 ## Acceptance before enabling a provider
 

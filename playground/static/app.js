@@ -19,6 +19,15 @@ const state = {
 const titles = { overview: 'Overview', chat: 'Chat', accounts: 'Accounts', activity: 'Activity' };
 let refreshPromise = null;
 let usageExpiryTimer = null;
+const usageRefreshes = new Map();
+const usageAttemptAt = new Map();
+const usageAttemptCount = new Map();
+const usageEpochs = new Map();
+const USAGE_RETRY_COOLDOWN_MS = 30_000;
+
+function accountPresent(ref) {
+  return state.accounts.some((account) => account.account_ref === ref);
+}
 
 function navigate(view) {
   if (!Object.hasOwn(titles, view)) return;
@@ -56,18 +65,28 @@ function renderAccountSummaries() {
     statuses: state.statuses,
     onRemove: openRemove,
     onChanged: refreshAll,
+    onUsageRefresh: refreshAccountUsage,
   });
 }
 
 function scheduleUsageExpiry() {
   if (usageExpiryTimer !== null) clearTimeout(usageExpiryTimer);
   usageExpiryTimer = null;
-  const expiry = nextUsageExpiry(state.usage.values());
-  if (expiry === null) return;
+  const deadlines = new Map();
+  for (const [ref, snapshot] of state.usage) {
+    if (!accountPresent(ref)) continue;
+    const expiry = nextUsageExpiry([snapshot]);
+    if (expiry !== null) deadlines.set(ref, expiry);
+  }
+  if (!deadlines.size) return;
+  const expiry = Math.min(...deadlines.values());
   usageExpiryTimer = setTimeout(() => {
     usageExpiryTimer = null;
-    if (refreshPromise) return;
     renderAccountSummaries();
+    const now = Date.now();
+    for (const [ref, deadline] of deadlines) {
+      if (deadline <= now && accountPresent(ref)) void refreshAccountUsage(ref, { force: true });
+    }
     scheduleUsageExpiry();
   }, Math.min(2_147_483_647, Math.max(1, expiry - Date.now() + 25)));
 }
@@ -84,9 +103,69 @@ function render() {
   scheduleUsageExpiry();
 }
 
+function requestAccountUsage(ref) {
+  const pending = usageRefreshes.get(ref);
+  if (pending) return pending;
+  const epoch = usageEpochs.get(ref) || 0;
+  usageAttemptAt.set(ref, Date.now());
+  usageAttemptCount.set(ref, (usageAttemptCount.get(ref) || 0) + 1);
+  const request = Promise.resolve().then(() => api.accountUsage(ref, true)).catch((error) => ({
+    supported: false, stale: true, reason: error?.code || 'observation_unavailable',
+  })).then((snapshot) => {
+    if (accountPresent(ref) && (usageEpochs.get(ref) || 0) === epoch) {
+      state.usage.set(ref, snapshot);
+      if (!refreshPromise) {
+        renderAccountSummaries();
+        scheduleUsageExpiry();
+      }
+    }
+    return snapshot;
+  }).finally(() => {
+    if (usageRefreshes.get(ref) === request) usageRefreshes.delete(ref);
+  });
+  usageRefreshes.set(ref, request);
+  return request;
+}
+
+function refreshAccountUsage(ref, { force = false } = {}) {
+  if (!accountPresent(ref)) return Promise.resolve(null);
+  const pending = usageRefreshes.get(ref);
+  if (pending) return pending;
+  if (refreshPromise) {
+    const previousCount = usageAttemptCount.get(ref);
+    return refreshPromise.catch(() => null).then(() => {
+      if (!accountPresent(ref)) return null;
+      if (usageAttemptCount.get(ref) !== previousCount) return state.usage.get(ref);
+      const active = usageRefreshes.get(ref);
+      if (active) return active;
+      const lastAttempt = usageAttemptAt.get(ref);
+      if (!force && lastAttempt !== undefined
+          && Date.now() - lastAttempt < USAGE_RETRY_COOLDOWN_MS) {
+        return state.usage.get(ref);
+      }
+      return requestAccountUsage(ref);
+    });
+  }
+  const lastAttempt = usageAttemptAt.get(ref);
+  if (!force && lastAttempt !== undefined && Date.now() - lastAttempt < USAGE_RETRY_COOLDOWN_MS) {
+    return Promise.resolve(state.usage.get(ref));
+  }
+  return requestAccountUsage(ref);
+}
+
 async function loadAccountObservations(accounts) {
   const statuses = new Map();
-  const usage = new Map();
+  const refs = new Set(accounts.map((account) => account.account_ref));
+  const knownRefs = new Set([...state.usage.keys(), ...usageRefreshes.keys(),
+    ...usageAttemptAt.keys(), ...usageAttemptCount.keys()]);
+  for (const ref of knownRefs) {
+    if (refs.has(ref)) continue;
+    state.usage.delete(ref);
+    usageRefreshes.delete(ref);
+    usageAttemptAt.delete(ref);
+    usageAttemptCount.delete(ref);
+    usageEpochs.set(ref, (usageEpochs.get(ref) || 0) + 1);
+  }
   await Promise.all(accounts.map(async (account) => {
     const ref = account.account_ref;
     try {
@@ -95,14 +174,9 @@ async function loadAccountObservations(accounts) {
     } catch (error) {
       statuses.set(ref, { error: describeError(error) });
     }
-    try {
-      usage.set(ref, await api.accountUsage(ref, true));
-    } catch (error) {
-      usage.set(ref, { supported: false, stale: true, reason: error.code || 'observation_unavailable' });
-    }
+    await requestAccountUsage(ref);
   }));
   state.statuses = statuses;
-  state.usage = usage;
 }
 
 async function refreshAll() {

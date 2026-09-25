@@ -9,6 +9,26 @@ from agentbridge.workspace_policy import validate_execution_workspace
 from fixtures.test_proxy_account_fixture import seed_authenticated_proxy_account
 
 
+def test_private_state_cannot_be_exposed_as_a_system_dependency(tmp_path, monkeypatch):
+    import agentbridge.workspace_policy as policy
+    system = tmp_path / 'synthetic-system'
+    monkeypatch.setattr(policy, '_EXPOSED_SYSTEM_ROOTS', (system,))
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    bridge = Bridge(system / 'private-state')
+    seed_authenticated_proxy_account(bridge.store, Account(
+        'fixture', 'codex', provider='codex', supported_models=('fixture-model',),
+        proxy_base_url='http://127.0.0.1:9/v1', key_env='FIXTURE_KEY',
+        management_key_env='FIXTURE_MANAGEMENT'))
+    try:
+        with pytest.raises(BridgeError) as error:
+            bridge.instance_create(model='fixture-model', workspace_path=workspace)
+        assert error.value.code == 'unsafe_store'
+        assert bridge.sessions() == []
+    finally:
+        bridge.close()
+
+
 def test_instance_creation_rejects_private_state_before_routing(tmp_path):
     bridge = Bridge(tmp_path / 'state')
     seed_authenticated_proxy_account(bridge.store, Account(

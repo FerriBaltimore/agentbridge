@@ -14,6 +14,7 @@ from .turn_stream import last_event_seq, serve_turn_stream
 
 MAX_BODY_BYTES = 64 * 1024
 MAX_PATH_BYTES = 4096
+API_REVISION = 2
 STATIC_ROOT = Path(__file__).parent / 'static'
 
 
@@ -121,7 +122,7 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                       404 if error.code in {'not_found', 'account_not_found', 'instance_not_found',
                                             'authentication_attempt_not_found'} else
                       409 if error.code in {'busy', 'authentication_in_progress',
-                                            'idempotency_conflict'} else 400)
+                                            'idempotency_conflict', 'playground_update_required'} else 400)
             self._json(status, {'error': {'code': error.code, 'message': str(error),
                                           'data': error.safe_data()}})
         except (TypeError, ValueError, KeyError):
@@ -140,6 +141,12 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
     def _mutation_guard(self):
         if self.headers.get('X-AgentBridge-Playground') != '1':
             raise BridgeError('forbidden', 'The local playground header is required.')
+        path = urlsplit(self.path).path
+        if (path == '/api/instances' or path.startswith('/api/instances/')) and (
+                self.headers.get('X-AgentBridge-API-Revision') != str(API_REVISION)):
+            raise BridgeError('playground_update_required',
+                              'The playground page and server are incompatible. '
+                              'Restart the playground server and reload this page before trying again.')
         if self.command == 'POST' and self.headers.get('Content-Type', '').split(';', 1)[0].strip() != 'application/json':
             raise BridgeError('invalid_request', 'Send a JSON request body.')
 
@@ -161,7 +168,7 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
     def _dispatch(self, method, parts, query, body):
         bridge = self.server.bridge
         if parts == ['api', 'meta'] and method == 'GET':
-            return {'workspace_path': self.server.workspace_path}
+            return {'workspace_path': self.server.workspace_path, 'api_revision': API_REVISION}
         if parts == ['api', 'capabilities'] and method == 'GET':
             return bridge.capabilities()
         if parts == ['api', 'accounts'] and method == 'GET':
@@ -219,12 +226,16 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
         if parts == ['api', 'instances'] and method == 'GET':
             return bridge.instances(limit=100)
         if parts == ['api', 'instances'] and method == 'POST':
-            values = _fields(body, ('model',), ('account_ref', 'provider',
-                                               'workspace_path', 'idempotency_key'))
+            values = _fields(body, ('model',), ('account_ref', 'provider', 'routing_mode',
+                                               'workspace_path', 'idempotency_key',
+                                               'permission_mode', 'sandbox_mode'))
             values.setdefault('workspace_path', self.server.workspace_path)
             return bridge.instance_create(**values)
+        if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'DELETE':
+            return bridge.instance_delete(parts[2])
         if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'POST':
-            values = _fields(body, ('expected_version',), ('model', 'provider'))
+            values = _fields(body, ('expected_version',), ('model', 'provider', 'routing_mode',
+                              'account_ref', 'permission_mode', 'sandbox_mode'))
             return bridge.instance_update(parts[2], **values)
         if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'GET':
             instance = bridge.instance_get(parts[2], include_last_turn=True)
@@ -235,14 +246,27 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[:2] == ['api', 'instances'] and method == 'GET':
             if parts[3] == 'messages':
                 return bridge.messages(parts[2], limit=200)
+            if parts[3] == 'queue':
+                return bridge.queue_list(parts[2], limit=_query_number(query, 'limit', 1000))
             if parts[3] == 'events':
                 return bridge.instance_events(parts[2], after_seq=_query_number(query, 'after_seq', 0),
                                               limit=200)
         if len(parts) == 4 and parts[:2] == ['api', 'instances'] and parts[3] == 'messages' and method == 'POST':
             values = _fields(body, ('content',), ('model', 'effort', 'context_window',
                               'permission_mode', 'sandbox_mode', 'timeout_ms',
-                              'idempotency_key'))
+                              'idempotency_key', 'delivery', 'expected_turn_id'))
             return bridge.message_create(parts[2], **values)
+        if len(parts) == 5 and parts[:2] == ['api', 'instances'] and parts[3] == 'queue' and method == 'POST':
+            action = parts[4]
+            if action in {'pause', 'resume'}:
+                values = _fields(body, (), ('expected_version',))
+                return getattr(bridge, 'queue_' + action)(parts[2], **values)
+            if action in {'move', 'delete', 'dispatch'}:
+                required = ('message_id', 'position') if action == 'move' else (
+                    ('message_id', 'mode') if action == 'dispatch' else ('message_id',))
+                optional = ('expected_version', 'expected_turn_id') if action == 'dispatch' else ('expected_version',)
+                values = _fields(body, required, optional)
+                return getattr(bridge, 'queue_' + action)(parts[2], **values)
         if len(parts) == 3 and parts[:2] == ['api', 'turns'] and method == 'GET':
             return bridge.turn(parts[2], include_usage=True, include_error=True)
         if len(parts) == 4 and parts[:2] == ['api', 'turns'] and parts[3] == 'events' and method == 'GET':

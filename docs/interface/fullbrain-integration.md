@@ -21,14 +21,18 @@ not call GrantBridge or a provider CLI directly.
    model support as routing information, not verified entitlement. Use
    `accounts.list` to show safe account labels and observed status.
 4. Call `instances.create` with the selected model and an idempotency key.
-   Supply `account_ref` only when the user explicitly pins a configured account.
+   An account alone pins; `routing_mode="automatic"` plus `account_ref` sets
+   the initial preferred account. The routing mode and preferred account can
+   change between turns with `instances.update`.
    For automatic routes, send the pending deletion account references as
    `excluded_account_refs` on creation and every `messages.create` call. Pin
    that list in the admitted turn so a retry uses the same route exclusions.
 
-Persist `instance_id` and `routing_mode`. An automatic instance reports its
-current `account_ref`; it may change between turns. Each accepted turn records
-its actual account route. A pinned instance stays on the requested account.
+Persist `instance_id`, `routing_mode` and `affinity_account_ref` for automatic
+routing. Its `account_ref` identifies the selected or admitted account,
+including after a failed turn. Each accepted turn records its actual account
+route. A pinned instance stays on the requested account. The native session
+belongs to the conversation, independently of those account references.
 
 ## Conversation loop
 
@@ -39,8 +43,12 @@ Use `turns.get` for a complete turn and `turns.events` when a single-turn view
 is needed. Do not use `follow=true` in the first integration.
 Record the account on each accepted turn and display route changes when useful.
 AgentBridge fixes one route for the entire turn, including tool calls. On an
-automatic account switch it starts a fresh Codex thread with bounded portable
-context and reports omissions; Fullbrain should surface those omissions.
+automatic account switch it resumes the same native Codex session. Model and
+provider changes also preserve this binding and its native history. Fullbrain
+must retain the same `instance_id` for the chat and use `instances.update`
+for route changes. Missing or divergent native state is an explicit failure,
+never a reason to create a replacement instance or thread silently. Explicit
+transfer creates a separate conversation and reports portable-context omissions.
 The v2 `messages.create` accepts a bounded `context_package` and operation-
 bound Unix-socket `mcp` descriptor. Fullbrain must test the selected package,
 facade grant/revocation and actual worker sandbox together before claiming

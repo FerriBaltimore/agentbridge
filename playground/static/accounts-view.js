@@ -12,6 +12,7 @@ let accountUsageRows = new Map();
 let accountStatuses = new Map();
 let removeAccount = null;
 let accountsChanged = null;
+let refreshUsage = null;
 let accountPage = 0;
 let accountPageSize = 6;
 let paginationReady = false;
@@ -90,11 +91,11 @@ function accountUsage(account, snapshot) {
   const windows = usageWindows(snapshot);
   const wrapper = node('div', 'account-table-usage');
   if (!windows.length) {
-    wrapper.append(node('span', 'usage-unknown', 'Unknown usage'));
+    wrapper.append(node('span', 'usage-unknown', 'Current usage unavailable'));
     wrapper.title = usageUnavailable(snapshot);
-    return wrapper;
+  } else {
+    for (const window of windows.slice(0, 2)) wrapper.append(usageWindowRow(window, { compact: true }));
   }
-  for (const window of windows.slice(0, 2)) wrapper.append(usageWindowRow(window, { compact: true }));
   const details = node('button', 'account-usage-open', windows.length > 2
     ? `View ${windows.length} windows` : 'Usage details');
   details.type = 'button';
@@ -108,45 +109,31 @@ function accountUsage(account, snapshot) {
 
 function renderUsageDialog(account, snapshot) {
   const windows = usageWindows(snapshot);
-  const current = windows.filter((window) => !window.stale);
-  const older = windows.filter((window) => window.stale);
-  const previousOlderOpen = byId('account-usage-dialog').open
-    ? byId('account-usage-content').querySelector('.usage-older-section')?.open : undefined;
   byId('account-usage-heading').textContent = `Usage for ${account.name || account.account_ref}`;
-  byId('account-usage-subtitle').textContent = `${account.provider || 'Historical'} · ${current.length} current · ${older.length} older observation${older.length === 1 ? '' : 's'}`;
+  byId('account-usage-subtitle').textContent = `${account.provider || 'Historical'} · Provider-reported quota windows`;
   const content = clear(byId('account-usage-content'));
   if (!windows.length) {
-    content.append(node('p', 'account-detail-note', usageUnavailable(snapshot)));
+    const empty = node('div', 'usage-dialog-empty');
+    empty.append(node('strong', '', 'Current usage unavailable'),
+      node('p', '', usageUnavailable(snapshot)));
+    content.append(empty);
     return;
   }
-  let help = 'Each bar is a provider-reported quota window. Its duration and reset appear below the bar.';
+  let help = 'Each bar represents a separate provider quota window. Percentages are not combined.';
   if (account.provider === 'codex') {
     help += ' Primary and secondary name window slots, not account rankings.';
     const namedPool = windows.map((window) =>
       /^(.+) · (?:primary|secondary)$/i.exec(window.display_label)?.[1]).find(Boolean);
     if (namedPool) help += ` ${namedPool} is a provider-reported quota group, not another account.`;
   }
-  const explainer = node('p', 'usage-explainer', help);
-  content.append(explainer);
-  if (current.length) {
-    const section = node('section', 'usage-window-section');
-    section.append(node('h3', '', `Current windows · ${current.length}`));
-    for (const window of current) section.append(usageWindowRow(window));
-    content.append(section);
-  }
-  if (older.length) {
-    const section = node('details', 'usage-older-section');
-    section.open = previousOlderOpen ?? !current.length;
-    section.append(node('summary', '', `Older observations · ${older.length}`));
-    for (const window of older) section.append(usageWindowRow(window));
-    content.append(section);
-  }
+  const section = node('section', 'usage-window-section');
+  section.append(node('h3', '', `Current windows · ${windows.length}`));
+  for (const window of windows) section.append(usageWindowRow(window));
+  content.append(section);
+  content.append(node('p', 'usage-dialog-note', help));
   if (snapshot?.refresh_reason) {
     content.append(node('p', 'account-detail-note',
-      `Current quota refresh unavailable (${String(snapshot.refresh_reason).replaceAll('_', ' ')}). Showing observed usage.`));
-  }
-  if (snapshot?.reason && windows.every((window) => window.stale)) {
-    content.append(node('p', 'account-detail-note', `Latest refresh: ${String(snapshot.reason).replaceAll('_', ' ')}.`));
+      'The latest direct quota check did not complete. Showing only current readings.'));
   }
 }
 
@@ -155,6 +142,7 @@ function openUsage(account, snapshot) {
   renderUsageDialog(account, snapshot);
   byId('account-usage-dialog').showModal();
   byId('account-usage-close').focus();
+  if (!usageWindows(snapshot).length && refreshUsage) refreshUsage(account.account_ref);
 }
 
 function ensureUsageDialog() {
@@ -283,7 +271,7 @@ function renderAccountRows() {
   }
 }
 
-export function renderAccounts(accounts, usage, { statuses, onRemove, onChanged }) {
+export function renderAccounts(accounts, usage, { statuses, onRemove, onChanged, onUsageRefresh }) {
   ensureModelsDialog();
   ensureUsageDialog();
   setupPagination();
@@ -292,6 +280,7 @@ export function renderAccounts(accounts, usage, { statuses, onRemove, onChanged 
   accountStatuses = statuses;
   removeAccount = onRemove;
   accountsChanged = onChanged;
+  refreshUsage = onUsageRefresh;
   const summary = clear(byId('accounts-summary'));
   summary.hidden = !accountRows.length;
   byId('accounts-removal-note').hidden = !accountRows.length;

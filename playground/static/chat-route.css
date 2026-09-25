@@ -1,0 +1,66 @@
+.route-primary-fields {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e4 transparent;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+.route-primary-fields > label, .route-mode-field {
+  display: grid;
+  grid-template-rows: 24px 34px;
+  align-items: center;
+  flex: 1 1 104px;
+  min-width: 96px;
+  gap: 4px;
+}
+.route-primary-fields > .route-provider-field { flex-basis: 98px; min-width: 82px; }
+.route-primary-fields > .route-mode-field { flex: 0 0 116px; }
+.route-primary-fields > .route-account-field { flex: 1.5 1 196px; min-width: 150px; }
+.route-primary-fields > .route-model-field { flex: 1.4 1 154px; min-width: 128px; }
+.route-primary-fields > #context-field { flex-basis: 150px; min-width: 118px; }
+.route-field-heading { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.route-info-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #7183a3;
+  font: 700 11px Georgia, serif;
+}
+#routing-mode-help::before { content: ''; position: absolute; width: 14px; height: 14px; border: 1px solid currentColor; border-radius: 50%; }
+.route-info-button svg { width: 14px; height: 14px; }
+.route-info-button:hover, .route-info-button[aria-expanded="true"] { color: var(--accent); background: #eef2ff; }
+.route-info-popover {
+  position: fixed;
+  inset: auto;
+  width: min(370px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  margin: 0;
+  padding: 17px;
+  overflow: auto;
+  border: 1px solid #dce4f2;
+  border-radius: 12px;
+  background: #fff;
+  color: #52627b;
+  box-shadow: 0 12px 36px rgba(27, 43, 76, .18);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.route-info-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #263650; font-size: 12px; }
+.route-info-popover p { margin: 10px 0; }
+.route-info-popover .route-account-help { display: block; padding-top: 10px; border-top: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .route-primary-fields > label, .route-mode-field { grid-template-rows: 24px 31px; }
+}
