@@ -1,8 +1,9 @@
 # Message queue acceptance
 
-Checks on Linux x86_64, 2026-09-25. All execution checks use isolated synthetic
-accounts and deterministic local provider subprocesses. They never discover or
-use real account credentials.
+Checks on Linux x86_64, 2026-09-25, for the AgentBridge 2.3.3 queue snapshot.
+All execution checks use isolated synthetic accounts and deterministic local
+provider subprocesses. They never discover or use real account credentials.
+This record does not establish acceptance of later 2.3.4 source changes.
 
 ## Contract and coverage
 
@@ -46,14 +47,15 @@ steer and interrupt through the installed SDK, imported outside the checkout.
 They verify cancellation of the replaced turn and completion of queued work.
 
 The complete suite used an immutable copy because other tasks were editing the
-shared checkout. Its Python source matches both the delivered wheel and the
-repository `.venv`. Two skipped tests require
+shared checkout. At validation time, its Python source matched the 2.3.3 wheel
+and the repository `.venv` installation for that snapshot. Two skipped tests
+require
 `AGENTBRIDGE_CODEX_ACCEPTANCE_BIN`; the third expects a sibling GrantBridge
 checkout, which is absent beside the temporary source copy.
 The skipped GrantBridge fixture passed separately in the original checkout
 (`test_grantbridge_proxy_adapter_starts_and_polls_a_local_fixture`: 1 passed).
 
-The delivered wheel is
+The wheel validated for that snapshot is
 `ferran_agentbridge-2.3.3-py3-none-manylinux_2_28_x86_64.whl`, 179,760,345 bytes,
 SHA-256 `ea5a8c943265ff35dad7506ab9dd266fced2cb850cf628f3f83804ce0d001042`.
 Its Python source matches the validated source snapshot. Bundled versions are
