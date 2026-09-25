@@ -199,10 +199,16 @@ class Store(AccountResetStoreMixin, InstanceDeletionStoreMixin, AccountPauseStor
         row['evaluation'] = evaluation is not None
         return row
 
-    def account_observation(self, account_id, source, status, data, *, observed_at=None):
+    def account_observation(self, account_id, source, status, data, *, observed_at=None,
+                            expected_reset_generation=None):
         with self.connect() as db:
+            if expected_reset_generation is not None:
+                db.execute('BEGIN IMMEDIATE')
+                if not self._reset_read_current(db, account_id, expected_reset_generation):
+                    return False
             db.execute('INSERT INTO account_observations(account_id,observed_at,source,status,data) VALUES (?,?,?,?,?)',
                        (account_id, observed_at or time.time(), source, status, dumps(data)))
+        return True
 
     def latest_account_observation(self, account_id):
         with self.connect() as db:
@@ -224,10 +230,16 @@ class Store(AccountResetStoreMixin, InstanceDeletionStoreMixin, AccountPauseStor
             ''').fetchall()
         return [dict(row) for row in rows]
 
-    def usage_observation(self, account_id, source, scope, data, *, stale=False, observed_at=None):
+    def usage_observation(self, account_id, source, scope, data, *, stale=False,
+                          observed_at=None, expected_reset_generation=None):
         with self.connect() as db:
+            if expected_reset_generation is not None:
+                db.execute('BEGIN IMMEDIATE')
+                if not self._reset_read_current(db, account_id, expected_reset_generation):
+                    return False
             db.execute('INSERT INTO usage_observations(account_id,observed_at,source,scope,stale,data) VALUES (?,?,?,?,?,?)',
                        (account_id, observed_at or time.time(), source, scope, int(stale), dumps(data)))
+        return True
 
     def latest_usage_observation(self, account_id, scope='account', *, source=None):
         with self.connect() as db:

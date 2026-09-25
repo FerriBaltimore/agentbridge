@@ -17,8 +17,12 @@ def migrate_v12(db, version):
             observation_ref TEXT NOT NULL UNIQUE,
             binding_fingerprint TEXT NOT NULL,
             identity_fingerprint TEXT NOT NULL,
+            generation INTEGER NOT NULL,
             observed_at REAL NOT NULL,
             data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS account_reset_generations(
+            account_id TEXT PRIMARY KEY,
+            generation INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS account_reset_attempts(
             idempotency_key TEXT PRIMARY KEY,
             account_id TEXT NOT NULL,
@@ -51,7 +55,40 @@ def _row(value):
     return result
 
 
+def _generation(db, account_id):
+    row = db.execute('SELECT generation FROM account_reset_generations WHERE account_id=?',
+                     (account_id,)).fetchone()
+    return row['generation'] if row is not None else 0
+
+
+def _advance_generation(db, account_id):
+    db.execute('INSERT INTO account_reset_generations(account_id,generation) VALUES (?,1) '
+               'ON CONFLICT(account_id) DO UPDATE SET generation=generation+1',
+               (account_id,))
+
+
 class AccountResetStoreMixin:
+    def reset_generation(self, account_id):
+        with self.connect() as db:
+            return _generation(db, account_id)
+
+    def _reset_read_current(self, db, account_id, generation):
+        return (_generation(db, account_id) == generation and
+                db.execute("SELECT 1 FROM account_reset_attempts WHERE account_id=? "
+                           "AND state='pending'", (account_id,)).fetchone() is None)
+
+    def reset_credit_state(self, account_id):
+        """Read credit, attempt and generation from one SQLite snapshot."""
+        with self.connect() as db:
+            db.execute('BEGIN')
+            observation = db.execute('SELECT * FROM account_reset_observations WHERE account_id=?',
+                                     (account_id,)).fetchone()
+            pending = db.execute("SELECT * FROM account_reset_attempts WHERE account_id=? "
+                                 "AND state='pending'", (account_id,)).fetchone()
+            generation = _generation(db, account_id)
+        return {'observation': _row(observation), 'pending': _row(pending),
+                'generation': generation}
+
     def pending_reset_account_ids(self):
         with self.connect() as db:
             return {row['account_id'] for row in db.execute(
@@ -71,19 +108,27 @@ class AccountResetStoreMixin:
                              (account_id,)).fetchone()
         return _row(row)
 
-    def expire_reset_observation(self, account_id):
+    def expire_reset_observation(self, account_id, expected_generation, observation_ref):
         """A failed refresh cannot leave the previous credit read redeemable."""
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            db.execute('UPDATE account_reset_observations SET observed_at=0 WHERE account_id=?',
-                       (account_id,))
+            if not self._reset_read_current(db, account_id, expected_generation):
+                return False
+            if observation_ref is None:
+                return False
+            changed = db.execute('UPDATE account_reset_observations SET observed_at=0 '
+                                 'WHERE account_id=? AND observation_ref=? AND generation=?',
+                                 (account_id, observation_ref, expected_generation))
+            return changed.rowcount == 1
 
-    def save_reset_observation(self, account_id, binding, data):
+    def save_reset_observation(self, account_id, binding, data, expected_generation):
         """Store only bounded normalized credit facts after verifying the login binding."""
         observed_at = time.time()
         observation_ref = uuid4().hex
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            if not self._reset_read_current(db, account_id, expected_generation):
+                return None
             if db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
                           (account_id,)).fetchone():
                 raise BridgeError('account_retired', 'The selected proxy account was retired.')
@@ -92,14 +137,15 @@ class AccountResetStoreMixin:
             if current is None or any(current[key] != binding[key] for key in current.keys()):
                 raise BridgeError('proxy_binding_changed', 'The proxy account binding changed.')
             db.execute('INSERT INTO account_reset_observations('
-                       'account_id,observation_ref,binding_fingerprint,identity_fingerprint,observed_at,data) '
-                       'VALUES (?,?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET '
+                       'account_id,observation_ref,binding_fingerprint,identity_fingerprint,generation,observed_at,data) '
+                       'VALUES (?,?,?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET '
                        'observation_ref=excluded.observation_ref,'
                        'binding_fingerprint=excluded.binding_fingerprint,'
                        'identity_fingerprint=excluded.identity_fingerprint,'
-                       'observed_at=excluded.observed_at,data=excluded.data',
+                       'generation=excluded.generation,observed_at=excluded.observed_at,'
+                       'data=excluded.data',
                        (account_id, observation_ref, binding['binding_fingerprint'],
-                        binding['identity_fingerprint'], observed_at,
+                        binding['identity_fingerprint'], expected_generation, observed_at,
                         json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(',', ':'))))
         return self.reset_observation(account_id)
 
@@ -162,6 +208,8 @@ class AccountResetStoreMixin:
                                   (account_id,)).fetchone()
             if observed is None or observed['observation_ref'] != observation_ref:
                 raise BridgeError('reset_observation_changed', 'Refresh available reset credits before redeeming.')
+            if observed['generation'] != _generation(db, account_id):
+                raise BridgeError('reset_observation_changed', 'Refresh available reset credits before redeeming.')
             age = time.time() - observed['observed_at']
             if not 0 <= age < maximum_age:
                 raise BridgeError('reset_observation_stale', 'Refresh available reset credits before redeeming.')
@@ -187,6 +235,7 @@ class AccountResetStoreMixin:
                        'VALUES (?,?,?,?,?,?,\'pending\',?,?,?)',
                        (idempotency_key, account_id, observation_ref, credit_id,
                         binding['binding_fingerprint'], binding['identity_fingerprint'], now, now, now))
+            _advance_generation(db, account_id)
             row = db.execute('SELECT * FROM account_reset_attempts WHERE idempotency_key=?',
                              (idempotency_key,)).fetchone()
         return {**_row(row), 'started_now': True}
@@ -216,6 +265,7 @@ class AccountResetStoreMixin:
             db.execute("UPDATE account_reset_attempts SET state='done',dispatch_started=NULL,"
                        "outcome=?,windows_reset=?,updated=? WHERE idempotency_key=?",
                        (outcome, windows_reset, time.time(), idempotency_key))
+            _advance_generation(db, row['account_id'])
             done = db.execute('SELECT * FROM account_reset_attempts WHERE idempotency_key=?',
                               (idempotency_key,)).fetchone()
         return _row(done)

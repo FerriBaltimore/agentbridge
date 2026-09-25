@@ -40,6 +40,7 @@ class RoutingService:
         """Persist only an allowlisted observation; a failed read is unknown."""
         if not account.management_key_env:
             return None
+        reset_generation = self.store.reset_generation(account.id)
         route = ProxyRoute(account.id, account.proxy_base_url, account.key_env)
         try:
             self._ensure_managed(account)
@@ -65,12 +66,16 @@ class RoutingService:
         except BridgeError as error:
             self._record_failure(account, error.code)
             return None
-        self.store.account_observation(account.id, 'cliproxy_management',
-                                       data.get('status') or 'unknown', data)
+        if not self.store.account_observation(
+                account.id, 'cliproxy_management', data.get('status') or 'unknown', data,
+                expected_reset_generation=reset_generation):
+            return None
         snapshot = self._usage_snapshot(account.id, data)
-        self.store.usage_observation(account.id, 'cliproxy_management', 'account',
-                                     {key: snapshot[key] for key in ('supported', 'quota_windows', 'reason')},
-                                     stale=snapshot['stale'])
+        if not self.store.usage_observation(
+                account.id, 'cliproxy_management', 'account',
+                {key: snapshot[key] for key in ('supported', 'quota_windows', 'reason')},
+                stale=snapshot['stale'], expected_reset_generation=reset_generation):
+            return None
         return data
 
     def observation(self, account, *, refresh=False, now=None, include_catalog=True):
@@ -301,6 +306,7 @@ class RoutingService:
         if not binding:
             return self._after_reset(account.id, {**snapshot, 'refresh_reason': 'proxy_binding_unverified'})
         route = ProxyRoute(account.id, account.proxy_base_url, account.key_env)
+        reset_generation = self.store.reset_generation(account.id)
         try:
             active = ManagementClient(route, account.management_key_env, timeout=8).fetch_quota(
                 binding['binding_fingerprint'])
@@ -309,31 +315,38 @@ class RoutingService:
             return self._after_reset(account.id, {**snapshot, 'refresh_reason': error.code})
         self._clear_active_refresh_failure(account)
         result = self._usage_snapshot(account.id, active)
-        self.store.usage_observation(account.id, result['source'], 'account',
-            {key: result[key] for key in ('supported', 'quota_windows', 'reason')},
-            stale=result['stale'])
+        if not self.store.usage_observation(
+                account.id, result['source'], 'account',
+                {key: result[key] for key in ('supported', 'quota_windows', 'reason')},
+                stale=result['stale'], expected_reset_generation=reset_generation):
+            return self._after_reset(account.id, snapshot, force=True)
         return self._after_reset(account.id, self._newer_usage(snapshot, result))
 
-    def _after_reset(self, account_id, snapshot):
+    def _after_reset(self, account_id, snapshot, *, force=False):
         """Do not publish quota percentages observed before a known redemption."""
+        pending = self.store.pending_reset_attempt(account_id) is not None
         invalidated_at = self.store.reset_invalidation_at(account_id)
-        if invalidated_at is None:
+        if invalidated_at is None and not force and not pending:
             return snapshot
         windows = []
         invalidated = False
         for item in snapshot['quota_windows']:
             observed_at = timestamp(item.get('observed_at'))
-            if observed_at is None or observed_at < invalidated_at:
+            source = item.get('source') or snapshot.get('source')
+            if (force or pending or observed_at is None or
+                    invalidated_at is not None and
+                    (source != 'cliproxy_upstream_usage' or observed_at < invalidated_at)):
                 windows.append({**item, 'used_percent': None, 'remaining_percent': None,
                                 'stale': True, 'invalidation_reason': 'reset_quota_refresh_required'})
                 invalidated = True
             else:
                 windows.append(item)
-        if not invalidated:
+        if not invalidated and not force and not pending:
             return snapshot
         fresh = any(not item['stale'] and item.get('used_percent') is not None for item in windows)
         return {**snapshot, 'quota_windows': windows, 'supported': fresh, 'stale': not fresh,
-                'reason': None if fresh else 'reset_quota_refresh_required'}
+                'reason': None if fresh else 'reset_pending' if pending
+                else 'reset_quota_refresh_required'}
 
     @staticmethod
     def _newer_usage(first, second):
@@ -351,7 +364,9 @@ class RoutingService:
 
         def priority(item):
             observed = timestamp(item.get('observed_at'))
-            return (not item.get('stale'), observed if observed is not None else -1)
+            return (not item.get('stale'),
+                    item.get('source') == 'cliproxy_upstream_usage',
+                    observed if observed is not None else -1)
 
         chosen = {}
         for snapshot in (first, second):

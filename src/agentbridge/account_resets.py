@@ -49,17 +49,24 @@ class AccountResetMixin:
         return CodexResetProxy(client, binding['binding_fingerprint'])
 
     def _reset_credit_view(self, account, *, reason=None):
-        stored = self.store.reset_observation(account.id)
-        pending = self.store.pending_reset_attempt(account.id)
+        state = self.store.reset_credit_state(account.id)
+        stored = state['observation']
+        pending = state['pending']
         binding = self.store.proxy_binding(account.id)
         if binding is None or any(
                 item is not None and any(item[key] != binding[key] for key in
                                          ('binding_fingerprint', 'identity_fingerprint'))
                 for item in (stored, pending)):
             reason = 'proxy_binding_changed'
+        obsolete = stored is not None and stored['generation'] != state['generation']
+        if reason is None and pending:
+            reason = 'reset_pending'
+        elif reason is None and obsolete:
+            reason = 'reset_credit_refresh_required'
         age = time.time() - stored['observed_at'] if stored and stored['observed_at'] > 0 else None
         stale = stored is None or age is None or not 0 <= age < RESET_OBSERVATION_TTL
-        value = stored['data'] if stored and reason != 'proxy_binding_changed' else {}
+        value = stored['data'] if stored and not pending and not obsolete \
+            and reason != 'proxy_binding_changed' else {}
         return {
             'account_id': account.id,
             'account_ref': self.account_reference(account.id),
@@ -71,7 +78,8 @@ class AccountResetMixin:
             'observed_at': _stamp(stored['observed_at']) if age is not None else None,
             'age_seconds': round(age, 3) if age is not None and age >= 0 else None,
             'stale': stale or reason is not None,
-            'observation_ref': stored['observation_ref'] if stored and reason != 'proxy_binding_changed' else None,
+            'observation_ref': stored['observation_ref'] if stored and not pending and not obsolete
+            and reason != 'proxy_binding_changed' else None,
             'pending_reset': ({'idempotency_key': pending['idempotency_key'],
                                'observation_ref': pending['observation_ref'],
                                'credit_id': pending['credit_id']}
@@ -84,15 +92,21 @@ class AccountResetMixin:
         account, binding = self._reset_account(account_ref, account_id)
         if not refresh:
             return self._reset_credit_view(account)
-        pending = self.store.pending_reset_attempt(account.id)
+        state = self.store.reset_credit_state(account.id)
+        pending = state['pending']
         if pending and any(pending[key] != binding[key] for key in
                            ('binding_fingerprint', 'identity_fingerprint')):
             return self._reset_credit_view(account, reason='proxy_binding_changed')
+        if pending:
+            return self._reset_credit_view(account)
         try:
             data = self._reset_proxy(account, binding).read()
-            self.store.save_reset_observation(account.id, binding, data)
+            self.store.save_reset_observation(account.id, binding, data,
+                                              state['generation'])
         except BridgeError as error:
-            self.store.expire_reset_observation(account.id)
+            self.store.expire_reset_observation(
+                account.id, state['generation'],
+                state['observation']['observation_ref'] if state['observation'] else None)
             return self._reset_credit_view(account, reason=error.code)
         return self._reset_credit_view(account)
 

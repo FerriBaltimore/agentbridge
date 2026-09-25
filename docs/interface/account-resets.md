@@ -28,6 +28,13 @@ available, individual credit details. CLIProxyAPI substitutes the chosen
 account's access token inside its local Management API; AgentBridge does not
 read or store that token. A failed read retains the previous observation and
 marks it stale with a safe `reason`. Missing evidence is `unknown`, not zero.
+Reads begun before a reset cannot overwrite its outcome: a durable account
+generation fences credit and quota observations after the provider call. While
+an attempt is pending, the credit count and quota percentages are unknown;
+the prior credit observation cannot authorize a new redemption.
+After a confirmed reset, passive proxy quota headers remain unknown even if
+the sidecar reports a newer timestamp. A direct upstream quota read must
+confirm the new percentages.
 
 The response includes `account_ref`, `provider: "codex"`, `status` (`available`,
 `none` or `unknown`), nullable `available_count`, nullable `credits`,
