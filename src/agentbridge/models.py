@@ -127,8 +127,11 @@ class RunOptions:
     attachments: tuple[dict, ...] = ()
     context_package_digest: str | None = None
     mcp_binding_digest: str | None = None
+    steerable: bool = False
 
     def __post_init__(self):
+        if type(self.steerable) is not bool:
+            raise BridgeError('invalid_request', 'steerable must be a boolean.')
         if (not finite_number(self.timeout) or not finite_number(self.stop_grace)
                 or not 0 < self.timeout <= 86400 or not 0 <= self.stop_grace <= 60):
             raise BridgeError("invalid_timeout", "Timeout must be in (0, 86400], stop grace in [0, 60].")

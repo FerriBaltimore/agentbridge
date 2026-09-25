@@ -14,7 +14,7 @@ from .admission import prepare_turn
 
 def admit_turn(bridge, session, prompt, options, request_key, message_id,
                excluded_account_refs=()):
-    """Retry a pre-execution account collision against another eligible route."""
+    """Admit one route; recheck a pre-execution race without replaying work."""
     model = options.model or session['model']
     candidates = sum(1 for item in bridge.accounts()
                      if item.proxy_base_url and model in item.supported_models)
@@ -43,7 +43,7 @@ def admit_turn(bridge, session, prompt, options, request_key, message_id,
             run_id, created = bridge.store.admit(
                 uuid4().hex, session['id'], clean_prompt, clean_options, request_key,
                 message_id=message_id or uuid4().hex,
-                account_id=account.id if decision else None,
+                account_id=account.id,
                 route_decision=decision, route_context=context,
                 route_omissions=omissions, route_event_seq=event_seq,
                 excluded_account_refs=excluded_account_refs)

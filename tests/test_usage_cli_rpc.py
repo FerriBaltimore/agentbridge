@@ -38,7 +38,8 @@ def test_reset_credit_rpc_and_cli_use_only_the_public_sdk(tmp_path, monkeypatch,
     for name in ("accounts.reset_credits", "accounts.quota.reset"):
         assert operations[name]["support"] == "adapter"
         assert operations[name]["maturity"] == "fixture_tested"
-        assert "live_provider_acceptance_pending" in operations[name]["limitations"]
+        assert "live_redemption_pending" in operations[name]["limitations"]
+    assert "live_credit_read_one_account" in operations["accounts.reset_credits"]["limitations"]
 
     assert dispatch(bridge, "accounts.reset_credits", {
         "account_ref": "fixture", "refresh": True})["observation_ref"] == "revision-1"

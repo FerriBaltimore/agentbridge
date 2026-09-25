@@ -84,6 +84,9 @@ class InstanceDeletionStoreMixin:
                                   (instance_id,)).fetchall()
                 if any(_process_may_run(run) for run in runs):
                     raise BridgeError('busy', 'A turn or owned process is still running.')
+                from .queueing.records import occupied
+                if occupied(db, instance_id):
+                    raise BridgeError('busy', 'Remove pending queue messages before deleting this instance.')
 
                 db.execute('INSERT INTO deleted_instances(session_id,status) VALUES (?,?)',
                            (instance_id, 'deleting'))
@@ -102,6 +105,8 @@ class InstanceDeletionStoreMixin:
                         db.execute(f'UPDATE error_cases SET {column}=NULL WHERE {column} IN '
                                    '(SELECT id FROM runs WHERE session_id=?)', (instance_id,))
                 db.execute('DELETE FROM events WHERE session_id=?', (instance_id,))
+                db.execute('DELETE FROM queued_messages WHERE session_id=?', (instance_id,))
+                db.execute('DELETE FROM conversation_queues WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM runs WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM session_routing WHERE session_id=?', (instance_id,))
                 db.execute('DELETE FROM instance_metadata WHERE session_id=?', (instance_id,))

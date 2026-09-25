@@ -8,6 +8,7 @@ def create_instance(bridge, args):
         model=args.model,
         workspace_path=args.workspace_path,
         account_ref=args.account_ref,
+        routing_mode=getattr(args, 'routing_mode', None),
         provider=args.provider,
         idempotency_key=args.idempotency_key,
     )

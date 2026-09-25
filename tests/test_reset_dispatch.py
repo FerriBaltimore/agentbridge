@@ -126,10 +126,11 @@ def test_version_eight_store_upgrades_to_reset_tables(tmp_path):
     with store.connect() as db:
         db.execute("DROP TABLE account_reset_observations")
         db.execute("DROP TABLE account_reset_attempts")
+        db.execute("ALTER TABLE session_routing DROP COLUMN affinity_account_id")
         db.execute("UPDATE metadata SET version=8")
     upgraded = Store(root)
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 11
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
         assert db.execute("PRAGMA table_info(account_reset_attempts)").fetchall()
     assert upgraded.pending_reset_account_ids() == set()
 
@@ -142,9 +143,10 @@ def test_version_nine_store_without_reset_tables_upgrades(tmp_path):
         db.execute("DROP TABLE account_reset_attempts")
         db.execute("DROP TABLE queued_messages")
         db.execute("DROP TABLE conversation_queues")
+        db.execute("ALTER TABLE session_routing DROP COLUMN affinity_account_id")
         db.execute("UPDATE metadata SET version=9")
     upgraded = Store(root)
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 11
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
         assert db.execute("PRAGMA table_info(account_reset_attempts)").fetchall()
         assert db.execute("PRAGMA table_info(queued_messages)").fetchall()

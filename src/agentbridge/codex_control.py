@@ -7,9 +7,10 @@ from .codex_skills import selected_config
 
 
 class CodexControl:
-    def __init__(self, channel, payload, emit, approve):
+    def __init__(self, channel, payload, emit, approve, steering=None):
         self.channel, self.payload, self.emit, self.approve = channel, payload, emit, approve
         self.next_id, self.done, self.thread_id, self.turn_id = 0, False, None, None
+        self.steering, self.pending_input = steering, None
 
     def rpc(self, method, params):
         self.next_id += 1
@@ -170,4 +171,36 @@ class CodexControl:
         result = self.rpc('turn/start', params)
         self.turn_id = result['turn']['id']
         while not self.done:
-            self.event(self.channel.receive(options['timeout']))
+            if self.steering is None:
+                self.event(self.channel.receive(options['timeout']))
+                continue
+            self.live_input()
+            try:
+                value = self.channel.receive(.1)
+            except BridgeError as error:
+                if error.code == 'provider_timeout':
+                    continue
+                raise
+            if self.pending_input and value.get('id') == self.pending_input[0] and 'method' not in value:
+                _, message_id = self.pending_input
+                if 'error' in value:
+                    self.steering.acknowledge(message_id, accepted=False, code='steering_rejected')
+                elif isinstance(value.get('result'), dict) and value['result'].get('turnId') == self.turn_id:
+                    self.steering.acknowledge(message_id, accepted=True)
+                else:
+                    self.steering.acknowledge(message_id, accepted=None, code='unknown_outcome')
+                self.pending_input = None
+            else:
+                self.event(value)
+
+    def live_input(self):
+        if self.pending_input:
+            return
+        item = self.steering.take()
+        if item is None:
+            return
+        message_id, content = item
+        self.next_id += 1
+        self.pending_input = (self.next_id, message_id)
+        self.channel.send({'id': self.next_id, 'method': 'turn/steer', 'params': {
+            'threadId': self.thread_id, 'expectedTurnId': self.turn_id, 'input': content}})

@@ -102,6 +102,7 @@ def test_codex_account_choice_filters_models_and_pins_conversation(two_codex_pla
 
             provider.select_option('codex')
             assert set(_option_values(account)) == {'', 'ai1', 'ai2'}
+            page.get_by_test_id('chat-routing-mode').select_option('pinned')
             account.select_option('ai2')
             assert set(_option_values(model)) == {'', SHARED_MODEL, AI2_MODEL}
             account.select_option('ai1')
@@ -113,6 +114,7 @@ def test_codex_account_choice_filters_models_and_pins_conversation(two_codex_pla
                                      and request.url.endswith('/api/instances')) as created:
                 _send_and_wait(page, 'Use ai2')
             assert created.value.post_data_json['account_ref'] == 'ai2'
+            assert created.value.post_data_json['routing_mode'] == 'pinned'
             assert 'provider' not in created.value.post_data_json
             instance = bridge.instances()[0]
             assert instance['routing_mode'] == 'pinned'
@@ -131,7 +133,7 @@ def test_codex_account_choice_filters_models_and_pins_conversation(two_codex_pla
             browser.close()
 
 
-def test_existing_automatic_conversation_explains_account_lock(two_codex_playground):
+def test_existing_automatic_conversation_allows_account_choice(two_codex_playground):
     with playwright_api.sync_playwright() as playwright:
         browser = _launch_browser(playwright)
         try:
@@ -145,11 +147,11 @@ def test_existing_automatic_conversation_explains_account_lock(two_codex_playgro
             instance = two_codex_playground['bridge'].instances()[0]
             assert instance['routing_mode'] == 'automatic'
             assert instance['routing_provider'] == 'codex'
-            assert account.is_disabled()
+            assert account.is_enabled()
             help_text = page.locator('#chat-account-help')
             assert help_text.is_visible()
-            assert 'new conversation' in help_text.inner_text().lower()
-            assert 'new conversation' in (account.get_attribute('title') or '').lower()
+            assert 'confirmed exhaustion' in help_text.inner_text().lower()
+            assert 'temporary limits wait' in help_text.inner_text().lower()
             assert page.get_by_role('combobox', name='Account', exact=True).count() == 1
             assert account.get_attribute('aria-describedby') == 'chat-account-help'
             assert errors == []

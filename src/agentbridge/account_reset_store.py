@@ -7,8 +7,8 @@ from uuid import uuid4
 from .errors import BridgeError, BusyError
 
 
-def migrate_v11(db, version):
-    if version != 10:
+def migrate_v12(db, version):
+    if version != 11:
         return version
     db.executescript('''
         BEGIN IMMEDIATE;
@@ -36,10 +36,10 @@ def migrate_v11(db, version):
             ON account_reset_attempts(account_id,observation_ref);
         CREATE UNIQUE INDEX IF NOT EXISTS account_reset_one_pending
             ON account_reset_attempts(account_id) WHERE state='pending';
-        UPDATE metadata SET version=11;
+        UPDATE metadata SET version=12;
         COMMIT;
     ''')
-    return 11
+    return 12
 
 
 def _row(value):

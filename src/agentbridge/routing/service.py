@@ -1,16 +1,22 @@
 """Model-first route discovery from safe local proxy observations."""
 
 import os
+from threading import Lock
 import time
 
 from ..errors import BridgeError
 from ..proxy import ManagementClient, ProxyRoute
 from ..proxy.quota import project as project_quota
 from ..quota_windows import timestamp
-from .selector import QuotaObservation, RouteCandidate, select_route
+from .quota import needs_active_refresh, route_quota
+from .selector import RouteCandidate, select_route
 
 
 OBSERVATION_TTL = 30
+MAX_ACTIVE_QUOTA_REFRESHES = 4
+ACTIVE_REFRESH_FAILURE_TTL = 30
+_ACTIVE_REFRESH_FAILURES = {}
+_ACTIVE_REFRESH_FAILURES_LOCK = Lock()
 
 
 class RoutingService:
@@ -101,18 +107,21 @@ class RoutingService:
                 and data.get('binding_verified') is True
                 and isinstance(data.get('models'), list))
 
-    def candidates(self, model, *, provider=None, refresh=False, excluded_account_refs=()):
+    def candidates(self, model, *, provider=None, refresh=False, excluded_account_refs=(),
+                   affinity_account_id=None, fast_affinity=False):
         excluded = {self.accounts.resolve(reference).id for reference in excluded_account_refs}
         paused = self.store.paused_account_ids()
         pending = self.store.pending_reset_account_ids()
-        reset_at = {}
         accounts = [account for account in self.accounts.list()
                     if account.proxy_base_url and model in account.supported_models
                     and (provider is None or account.provider == provider)
                     and account.id not in excluded and account.id not in paused
                     and account.id not in pending]
+        if affinity_account_id is not None:
+            accounts.sort(key=lambda account: account.id != affinity_account_id)
         loads = self.store.route_load([account.id for account in accounts])
         result = []
+        active_refreshes = 0
         for account in accounts:
             saved = self.observation(account, refresh=refresh)
             verified = self._verified(account, saved) and bool(os.environ.get(account.key_env))
@@ -121,20 +130,50 @@ class RoutingService:
             declared_and_seen = tuple(item for item in account.supported_models if item in models)
             item = models.get(model) if verified else None
             quotas = ()
-            if item and item.get('used_percent') is not None:
-                observed_at = timestamp(item.get('quota_observed_at'))
-                if account.id not in reset_at:
-                    reset_at[account.id] = self.store.reset_invalidation_at(account.id)
-                if observed_at is not None and (reset_at[account.id] is None
-                                                or observed_at >= reset_at[account.id]):
-                    quotas = (QuotaObservation(item['used_percent'], observed_at, model_id=model),)
+            if verified and item is not None:
+                quota_snapshot = self._quota_snapshot(account, saved)
+                if (refresh and account.provider in {'codex', 'claude'}
+                        and active_refreshes < MAX_ACTIVE_QUOTA_REFRESHES
+                        and needs_active_refresh(quota_snapshot, model)
+                        and not self._recent_active_refresh_failure(account)):
+                    quota_snapshot = self._quota_snapshot(account, saved, refresh_active=True)
+                    active_refreshes += 1
+                quotas = route_quota(quota_snapshot, model)
             load = loads[account.id]
             result.append(RouteCandidate(
                 account_id=account.id, models=declared_and_seen if verified else account.supported_models,
                 quota=quotas, health='healthy' if verified else 'unhealthy',
                 cooldown_until=timestamp(item.get('cooldown_until')) if item else None,
                 in_flight=load['in_flight'], assigned_turns=load['assigned_turns']))
+            if fast_affinity and account.id == affinity_account_id:
+                try:
+                    select_route(model, (result[-1],), affinity_account_id=affinity_account_id)
+                except BridgeError as error:
+                    if error.code not in {'quota_exhausted', 'model_unavailable'}:
+                        break
+                else:
+                    break
         return result
+
+    def _active_refresh_key(self, account):
+        return str(getattr(self.store, 'path', id(self.store))), account.id
+
+    def _recent_active_refresh_failure(self, account):
+        with _ACTIVE_REFRESH_FAILURES_LOCK:
+            failed_at = _ACTIVE_REFRESH_FAILURES.get(self._active_refresh_key(account))
+        return failed_at is not None and time.monotonic() - failed_at < ACTIVE_REFRESH_FAILURE_TTL
+
+    def _record_active_refresh_failure(self, account):
+        now = time.monotonic()
+        with _ACTIVE_REFRESH_FAILURES_LOCK:
+            for key, failed_at in list(_ACTIVE_REFRESH_FAILURES.items()):
+                if now - failed_at >= ACTIVE_REFRESH_FAILURE_TTL:
+                    del _ACTIVE_REFRESH_FAILURES[key]
+            _ACTIVE_REFRESH_FAILURES[self._active_refresh_key(account)] = now
+
+    def _clear_active_refresh_failure(self, account):
+        with _ACTIVE_REFRESH_FAILURES_LOCK:
+            _ACTIVE_REFRESH_FAILURES.pop(self._active_refresh_key(account), None)
 
     def context_ceiling(self, account, model, *, refresh=False):
         """Return the verified proxy catalog ceiling, or unknown."""
@@ -147,7 +186,7 @@ class RoutingService:
         return maximum if type(maximum) is int and 0 < maximum <= 10_000_000 else None
 
     def select(self, model, *, provider=None, refresh=True, excluded_account_refs=(),
-               context_window=None):
+               context_window=None, affinity_account_id=None):
         from .admission import normalized_exclusions
 
         excluded = normalized_exclusions(excluded_account_refs)
@@ -155,16 +194,24 @@ class RoutingService:
                 (type(context_window) is not int or not 0 < context_window <= 10_000_000)):
             raise BridgeError('invalid_context_window', 'context_window must be a positive token count.')
         candidates = self.candidates(model, provider=provider, refresh=refresh,
-                                     excluded_account_refs=excluded)
+                                     excluded_account_refs=excluded,
+                                     affinity_account_id=affinity_account_id,
+                                     fast_affinity=context_window is None)
         if context_window is not None:
             declared_candidates = candidates
-            candidates = [item for item in candidates if
-                (ceiling := self.context_ceiling(self.accounts.resolve(item.account_id), model))
-                is not None and context_window <= ceiling]
+            eligible = []
+            for item in candidates:
+                ceiling = self.context_ceiling(self.accounts.resolve(item.account_id), model)
+                if (item.account_id == affinity_account_id and ceiling is None):
+                    raise BridgeError('context_window_unavailable',
+                                      'The affinity account has no verified context window ceiling.')
+                if ceiling is not None and context_window <= ceiling:
+                    eligible.append(item)
+            candidates = eligible
             if not candidates and declared_candidates:
                 raise BridgeError('context_window_unavailable',
                                   'No verified account supports the requested context window.')
-        return select_route(model, candidates)
+        return select_route(model, candidates, affinity_account_id=affinity_account_id)
 
     def models(self, *, account_ref=None, provider=None, refresh=False):
         """Return a configured catalog, marking proxy observations separately."""
@@ -234,6 +281,10 @@ class RoutingService:
 
     def usage(self, account, *, refresh=False):
         saved = self.observation(account, refresh=refresh)
+        return self._quota_snapshot(account, saved, refresh_active=refresh)
+
+    def _quota_snapshot(self, account, saved, *, refresh_active=False):
+        """Share one combined passive/active window view with routing and usage."""
         verified = self._verified(account, saved)
         snapshot = self._usage_snapshot(account.id, saved['data'] if verified else None,
                                         failure=saved['data'].get('reason') if saved else None)
@@ -244,7 +295,7 @@ class RoutingService:
                 prior = self._usage_snapshot(account.id, {
                     **previous['data'], 'source': previous['source']})
                 snapshot = self._newer_usage(snapshot, prior)
-        if not refresh or not verified or account.provider not in {'codex', 'claude'}:
+        if not refresh_active or not verified or account.provider not in {'codex', 'claude'}:
             return self._after_reset(account.id, snapshot)
         binding = self.store.proxy_binding(account.id)
         if not binding:
@@ -254,7 +305,9 @@ class RoutingService:
             active = ManagementClient(route, account.management_key_env, timeout=8).fetch_quota(
                 binding['binding_fingerprint'])
         except BridgeError as error:
+            self._record_active_refresh_failure(account)
             return self._after_reset(account.id, {**snapshot, 'refresh_reason': error.code})
+        self._clear_active_refresh_failure(account)
         result = self._usage_snapshot(account.id, active)
         self.store.usage_observation(account.id, result['source'], 'account',
             {key: result[key] for key in ('supported', 'quota_windows', 'reason')},
@@ -303,7 +356,7 @@ class RoutingService:
         chosen = {}
         for snapshot in (first, second):
             for item in snapshot['quota_windows']:
-                candidate = {**item, 'source': snapshot['source']}
+                candidate = {**item, 'source': item.get('source') or snapshot['source']}
                 key = identity(candidate)
                 if key not in chosen or priority(candidate) > priority(chosen[key]):
                     chosen[key] = candidate

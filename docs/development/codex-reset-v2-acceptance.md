@@ -28,7 +28,7 @@ probed with synthetic OAuth data and a local fixture, as detailed in
 | Full integrated `python -m pytest -q` | 986 passed, 3 skipped. |
 | Focused browser/server suite for resets, Accounts and usage | 32 passed. |
 | Reset store/SDK/transport tests | Passed with synthetic credentials; no real account discovery. |
-| SQLite migrations | v9 conversation deletion, v10 queue tables, v11 reset observations/attempts; fixture upgrade from v9 passed. |
+| SQLite migrations | v9 conversation deletion, v10 queue tables, v11 account affinity, v12 reset observations/attempts; fixture upgrade from v9 passed. |
 | x86_64 and ARM64 wheels | Built and verified against pinned CLIProxyAPI, Codex, Node and GrantBridge resources. |
 | Disposable x86_64 wheel install | Installed example and CLI version `2.3.4` passed outside the checkout. |
 

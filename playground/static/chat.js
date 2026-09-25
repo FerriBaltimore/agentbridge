@@ -1,6 +1,7 @@
 import { api } from './api.js';
 import { setupChatCatalog } from './chat-catalog.js';
 import { setupChatDeletion } from './chat-deletion.js';
+import { createRoute } from './chat-routing.js';
 import { createChatStream } from './chat-stream.js';
 import { renderChatHeader, renderConversations, renderEvents, renderMessages } from './chat-view.js';
 import { byId, describeError, toast } from './ui.js';
@@ -70,6 +71,7 @@ export function setupChat({ onDataChanged }) {
   let events = [];
   let eventCursor = 0;
   let activeTurn = null;
+  let activeRouteRef = null;
   let pendingSend = null;
   let timer = null;
   let busy = false;
@@ -129,7 +131,7 @@ export function setupChat({ onDataChanged }) {
     stopButton.hidden = !activeTurn;
     newButton.disabled = !!activeTurn || busy;
     byId('activity-refresh').disabled = !current;
-    renderChatHeader(current, activeTurn, catalog.selected(), catalog.hasPendingRoute());
+    renderChatHeader(current, activeTurn, catalog.selected(), catalog.hasPendingRoute(), activeRouteRef);
   }
 
   function render() {
@@ -176,10 +178,12 @@ export function setupChat({ onDataChanged }) {
     try {
       const [turn] = await Promise.all([api.turn(turnId), refreshConversation()]);
       if (turnId !== activeTurn) return;
+      activeRouteRef = turn.account_ref || activeRouteRef;
       if (TERMINAL.has(turn.state)) {
         activeTurn = null;
         stream.close();
         stopPolling();
+        await refreshCurrentState().catch((error) => toast(describeError(error), true));
         await refreshConversation().catch((error) => toast(describeError(error), true));
         render();
         if (turn.state === 'completed') toast('Turn completed.');
@@ -206,6 +210,7 @@ export function setupChat({ onDataChanged }) {
       const lastTurn = current.last_turn;
       activeTurn = lastTurn && !TERMINAL.has(lastTurn.state)
         ? lastTurn.turn_id : null;
+      activeRouteRef = activeTurn ? lastTurn.account_ref || null : null;
       catalog.lock(current);
       messages = [];
       events = [];
@@ -235,6 +240,7 @@ export function setupChat({ onDataChanged }) {
     catalog.refreshInstance(latest);
     const lastTurn = latest.last_turn;
     activeTurn = lastTurn && !TERMINAL.has(lastTurn.state) ? lastTurn.turn_id : null;
+    activeRouteRef = activeTurn ? lastTurn.account_ref || null : null;
     if (activeTurn) {
       stream.open(activeTurn, eventCursor);
       stopPolling();
@@ -247,6 +253,7 @@ export function setupChat({ onDataChanged }) {
     stream.close();
     stopPolling();
     current = null;
+    activeRouteRef = null;
     messages = [];
     events = [];
     eventCursor = 0;
@@ -272,9 +279,8 @@ export function setupChat({ onDataChanged }) {
     }
     routeSettings.open = false;
     const choice = catalog.selected();
-    const route = choice.account
-      ? { account: choice.account, model: choice.model }
-      : { provider: choice.provider, model: choice.model };
+    const route = { mode: choice.routingMode, account: choice.account,
+      provider: choice.provider, model: choice.model };
     const fingerprint = JSON.stringify({ text, route, effort: choice.effort,
       context: choice.context, permission: choice.permission, workspace: choice.workspace });
     if (!pendingSend || pendingSend.fingerprint !== fingerprint) {
@@ -284,13 +290,8 @@ export function setupChat({ onDataChanged }) {
     updateControls();
     try {
       if (!current) {
-        const values = {
-          model: choice.model,
-          idempotency_key: pendingSend.createKey,
-        };
+        const values = { ...createRoute(choice), idempotency_key: pendingSend.createKey };
         if (choice.workspace) values.workspace_path = choice.workspace;
-        if (choice.account) values.account_ref = choice.account;
-        else if (choice.provider) values.provider = choice.provider;
         current = await api.createInstance(values);
         restorePending = false;
         rememberInstance(instanceId(current));
@@ -315,6 +316,7 @@ export function setupChat({ onDataChanged }) {
       if (choice.permission) values.permission_mode = choice.permission;
       const result = await api.sendMessage(instanceId(current), values);
       activeTurn = result.turn_id;
+      activeRouteRef = result.account_ref || null;
       pendingSend = null;
       input.value = '';
       render();

@@ -79,7 +79,7 @@ def _native_calls(capture):
     return [json.loads(line) for line in capture.read_text().splitlines()]
 
 
-def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
+def test_pinned_chat_can_switch_account_provider_model_effort_and_context_in_place(
         route_change_playground):
     bridge = route_change_playground['bridge']
     with playwright_api.sync_playwright() as playwright:
@@ -96,6 +96,7 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
             provider.select_option('codex')
             model.select_option(OPENAI_MODEL)
             page.locator('#route-settings summary').click()
+            page.get_by_test_id('chat-routing-mode').select_option('pinned')
             account.select_option('OpenAI Personal')
             effort.select_option('high')
             assert context.locator('option').evaluate_all(
@@ -113,6 +114,7 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
             assert CLAUDE_MODEL in model.locator('option').all_text_contents()
             model.select_option(CLAUDE_MODEL)
             assert account.input_value() == ''
+            account.select_option('Claude Research')
             assert effort.locator('option').evaluate_all(
                 '(items) => items.map((item) => item.value)') == ['', 'low']
             effort.select_option('low')
@@ -132,12 +134,12 @@ def test_pinned_chat_can_switch_provider_model_effort_and_context_in_place(
             assert updated.value.post_data_json == {
                 'expected_version': first['version'],
                 'model': CLAUDE_MODEL,
-                'provider': 'claude',
+                'account_ref': 'Claude Research',
             }
             assert len(bridge.instances()) == 1
             changed = bridge.instance_get(instance_id)
-            assert changed['routing_mode'] == 'automatic'
-            assert changed['routing_provider'] == 'claude'
+            assert changed['routing_mode'] == 'pinned'
+            assert changed['account_ref'] == 'Claude Research'
             assert changed['model'] == CLAUDE_MODEL
             assert changed['version'] == first['version'] + 1
             turns = bridge.turns(instance_id=instance_id)
@@ -226,7 +228,7 @@ def test_automatic_chat_changes_provider_and_model_without_new_instance(
             instance_id = first['id']
             assert first['routing_mode'] == 'automatic'
             assert first['routing_provider'] == 'codex'
-            assert account.is_disabled()
+            assert account.is_enabled()
 
             provider.select_option('claude')
             model.select_option(CLAUDE_MODEL)

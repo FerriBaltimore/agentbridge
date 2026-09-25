@@ -26,7 +26,9 @@ class EventStreamMixin:
             if page:
                 return page
             if run.status in TERMINAL:
-                return []
+                # Completion may commit between the empty read and the state
+                # read. Drain its durable terminal events before ending follow.
+                return self.store.events(run_id=run.id, after=after_seq, limit=limit)
             now = time.monotonic()
             if timeout is not None and now - started >= timeout:
                 return []

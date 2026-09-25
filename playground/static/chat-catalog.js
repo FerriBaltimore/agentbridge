@@ -1,4 +1,5 @@
 import { byId, clear, node } from './ui.js';
+import { requestedRoute, routePending, routingMode, selectedAccount, updateRoute } from './chat-routing.js';
 
 function listModels(catalog) {
   return Array.isArray(catalog?.items) ? catalog.items
@@ -84,6 +85,7 @@ export function setupChatCatalog(onChange) {
   const provider = byId('chat-provider');
   const model = byId('chat-model');
   const account = byId('chat-account');
+  const mode = byId('chat-routing-mode');
   const workspace = byId('chat-workspace');
   const effort = byId('chat-effort');
   const context = byId('chat-context');
@@ -98,6 +100,13 @@ export function setupChatCatalog(onChange) {
   function hasObservedModel(reference) {
     return listModels(catalog).some((item) => observed(item)
       && item.observed_account_refs.includes(reference));
+  }
+
+  function currentEligible() {
+    const reference = selectedAccount(lockedInstance);
+    const selectedModel = listModels(catalog).find((item) => item.id === model.value);
+    return !!reference && eligibleAccounts(selectedModel, provider.value, accounts)
+      .some((item) => item.account_ref === reference);
   }
 
   function populateProviders() {
@@ -131,24 +140,13 @@ export function setupChatCatalog(onChange) {
   function populateAccounts() {
     const previous = account.value;
     const matching = accounts.filter((item) => !provider.value || item.provider === provider.value);
-    clear(account).append(option('', provider.value
-      ? `Automatic · ${providerName(provider.value)} accounts` : 'Automatic · all providers'));
-    if (lockedInstance?.routing_mode === 'automatic') {
-      account.value = '';
-      return;
-    }
-    if (lockedInstance?.routing_mode === 'pinned') {
-      const original = lockedInstance.account_ref;
-      const originalRow = matching.find((item) => item.account_ref === original);
-      const available = originalRow && hasObservedModel(original);
-      const label = available
-        ? `Pinned · ${original}` : `Pinned · ${original} · unavailable`;
-      const pinned = option(original, label);
-      pinned.disabled = !available;
-      account.append(pinned);
-      account.value = previous === original && originalRow ? original : '';
-      return;
-    }
+    const currentAccount = selectedAccount(lockedInstance) || 'none yet';
+    const emptyLabel = mode.value === 'pinned'
+      ? lockedInstance && currentEligible() ? `Use current account · ${currentAccount}`
+        : 'Select an account'
+      : lockedInstance && currentEligible() ? `Keep preferred account · ${currentAccount}`
+        : 'Start with least-used eligible account';
+    clear(account).append(option('', emptyLabel));
     for (const item of matching) {
       const available = hasObservedModel(item.account_ref);
       const label = `${item.name || item.account_ref} · ${providerName(item.provider || 'unknown provider')}`;
@@ -161,12 +159,13 @@ export function setupChatCatalog(onChange) {
       missing.disabled = true;
       account.append(missing);
     }
-    account.value = previous;
+    account.value = [...account.options].some((item) => item.value === previous) ? previous : '';
   }
 
   function populateParameters() {
     const selectedModel = listModels(catalog).find((item) => item.id === model.value);
-    const metadata = selectedMetadata(selectedModel, provider.value, account.value, accounts);
+    const metadata = selectedMetadata(selectedModel, provider.value,
+      mode.value === 'pinned' ? account.value || lockedInstance?.account_ref : null, accounts);
     const effortSupport = capabilities?.parameters?.effort?.support;
     const contextSupport = capabilities?.parameters?.context_window?.support;
     const effortAllowed = !!effortSupport && effortSupport !== 'unsupported';
@@ -200,48 +199,43 @@ export function setupChatCatalog(onChange) {
     byId('permission-field').hidden = permissionParameter?.support !== 'adapter'
       || !permissionValues.length;
     const eligible = eligibleAccounts(selectedModel, provider.value, accounts);
-    const route = account.value
-      ? `This conversation uses ${account.value}.`
-      : `Automatic routing uses an observed account${provider.value ? ` within ${provider.value}` : ''}.`;
-    byId('route-help').textContent = account.value
-      && !eligible.some((item) => item.account_ref === account.value)
-      ? 'This account has not observed the selected model. Choose Automatic routing or another model.'
+    const selectedRef = mode.value === 'pinned'
+      ? account.value || selectedAccount(lockedInstance) : account.value;
+    const route = mode.value === 'pinned'
+      ? `Pinned routing uses ${selectedRef || 'the selected account'}.`
+      : account.value ? `Automatic routing starts with ${account.value}.`
+        : currentEligible() ? `Automatic routing keeps ${selectedAccount(lockedInstance)}.`
+          : 'Automatic routing starts with the least-used eligible account.';
+    byId('route-help').textContent = selectedRef
+      && !eligible.some((item) => item.account_ref === selectedRef)
+      ? 'This account has not observed the selected model. Choose another account or model.'
       : selectedModel && eligible.length
       ? `${route}${availableWindows.length ? ' Context sizes come from the observed model catalog; the provider may reject an override.' : ''}`
       : 'Choose a model observed from a connected account.';
   }
 
   function hasPendingRoute() {
-    if (!lockedInstance) return false;
-    if (lockedInstance.routing_mode === 'pinned') {
-      return account.value !== lockedInstance.account_ref || model.value !== lockedInstance.model;
-    }
-    return model.value !== lockedInstance.model
-      || provider.value !== (lockedInstance.routing_provider || '');
+    return routePending(lockedInstance, selected());
   }
 
   function updateSummary() {
-    const parts = [provider.value || 'All providers', model.value || 'Choose a model',
-      account.value || 'Automatic'];
-    byId('route-summary').textContent = `${lockedInstance && hasPendingRoute() ? 'Pending · ' : ''}${parts.join(' · ')}`;
+    const choice = selected();
+    const route = requestedRoute(choice, lockedInstance);
+    byId('route-summary').textContent = `${lockedInstance && hasPendingRoute() ? 'Pending · ' : ''}${choice.model || 'Choose a model'} · ${route}`;
   }
 
   function applyDisabled() {
-    for (const field of [provider, model, effort, context, permission]) field.disabled = busy;
-    account.disabled = busy || lockedInstance?.routing_mode === 'automatic';
-    account.title = lockedInstance?.routing_mode === 'automatic'
-      ? 'Start a new conversation to choose a specific account.' : '';
-    const accountHelp = byId('chat-account-help');
-    if (lockedInstance?.routing_mode === 'automatic') {
-      accountHelp.textContent = 'Start a new conversation to choose a specific account.';
-    } else if (lockedInstance?.routing_mode === 'pinned') {
-      accountHelp.textContent = 'Choose Automatic to unpin, or start a new conversation to choose another account.';
-    } else if (account.value && !hasObservedModel(account.value)) {
-      accountHelp.textContent = 'This account has no observed models. Choose another account or Automatic.';
-    } else {
-      accountHelp.textContent = '';
+    for (const field of [provider, model, mode, account, effort, context, permission]) {
+      field.disabled = busy;
     }
-    accountHelp.hidden = !accountHelp.textContent;
+    const accountHelp = byId('chat-account-help');
+    if (mode.value === 'automatic') {
+      accountHelp.textContent = 'Stays on the preferred account until confirmed exhaustion; temporary limits wait for reset.';
+    } else if (lockedInstance) {
+      accountHelp.textContent = 'Uses the chosen account for each turn. Leave Account unchanged to pin the current account.';
+    } else {
+      accountHelp.textContent = 'Choose the account to use for this conversation.';
+    }
     workspace.disabled = busy || !!lockedInstance;
     workspace.title = lockedInstance ? 'Workspace is fixed for this conversation.' : '';
   }
@@ -256,15 +250,30 @@ export function setupChatCatalog(onChange) {
   }
 
   provider.addEventListener('change', () => {
-    if (account.value && (!provider.value || accounts.find((item) =>
+    if (account.value && (provider.value && accounts.find((item) =>
       item.account_ref === account.value)?.provider !== provider.value)) {
       account.value = '';
     }
     sync();
   });
   model.addEventListener('change', sync);
-  account.addEventListener('change', sync);
+  account.addEventListener('change', () => {
+    if (account.value && !provider.value) {
+      provider.value = accounts.find((item) => item.account_ref === account.value)?.provider || '';
+    }
+    sync();
+  });
+  mode.addEventListener('change', sync);
   context.addEventListener('change', () => onChange?.());
+
+  function selected() {
+    return { provider: provider.value, model: model.value, account: account.value,
+      routingMode: mode.value, preferredEligible: currentEligible(),
+      workspace: workspace.value.trim(),
+      effort: byId('effort-field').hidden ? '' : effort.value,
+      context: byId('context-field').hidden ? '' : context.value,
+      permission: byId('permission-field').hidden ? '' : permission.value };
+  }
 
   return {
     update({ models, accountRows, capabilityData, workspacePath }) {
@@ -275,38 +284,27 @@ export function setupChatCatalog(onChange) {
       populateProviders();
       sync();
     },
-    selected() {
-      return { provider: provider.value, model: model.value, account: account.value,
-        workspace: workspace.value.trim(),
-        effort: byId('effort-field').hidden ? '' : effort.value,
-        context: byId('context-field').hidden ? '' : context.value,
-        permission: byId('permission-field').hidden ? '' : permission.value };
-    },
+    selected,
     canSend() {
-      const choice = this.selected();
+      const choice = selected();
       if (!validContext(choice.context, availableWindows)) return false;
       const item = listModels(catalog).find((row) => row.id === choice.model);
       const eligible = eligibleAccounts(item, choice.provider, accounts);
-      if (lockedInstance?.routing_mode === 'automatic' && choice.account) return false;
-      if (lockedInstance?.routing_mode === 'pinned' && choice.account
-          && choice.account !== lockedInstance.account_ref) return false;
+      const requiredAccount = choice.account || (choice.routingMode === 'pinned'
+        ? selectedAccount(lockedInstance) : null);
+      if (choice.routingMode === 'pinned' && !requiredAccount) return false;
       return eligible.length > 0 && (!choice.account
-        || eligible.some((row) => row.account_ref === choice.account));
+        || eligible.some((row) => row.account_ref === choice.account))
+        && (!requiredAccount || eligible.some((row) => row.account_ref === requiredAccount));
     },
     hasPendingRoute,
     updatePayload() {
-      if (!hasPendingRoute()) return null;
-      const choice = this.selected();
-      const values = { expected_version: lockedInstance.version, model: choice.model };
-      if (lockedInstance.routing_mode !== 'pinned' || choice.account !== lockedInstance.account_ref) {
-        values.provider = choice.provider || null;
-      }
-      return values;
+      return updateRoute(lockedInstance, selected());
     },
     lock(instance) {
       lockedInstance = instance || null;
       if (!instance) { sync(); return; }
-      const routeProvider = instance.routing_mode === 'pinned'
+      const routeProvider = routingMode(instance) === 'pinned'
         ? accounts.find((item) => item.account_ref === instance.account_ref)?.provider || ''
         : instance.routing_provider || '';
       populateProviders();
@@ -314,8 +312,9 @@ export function setupChatCatalog(onChange) {
         provider.append(option(routeProvider, `${routeProvider} · unavailable`));
       }
       provider.value = routeProvider;
+      mode.value = routingMode(instance);
       populateAccounts();
-      account.value = instance.routing_mode === 'pinned' ? instance.account_ref || '' : '';
+      account.value = routingMode(instance) === 'pinned' ? instance.account_ref || '' : '';
       populateModels();
       if (instance.model && ![...model.options].some((item) => item.value === instance.model)) {
         model.append(option(instance.model, `${instance.model} · unavailable`));
@@ -328,8 +327,11 @@ export function setupChatCatalog(onChange) {
       onChange?.();
     },
     refreshInstance(instance) {
+      if (!hasPendingRoute()) {
+        this.lock(instance);
+        return;
+      }
       lockedInstance = instance;
-      if (instance.routing_mode === 'automatic') account.value = '';
       populateAccounts();
       populateParameters();
       updateSummary();
@@ -340,6 +342,7 @@ export function setupChatCatalog(onChange) {
     reset() {
       lockedInstance = null;
       provider.value = '';
+      mode.value = 'automatic';
       account.value = '';
       model.value = '';
       sync();

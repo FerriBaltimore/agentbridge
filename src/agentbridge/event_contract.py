@@ -23,6 +23,7 @@ EVENT_KINDS = {
     "run_finished": "run.finished",
     "recovery": "recovery.observed",
     "gap": "recovery.gap",
+    "queue_changed": "queue.changed",
 }
 
 

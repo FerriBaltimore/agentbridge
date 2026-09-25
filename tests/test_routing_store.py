@@ -49,7 +49,8 @@ def test_automatic_admission_persists_route_and_native_completion(tmp_path):
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     assert store.routing("instance") == {"mode": "automatic",
                                           "last_completed_account_id": None,
-                                          "last_native_id": None, "provider": None}
+                                          "last_native_id": None, "provider": None,
+                                          "affinity_account_id": "a"}
     # The first selected account may differ from the creation anchor.
     assert admit(store, "run-b", "instance", "b") == ("run-b", True)
     event = store.events(run_id="run-b")[0]
@@ -283,10 +284,11 @@ def test_v3_migration_preserves_pinned_proxy_session_and_replay(tmp_path):
         db.execute("UPDATE metadata SET version=3")
     upgraded = Store(tmp_path / "state")
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 11
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
     assert upgraded.routing("legacy") == {"mode": "pinned",
                                           "last_completed_account_id": "a",
-                                          "last_native_id": "native-a", "provider": None}
+                                          "last_native_id": "native-a", "provider": None,
+                                          "affinity_account_id": None}
     assert upgraded.add_session("ignored", "a", str(tmp_path), MODEL,
                                 native_id="native-a", request_key="legacy-key") == ("legacy", False)
 

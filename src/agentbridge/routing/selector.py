@@ -34,6 +34,8 @@ class QuotaObservation:
     model_id: str | None = None
     reset_at: float | None = None
     limit_reached: bool | None = None
+    source: str | None = None
+    window_id: str | None = None
 
     def __post_init__(self):
         if self.model_id is not None:
@@ -49,6 +51,9 @@ class QuotaObservation:
             object.__setattr__(self, "reset_at", _nonnegative(self.reset_at, "reset_at"))
         if self.limit_reached is not None and type(self.limit_reached) is not bool:
             raise BridgeError("invalid_request", "limit_reached must be a boolean or unknown.")
+        for value in (self.source, self.window_id):
+            if value is not None and (not isinstance(value, str) or not 0 < len(value) <= 512):
+                raise BridgeError("invalid_request", "Quota evidence labels must be bounded strings.")
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,8 @@ class RouteDecision:
     health: str
     in_flight: int
     reason: str
+    affinity_break_reason: str | None = None
+    affinity_break_evidence: dict | None = None
 
 
 def _quota_state(candidate, model, now, quota_ttl):
@@ -114,8 +121,37 @@ def _quota_state(candidate, model, now, quota_ttl):
     return "known", max(item.used_percent for item in fresh)
 
 
-def select_route(model, candidates, *, now=None, quota_ttl=60):
-    """Select the least-used eligible account for an exact model identifier.
+def _exhaustion_evidence(candidate, model, now, quota_ttl):
+    def bounded_label(value):
+        return (value if isinstance(value, str) and 0 < len(value) <= 256
+                and all(32 <= ord(char) < 127 for char in value) else None)
+
+    for item in candidate.quota:
+        if item.model_id not in (None, model) or item.observed_at is None:
+            continue
+        if (item.observed_at > now or now - item.observed_at >= quota_ttl
+                or item.reset_at is not None and item.reset_at <= now):
+            continue
+        if item.limit_reached is True or item.used_percent == 100:
+            return {"account_id": candidate.account_id, "source": bounded_label(item.source),
+                    "window_id": bounded_label(item.window_id), "observed_at": item.observed_at,
+                    "reset_at": item.reset_at, "used_percent": item.used_percent,
+                    "limit_reached": item.limit_reached}
+    return None
+
+
+def _unverified_exhaustion_reset(candidate, model, now, quota_ttl):
+    """An expired observation cannot prove a rejected window has reopened."""
+    resets = [item.reset_at for item in candidate.quota
+              if item.model_id in (None, model) and item.observed_at is not None
+              and item.observed_at <= now and now - item.observed_at >= quota_ttl
+              and item.reset_at is not None and item.reset_at > now
+              and (item.limit_reached is True or item.used_percent == 100)]
+    return min(resets) if resets else None
+
+
+def select_route(model, candidates, *, now=None, quota_ttl=60, affinity_account_id=None):
+    """Keep an eligible affinity account, else choose the least-used candidate.
 
     Known, fresh quota beats unknown quota. Unknown remains eligible as a
     fallback and is never interpreted as zero usage. Assigned turn count is a
@@ -123,6 +159,8 @@ def select_route(model, candidates, *, now=None, quota_ttl=60):
     itself does not reserve capacity; callers must persist and reserve atomically.
     """
     model_id(model)
+    if affinity_account_id is not None:
+        identifier(affinity_account_id)
     now = time.time() if now is None else _nonnegative(now, "now")
     quota_ttl = _nonnegative(quota_ttl, "quota_ttl")
     if quota_ttl == 0:
@@ -135,21 +173,47 @@ def select_route(model, candidates, *, now=None, quota_ttl=60):
     supported = [row for row in rows if model in row.models]
     if not supported:
         raise BridgeError("model_unavailable", "No account declares support for this model.")
+    affinity = next((row for row in supported if row.account_id == affinity_account_id), None)
+    if affinity is not None:
+        if affinity.health == "unhealthy":
+            raise BridgeError("proxy_binding_unverified", "The affinity account could not be verified.")
+        affinity_quota, affinity_used = _quota_state(affinity, model, now, quota_ttl)
+        if affinity_quota != "exhausted":
+            reset_at = _unverified_exhaustion_reset(affinity, model, now, quota_ttl)
+            if reset_at is not None:
+                raise BridgeError("quota_unknown", "The affinity account's prior quota rejection needs revalidation.",
+                                  retryable=True,
+                                  retry_after_ms=min(10000, math.ceil((reset_at - now) * 1000)))
+            if affinity.cooldown_until is not None and affinity.cooldown_until > now:
+                raise BridgeError("rate_limited", "The affinity account is temporarily rate limited.",
+                                  retryable=True,
+                                  retry_after_ms=math.ceil((affinity.cooldown_until - now) * 1000))
+            if affinity.in_flight >= affinity.max_in_flight:
+                raise BridgeError("account_busy", "The affinity account has an active turn.",
+                                  retryable=True)
+            return RouteDecision(affinity.account_id, model, affinity_quota, affinity_used,
+                                 affinity.health, affinity.in_flight, "affinity")
+    break_evidence = (_exhaustion_evidence(affinity, model, now, quota_ttl)
+                      if affinity is not None else None)
     eligible = []
-    excluded = {"unhealthy": 0, "cooldown": 0, "busy": 0, "quota_exhausted": 0}
+    excluded = {"unhealthy": 0, "cooldown": 0, "busy": 0,
+                "quota_exhausted": 0, "quota_unknown": 0}
     for row in supported:
         if row.health == "unhealthy":
             excluded["unhealthy"] += 1
+            continue
+        quota_state, used = _quota_state(row, model, now, quota_ttl)
+        if quota_state == "exhausted":
+            excluded["quota_exhausted"] += 1
+            continue
+        if _unverified_exhaustion_reset(row, model, now, quota_ttl) is not None:
+            excluded["quota_unknown"] += 1
             continue
         if row.cooldown_until is not None and row.cooldown_until > now:
             excluded["cooldown"] += 1
             continue
         if row.in_flight >= row.max_in_flight:
             excluded["busy"] += 1
-            continue
-        quota_state, used = _quota_state(row, model, now, quota_ttl)
-        if quota_state == "exhausted":
-            excluded["quota_exhausted"] += 1
             continue
         key = (row.health != "healthy", quota_state != "known",
                used if used is not None else 101,
@@ -158,9 +222,12 @@ def select_route(model, candidates, *, now=None, quota_ttl=60):
         eligible.append((key, row, quota_state, used))
     if not eligible:
         reason = ("quota_exhausted" if excluded["quota_exhausted"] == len(supported) else
+                  "quota_unknown" if excluded["quota_unknown"] + excluded["quota_exhausted"] == len(supported) else
                   "account_busy" if excluded["busy"] == len(supported) else "provider_unavailable")
         raise BridgeError(reason, "No account is currently available for this model.",
                           details={"excluded": excluded})
     _, selected, quota_state, used = min(eligible, key=lambda item: item[0])
     return RouteDecision(selected.account_id, model, quota_state, used, selected.health,
-                         selected.in_flight, "least_used" if quota_state == "known" else "quota_unknown")
+                         selected.in_flight, "least_used" if quota_state == "known" else "quota_unknown",
+                         "quota_exhausted" if break_evidence is not None else None,
+                         break_evidence)
