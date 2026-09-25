@@ -85,15 +85,19 @@ direct instances are read only.
 `account_ref` identifies the selected or admitted route, including after a
 failed turn, or its initial candidate before the first turn. `native_session_id`
 can be absent before Codex creates the initial thread; once bound, it is
-immutable. Switching model, account or
-provider retains that thread and its native history. Missing or divergent
+immutable. Switching model, account or provider retains that thread and its
+native history. Missing or divergent
 native state is an explicit continuation failure. Bounded portable export
 belongs to an explicit transfer into a separate instance, not a route change.
 
 For existing records, migration anchors the stored native session or the
 latest observed historical session ID when the stored binding is absent.
-An older conversation already split across native threads is not merged
-retroactively; continuation preserves the anchored thread.
+Admission compares that binding with the latest observed session identity.
+If an older implementation restored thread A after a later thread B failed,
+the differing observation returns `native_session_diverged`; it cannot
+silently resume A and omit B. Continuing requires explicit review and recovery
+or an explicit transfer into a separate conversation. Migration does not
+select a different thread to resolve the ambiguity or merge native histories.
 
 ## Message and turn
 

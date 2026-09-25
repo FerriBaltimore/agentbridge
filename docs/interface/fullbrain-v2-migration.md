@@ -142,9 +142,12 @@ uncertain. Do not automatically rerun a turn with an unknown outcome, transfer
 it to another account, or replay its tools. Stop is an explicit cancellation.
 The host decides whether a new turn is appropriate after inspecting recovery.
 Native session errors must stay visible: the host must not replace the chat's
-instance or session to hide missing or divergent history. Migrated chats
-already split across older native sessions retain their anchored session;
-the SDK does not merge those histories retroactively.
+instance or session to hide missing or divergent history. If an older chat
+restored thread A after a later thread B failed, the stored and latest
+observed identities differ and admission returns `native_session_diverged`.
+Keep that failure visible pending explicit review and recovery or a separate
+transfer; do not choose either thread automatically. The SDK does not merge
+split histories or reconstruct their native state retroactively.
 
 ## Acceptance before enabling a provider
 

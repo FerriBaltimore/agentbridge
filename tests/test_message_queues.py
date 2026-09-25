@@ -197,7 +197,8 @@ def test_stop_pauses_pending_work_until_explicit_resume(queued):
         'methods': ['thread/start', 'thread/resume'], 'prompts': ['hold:never', 'second']}
 
 
-def test_native_rejection_and_lost_ack_are_not_replayed(queued):
+@pytest.mark.parametrize('lost_input', ['drop', 'complete_without_ack'])
+def test_native_rejection_and_lost_ack_are_not_replayed(queued, lost_input):
     bridge, instance = queued
     first = bridge.queue_add(instance, 'hold:never')
     turn = running(bridge, first)
@@ -205,10 +206,10 @@ def test_native_rejection_and_lost_ack_are_not_replayed(queued):
     until(lambda: bridge.message_get(rejected['message_id'])['state'] == 'rejected')
     assert bridge.run(turn).status == 'running'
     later = bridge.queue_add(instance, 'later')
-    lost = bridge.message_create(instance, 'drop', delivery='steer', idempotency_key='drop')
+    lost = bridge.message_create(instance, lost_input, delivery='steer', idempotency_key='drop')
     until(lambda: bridge.message_get(lost['message_id'])['state'] == 'unknown')
     assert bridge.queue_list(instance)['paused']
-    replay = bridge.message_create(instance, 'drop', delivery='steer', idempotency_key='drop')
+    replay = bridge.message_create(instance, lost_input, delivery='steer', idempotency_key='drop')
     assert replay['replayed'] and replay['state'] == 'unknown'
     assert len(bridge.runs()) == 1
     assert bridge.message_get(later['message_id'])['turn_id'] is None

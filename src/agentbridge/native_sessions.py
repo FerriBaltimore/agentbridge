@@ -44,6 +44,14 @@ def require_native_session(db, session):
         if native_id != bound['native_id']:
             raise BridgeError('native_session_diverged',
                               'The instance no longer identifies its bound native conversation.')
+        latest = db.execute("SELECT json_extract(data,'$.native_id') AS native_id FROM events "
+                            "WHERE session_id=? AND kind='session' "
+                            "AND json_type(data,'$.native_id')='text' "
+                            "AND length(json_extract(data,'$.native_id'))>0 "
+                            "ORDER BY seq DESC LIMIT 1", (session['id'],)).fetchone()
+        if latest is not None and latest['native_id'] != native_id:
+            raise BridgeError('native_session_diverged',
+                              'Later execution used another native conversation; continuing would omit that history.')
         return validate_native_id(native_id)
     if native_id is not None:
         # Explicit historical imports bind on admission, before native execution.

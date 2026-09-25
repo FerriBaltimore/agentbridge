@@ -84,6 +84,9 @@ it does not enable a direct execution path. V2 continuation also uses
 `native_session_missing` when the bound session is unavailable and
 `native_session_diverged` when its identity is replaced or mismatched. Neither
 error permits a replacement thread, portable reconstruction or automatic rerun.
+The mismatch check includes a legacy stored identity that differs from the
+latest observed native thread, even if the stored thread previously completed
+successfully. Explicit review and recovery or a separate transfer is required.
 Unknown provider stderr, tokens, prompts, private reasoning and unbounded
 response bodies are never included in the public error.
 
