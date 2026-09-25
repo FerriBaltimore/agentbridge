@@ -47,7 +47,9 @@ still needs controlled live acceptance. See the
 [implementation inventory](docs/interface/implementation-status.md).
 
 The CLI also provides `accounts list`, `accounts status`, `accounts usage`,
-`accounts check`, `accounts pause`, `accounts resume` and `accounts delete`.
+`accounts check`, `accounts pause`, `accounts resume`, `accounts delete`,
+`accounts reset-credits` and explicit `accounts quota-reset` for earned Codex
+credits. See [the reset contract](docs/interface/account-resets.md).
 Pause excludes an account from new routing while preserving its login and
 current turns. Delete retires the local route and
 preserves its history; it does not remove the upstream proxy credential.

@@ -45,6 +45,32 @@ def print_account_human(command, value, account_name=None):
     if command == "usage":
         print_usage(value, account_name)
         return
+    if command == "reset-credits":
+        print(f"Account: {account_name or value.get('account_ref') or '-'}")
+        print(f"Reset credits: {value.get('available_count') if value.get('available_count') is not None else 'unknown'}")
+        print(f"Status: {value.get('status') or 'unknown'}")
+        print(f"Observed at: {value.get('observed_at') or 'unknown'}")
+        print(f"Stale: {'yes' if value.get('stale', True) else 'no'}")
+        if value.get('observation_ref'):
+            print(f"Observation reference: {value['observation_ref']}")
+        if value.get('reason'):
+            print(f"Reason: {value['reason']}")
+        if value.get('pending_reset'):
+            print("Pending redemption: inspect the existing attempt before retrying with its key.")
+        for credit in value.get('credits') or []:
+            print(f"Credit: {credit.get('id') or '-'} ({credit.get('status') or 'unknown'})")
+            if credit.get('expires_at'):
+                print(f"  Expires at: {credit['expires_at']}")
+        return
+    if command == "quota-reset":
+        print(f"Account: {account_name or value.get('account_ref') or '-'}")
+        print(f"Redemption outcome: {value.get('outcome') or 'unknown'}")
+        if value.get('windows_reset') is not None:
+            print(f"Windows reset: {value['windows_reset']}")
+        credits = value.get('reset_credits') or {}
+        if credits:
+            print(f"Remaining reset credits: {credits.get('available_count') if credits.get('available_count') is not None else 'unknown'}")
+        return
     if command == "history":
         print(f"Account: {account_name or '-'}")
         if not value:

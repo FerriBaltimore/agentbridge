@@ -66,6 +66,10 @@ export const api = {
   accounts: () => request('/api/accounts'),
   accountStatus: (account, refresh = false) => request(`/api/accounts/${ref(account)}/status${query({ refresh: refresh ? 1 : undefined })}`),
   accountUsage: (account, refresh = false) => request(`/api/accounts/${ref(account)}/usage${query({ refresh: refresh ? 1 : undefined })}`),
+  accountResetCredits: (account, refresh = false) => request(
+    `/api/accounts/${ref(account)}/reset-credits${query({ refresh: refresh ? 1 : undefined })}`),
+  redeemAccountReset: (account, operation) => request(
+    `/api/accounts/${ref(account)}/quota/reset`, { method: 'POST', body: operation }),
   models: (refresh = false) => request(`/api/models${query({ refresh: refresh ? 1 : undefined })}`),
   instances: () => request('/api/instances'),
   instance: (id) => request(`/api/instances/${ref(id)}`),

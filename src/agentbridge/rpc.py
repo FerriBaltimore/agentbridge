@@ -77,6 +77,8 @@ def dispatch(bridge,method,params):
         value = dict(params)
         value['account_id'] = value.pop('account_ref', value.pop('account_id', None))
         return bridge.account_usage(**value)
+    if method=='accounts.reset_credits':
+        return bridge.account_reset_credits(**params)
     if method=='accounts.quota.reset':
         return bridge.account_quota_reset(**params)
     if method=='accounts.usage_history':

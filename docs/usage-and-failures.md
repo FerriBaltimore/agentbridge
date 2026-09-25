@@ -10,6 +10,7 @@ entitlement or available quota.
 
 ```sh
 agentbridge accounts usage "My Codex" --refresh
+agentbridge accounts reset-credits "My Codex" --refresh --json
 agentbridge accounts history "My Codex" --json
 agentbridge models list --refresh
 agentbridge usage --turn-id TURN_ID --json
@@ -76,10 +77,25 @@ unavailable or change independently of CLIProxyAPI; fixture tests establish
 the request and normalization shape, while each provider still needs live
 acceptance.
 
-The local proxy does not expose Codex earned-reset redemption.
-`accounts.quota.reset` returns unsupported in v2; there is no CLI
-`accounts quota-reset` command. Historical native reset-credit operations do
-not appear in current proxy account responses.
+Earned Codex reset credits are separate from quota-window renewal times and
+additional quota pools. `accounts reset-credits NAME --refresh` requests a
+fresh count and optional detail rows through the account's bound proxy. To
+explicitly redeem one, save its `observation_ref` and use:
+
+```sh
+agentbridge accounts quota-reset "My Codex" \
+  --idempotency-key ONE_LOGICAL_ATTEMPT_KEY \
+  --observation-ref FRESH_OBSERVATION_REF --json
+```
+
+The observation expires for redemption after 60 seconds. An optional
+`--credit-id` selects an observed available credit. The attempt and key are
+durable before the provider call. A lost or invalid response leaves the
+outcome unknown; AgentBridge will not retry or change accounts on its own.
+Inspect the pending attempt and reuse the same key and parameters only when
+explicitly reconciling it. Details and exact response fields are in the
+[account reset contract](interface/account-resets.md). This adapter has
+fixture evidence; live credit reads and redemption remain unverified.
 
 ## Models and consumption
 

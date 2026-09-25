@@ -30,9 +30,10 @@ from .state_path import default_root
 from .workspace_policy import validate_execution_workspace, validate_workspace
 from .account_retirement import AccountRetirementMixin
 from .account_pause import AccountPauseMixin
+from .account_resets import AccountResetMixin
 
 
-class Bridge(EventStreamMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
+class Bridge(AccountResetMixin, EventStreamMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
     def __init__(self, root=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
@@ -130,9 +131,6 @@ class Bridge(EventStreamMixin, AccountPauseMixin, AccountRetirementMixin, Evalua
             raise UnsupportedError('Historical usage filters are not supported by this adapter.')
         values = self.account_service.history(account_id, limit=limit + cursor)
         return values[cursor:cursor + limit]
-
-    def account_quota_reset(self, account_ref, *, idempotency_key, credit_id=None):
-        raise UnsupportedError('The local proxy does not expose Codex earned reset redemption.')
 
     def account_login(self, **options):return self.authentication.login(**options)
     def account_login_attempts(self, **options):return self.authentication.attempts(**options)

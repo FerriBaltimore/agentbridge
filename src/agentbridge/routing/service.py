@@ -104,10 +104,13 @@ class RoutingService:
     def candidates(self, model, *, provider=None, refresh=False, excluded_account_refs=()):
         excluded = {self.accounts.resolve(reference).id for reference in excluded_account_refs}
         paused = self.store.paused_account_ids()
+        pending = self.store.pending_reset_account_ids()
+        reset_at = {}
         accounts = [account for account in self.accounts.list()
                     if account.proxy_base_url and model in account.supported_models
                     and (provider is None or account.provider == provider)
-                    and account.id not in excluded and account.id not in paused]
+                    and account.id not in excluded and account.id not in paused
+                    and account.id not in pending]
         loads = self.store.route_load([account.id for account in accounts])
         result = []
         for account in accounts:
@@ -120,7 +123,10 @@ class RoutingService:
             quotas = ()
             if item and item.get('used_percent') is not None:
                 observed_at = timestamp(item.get('quota_observed_at'))
-                if observed_at is not None:
+                if account.id not in reset_at:
+                    reset_at[account.id] = self.store.reset_invalidation_at(account.id)
+                if observed_at is not None and (reset_at[account.id] is None
+                                                or observed_at >= reset_at[account.id]):
                     quotas = (QuotaObservation(item['used_percent'], observed_at, model_id=model),)
             load = loads[account.id]
             result.append(RouteCandidate(
@@ -162,8 +168,10 @@ class RoutingService:
 
     def models(self, *, account_ref=None, provider=None, refresh=False):
         """Return a configured catalog, marking proxy observations separately."""
+        pending = self.store.pending_reset_account_ids()
         accounts = [account for account in self.accounts.list() if account.proxy_base_url
-                    and account.id not in self.store.paused_account_ids()]
+                    and account.id not in self.store.paused_account_ids()
+                    and account.id not in pending]
         if account_ref is not None:
             selected = self.accounts.resolve(account_ref)
             accounts = [account for account in accounts if account.id == selected.id]
@@ -237,21 +245,42 @@ class RoutingService:
                     **previous['data'], 'source': previous['source']})
                 snapshot = self._newer_usage(snapshot, prior)
         if not refresh or not verified or account.provider not in {'codex', 'claude'}:
-            return snapshot
+            return self._after_reset(account.id, snapshot)
         binding = self.store.proxy_binding(account.id)
         if not binding:
-            return {**snapshot, 'refresh_reason': 'proxy_binding_unverified'}
+            return self._after_reset(account.id, {**snapshot, 'refresh_reason': 'proxy_binding_unverified'})
         route = ProxyRoute(account.id, account.proxy_base_url, account.key_env)
         try:
             active = ManagementClient(route, account.management_key_env, timeout=8).fetch_quota(
                 binding['binding_fingerprint'])
         except BridgeError as error:
-            return {**snapshot, 'refresh_reason': error.code}
+            return self._after_reset(account.id, {**snapshot, 'refresh_reason': error.code})
         result = self._usage_snapshot(account.id, active)
         self.store.usage_observation(account.id, result['source'], 'account',
             {key: result[key] for key in ('supported', 'quota_windows', 'reason')},
             stale=result['stale'])
-        return self._newer_usage(snapshot, result)
+        return self._after_reset(account.id, self._newer_usage(snapshot, result))
+
+    def _after_reset(self, account_id, snapshot):
+        """Do not publish quota percentages observed before a known redemption."""
+        invalidated_at = self.store.reset_invalidation_at(account_id)
+        if invalidated_at is None:
+            return snapshot
+        windows = []
+        invalidated = False
+        for item in snapshot['quota_windows']:
+            observed_at = timestamp(item.get('observed_at'))
+            if observed_at is None or observed_at < invalidated_at:
+                windows.append({**item, 'used_percent': None, 'remaining_percent': None,
+                                'stale': True, 'invalidation_reason': 'reset_quota_refresh_required'})
+                invalidated = True
+            else:
+                windows.append(item)
+        if not invalidated:
+            return snapshot
+        fresh = any(not item['stale'] and item.get('used_percent') is not None for item in windows)
+        return {**snapshot, 'quota_windows': windows, 'supported': fresh, 'stale': not fresh,
+                'reason': None if fresh else 'reset_quota_refresh_required'}
 
     @staticmethod
     def _newer_usage(first, second):

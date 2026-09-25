@@ -85,6 +85,22 @@
 .usage-older-section:not([open]) .account-usage-window { display: none; }
 .usage-window-section .account-usage-window, .usage-older-section .account-usage-window { padding: 14px 16px; border-radius: 11px; background: #fbfcff; }
 .account-usage-dialog .modal-body h2 { overflow-wrap: anywhere; }
+.account-reset-section { display: grid; gap: 9px; min-width: 0; padding: 15px 16px; border: 1px solid #dce5f5; border-radius: 12px; background: linear-gradient(145deg, #f7faff, #fff); }
+.account-reset-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.account-reset-heading h3 { margin: 0; color: #31425e; font-size: 12px; }
+.account-reset-refresh { flex: none; padding: 6px 8px; font-size: 10px; }
+.account-reset-status { margin: 0; color: #415779; font-size: 12px; font-weight: 750; }
+.account-reset-note, .account-reset-pending, .account-reset-error { margin: 0; color: #7889a3; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-reset-pending { color: #95601e; }
+.account-reset-error { color: #b14d58; }
+.reset-credit-details { color: #667995; font-size: 11px; }
+.reset-credit-details summary { cursor: pointer; font-weight: 700; }
+.reset-credit-details ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.6; }
+.account-reset-use { justify-self: start; font-size: 11px; }
+.account-reset-confirm { display: grid; gap: 10px; padding: 11px 12px; border: 1px solid #c8d5f3; border-radius: 9px; background: #eef3ff; }
+.account-reset-confirm p { margin: 0; color: #405271; font-size: 11px; line-height: 1.5; }
+.account-reset-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.account-reset-actions .button { font-size: 11px; }
 .account-models-button { min-height: 32px; padding: 7px 9px; font-size: 10px; }
 .model-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 6px; background: #edf2ff; color: #5572dc; font-size: 9px; }
 .account-models-dialog { width: min(710px, calc(100vw - 28px)); }

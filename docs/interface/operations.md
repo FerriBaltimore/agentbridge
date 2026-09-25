@@ -24,6 +24,9 @@ where the implementation declares support.
     accounts.usage(account_ref, refresh?)
     accounts.usage_history(account_ref, since?, until?, granularity?,
                            limit?, cursor?, refresh?)
+    accounts.reset_credits(account_ref?, account_id?, refresh?)
+    accounts.quota.reset(account_ref?, account_id?, idempotency_key,
+                         observation_ref, credit_id?)
     models.list(account_ref?, refresh?, include_hidden?,
                 include_deprecated?, limit?, cursor?)
 
@@ -76,6 +79,12 @@ already admitted turns intact. Resuming restores new-work eligibility after
 the usual live proxy checks. Both operations are idempotent and return the
 account reference plus `routing.paused` and `routing.paused_at`. A pause does
 not cancel a running turn or revoke a provider credential.
+Earned Codex reset credits use a separate explicit read and redemption flow.
+`accounts.reset_credits(refresh=true)` returns a fresh `observation_ref` when
+Codex supplies a usable count. `accounts.quota.reset` requires that reference
+and a durable idempotency key; it never runs automatically. See
+[account-resets.md](account-resets.md) for the response, expiry, outcomes and
+unknown-result rules.
 Account names are unique within each provider after trimming and case folding.
 Codex and Claude accounts may share the same human name. Login start and
 completion enforce that provider-scoped claim in database transactions; a

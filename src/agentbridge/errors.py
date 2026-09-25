@@ -66,7 +66,8 @@ class BridgeError(Exception):
                            'output_limit_exceeded',
                            'budget_exhausted', 'max_turns_exceeded', 'structured_output_failed'}:
             category = 'limit'
-        elif self.code in {'unknown_outcome', 'managed_proxy_stop_unverified'}:
+        elif self.code in {'unknown_outcome', 'reset_outcome_unknown', 'reset_in_progress',
+                           'managed_proxy_stop_unverified'}:
             category = 'execution'
         elif self.code == 'provider_catalog_unsupported':
             category = 'capability'

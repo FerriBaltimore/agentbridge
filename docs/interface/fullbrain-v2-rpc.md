@@ -93,6 +93,24 @@ Usage history is available through `accounts.usage_history` or
 `usage.history`; both return bare arrays, and historical time filters and
 aggregation are currently unsupported.
 
+Earned Codex resets use a separate, explicit account operation. Fullbrain
+first calls `accounts.reset_credits` with `refresh: true` and displays the
+returned `available_count`, optional credit details, `stale` and
+`observation_ref`. It must not infer a credit from a window's `resets_at` or
+from an additional pool such as `gpt-reserve`. After a user explicitly chooses
+to redeem, Fullbrain saves a key for that one logical attempt and calls:
+
+```json
+{"jsonrpc":"2.0","id":18,"method":"accounts.reset_credits","params":{"account_ref":"team-codex-1","refresh":true}}
+{"jsonrpc":"2.0","id":19,"method":"accounts.quota.reset","params":{"account_ref":"team-codex-1","idempotency_key":"SAVED_LOGICAL_ATTEMPT_KEY","observation_ref":"SAVED_FRESH_OBSERVATION_REF"}}
+```
+
+The credit observation must be fresh and available. If the redemption result
+is unknown, keep its key and original parameters for explicit reconciliation;
+do not create another key or switch accounts. The current adapter has fixture
+evidence only; live provider acceptance remains pending. The complete result
+and expiry rules are in [account-resets.md](account-resets.md).
+
 Each `models.list.items[]` model has `id`, `display_name`, `availability`,
 `source`, `providers`, `candidate_account_refs`, `observed_account_refs`,
 `reasoning_efforts`, `context_windows`, `input_modalities` and

@@ -1,10 +1,12 @@
 import { api } from './api.js';
 import { accountModels, renderAccountModelsDialog } from './account-models-view.js';
+import { createAccountResetView } from './account-reset-view.js';
 import { byId, clear, describeError, emptyState, node, setFeedback, statusPill, toast } from './ui.js';
 import { usageUnavailable, usageWindowRow, usageWindows } from './usage-view.js';
 
 let selectedModelsAccountRef = null;
 let selectedUsageAccountRef = null;
+let resetView = null;
 let modelsDialogReady = false;
 let usageDialogReady = false;
 let accountRows = [];
@@ -92,11 +94,11 @@ function accountUsage(account, snapshot) {
   if (!windows.length) {
     wrapper.append(node('span', 'usage-unknown', 'Unknown usage'));
     wrapper.title = usageUnavailable(snapshot);
-    return wrapper;
+    if (account.provider !== 'codex') return wrapper;
   }
   for (const window of windows.slice(0, 2)) wrapper.append(usageWindowRow(window, { compact: true }));
   const details = node('button', 'account-usage-open', windows.length > 2
-    ? `View ${windows.length} windows` : 'Usage details');
+    ? `View ${windows.length} windows` : windows.length ? 'Usage details' : 'Usage and resets');
   details.type = 'button';
   details.dataset.testid = 'account-usage-open';
   details.dataset.accountRef = account.account_ref;
@@ -117,6 +119,7 @@ function renderUsageDialog(account, snapshot) {
   const content = clear(byId('account-usage-content'));
   if (!windows.length) {
     content.append(node('p', 'account-detail-note', usageUnavailable(snapshot)));
+    appendResetControl(content, account);
     return;
   }
   let help = 'Each bar is a provider-reported quota window. Its duration and reset appear below the bar.';
@@ -148,6 +151,21 @@ function renderUsageDialog(account, snapshot) {
   if (snapshot?.reason && windows.every((window) => window.stale)) {
     content.append(node('p', 'account-detail-note', `Latest refresh: ${String(snapshot.reason).replaceAll('_', ' ')}.`));
   }
+  appendResetControl(content, account);
+}
+
+function appendResetControl(content, account) {
+  if (account.provider !== 'codex') {
+    resetView?.dispose();
+    resetView = null;
+    return;
+  }
+  if (resetView?.accountRef !== account.account_ref) {
+    resetView?.dispose();
+    resetView = createAccountResetView(account, accountStatuses?.get(account.account_ref),
+      () => accountsChanged());
+  }
+  content.append(resetView.element);
 }
 
 function openUsage(account, snapshot) {
@@ -169,6 +187,8 @@ function ensureUsageDialog() {
   dialog.addEventListener('close', () => {
     const ref = selectedUsageAccountRef;
     selectedUsageAccountRef = null;
+    resetView?.dispose();
+    resetView = null;
     const button = [...byId('accounts-list').querySelectorAll('[data-testid="account-usage-open"]')]
       .find((candidate) => candidate.dataset.accountRef === ref);
     if (button?.getClientRects().length) button.focus();

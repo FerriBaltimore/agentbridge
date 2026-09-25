@@ -49,6 +49,10 @@ default. AgentBridge does not silently import or discard the old accounts.
 - The permission selector follows SDK capabilities. Choose "Ask before actions"
   to test an interactive provider request, then allow or deny it from Activity.
 - Send a message, inspect recorded events, stop a turn, and review its output.
+- In a Codex account's usage dialog, check earned reset credits and inspect
+  their reported expiry. Redeeming one requires an explicit confirmation. The
+  browser saves the request key before sending it and offers the same-key retry
+  after an uncertain outcome; opening the dialog never redeems a credit.
 - Remove an account to retire its local route. AgentBridge preserves historical
   conversations; this action does not revoke the upstream OAuth credential.
 

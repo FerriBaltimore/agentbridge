@@ -47,6 +47,12 @@ class AccountRetirementStoreMixin:
                                     "('starting','running','stopping')", (account_id,)).fetchone()
                 if active:
                     raise BusyError()
+                reset_pending = db.execute(
+                    "SELECT 1 FROM account_reset_attempts WHERE account_id=? AND state='pending'",
+                    (account_id,)).fetchone()
+                if reset_pending:
+                    raise BridgeError('reset_pending',
+                                      'Resolve the pending reset attempt before removing this account.')
                 pending = db.execute("SELECT 1 FROM auth_attempts WHERE account_id=? AND status NOT IN "
                     "('failed','cancelled','expired','revoked','replaced','bound','usable')",
                     (account_id,)).fetchone()
