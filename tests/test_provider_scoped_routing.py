@@ -187,7 +187,8 @@ def test_pinned_chat_can_switch_provider_with_same_native_thread(tmp_path, monke
     assert bridge.store.routing('conversation')['last_completed_account_id'] == 'openai'
     monkeypatch.setattr(bridge.routes, 'select', lambda *args, **kwargs:
                         RouteDecision('anthropic', MODEL, 'unknown', None,
-                                      'healthy', 0, 'quota_unknown'))
+                                      'healthy', 0, 'quota_unknown',
+                                      'provider_incompatible', {'account_id': 'openai'}))
     account, decision, context, omissions, snapshot = prepare_turn(
         bridge, bridge.get_session('conversation'), RunOptions(model=MODEL))
     assert account.id == 'anthropic'

@@ -12,6 +12,10 @@ _BREAK_FIELDS = frozenset({
     "account_id", "source", "window_id", "observed_at", "reset_at",
     "used_percent", "limit_reached",
 })
+_ACCOUNT_BREAKS = frozenset({
+    'explicit_exclusion', 'account_paused', 'account_retired',
+    'model_incompatible', 'provider_incompatible',
+})
 
 
 def _bounded_label(value):
@@ -30,6 +34,20 @@ def _break_evidence(values):
     evidence = values.get("affinity_break_evidence")
     if reason is None and evidence is None:
         return {}
+    if reason in _ACCOUNT_BREAKS:
+        if (values.get('reason') == 'affinity' or not isinstance(evidence, dict)
+                or evidence.keys() != {'account_id'}):
+            raise BridgeError('invalid_request', 'The affinity availability evidence is invalid.')
+        identifier(evidence['account_id'])
+        return {'affinity_break_reason': reason, 'affinity_break_evidence': evidence}
+    if reason == 'context_window_incompatible':
+        if (values.get('reason') == 'affinity' or not isinstance(evidence, dict)
+                or evidence.keys() != {'account_id', 'context_window'}
+                or type(evidence['context_window']) is not int
+                or not 0 < evidence['context_window'] <= 10_000_000):
+            raise BridgeError('invalid_request', 'The affinity context evidence is invalid.')
+        identifier(evidence['account_id'])
+        return {'affinity_break_reason': reason, 'affinity_break_evidence': evidence}
     if (reason != "quota_exhausted" or values.get("reason") == "affinity"
             or not isinstance(evidence, dict) or evidence.keys() != _BREAK_FIELDS):
         raise BridgeError("invalid_request", "The affinity break evidence is invalid.")

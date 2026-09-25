@@ -36,10 +36,16 @@ def downgrade_routing_to_v10(store):
         ''')
 
 
-def admit(store, run_id, account_id, *, reason=None, context=None, key=None):
+def admit(store, run_id, account_id, *, reason=None, context=None, key=None,
+          quota_break=False):
     state, used = ("unknown", None) if account_id == "b" else ("known", 20)
     reason = reason or ("quota_unknown" if account_id == "b" else "affinity")
-    decision = RouteDecision(account_id, MODEL, state, used, "healthy", 0, reason)
+    previous = store.routing("instance")['affinity_account_id']
+    evidence = ({"account_id": previous, "source": "fixture", "window_id": "primary",
+                 "observed_at": time.time(), "reset_at": None,
+                 "used_percent": 100, "limit_reached": True} if quota_break else None)
+    decision = RouteDecision(account_id, MODEL, state, used, "healthy", 0, reason,
+                             "quota_exhausted" if evidence else None, evidence)
     return store.admit(
         run_id, "instance", "fixture prompt", RunOptions(model=MODEL), key,
         account_id=account_id, route_decision=decision, route_context=context,
@@ -72,7 +78,7 @@ def test_failed_new_route_keeps_affinity_and_the_same_native_session(tmp_path):
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
 
-    assert admit(store, "first-b", "b") == (
+    assert admit(store, "first-b", "b", quota_break=True) == (
         "first-b", True)
     assert store.routing("instance")["affinity_account_id"] == "b"
     store.emit("first-b", "session", {"native_id": "native-a"})
@@ -115,7 +121,7 @@ def test_v10_migration_recovers_last_admitted_route_after_failure(tmp_path):
     admit(store, "first", "a")
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
-    admit(store, "failed-b", "b")
+    admit(store, "failed-b", "b", quota_break=True)
     store.finish("failed-b", "failed", "provider_failed")
     downgrade_routing_to_v10(store)
 

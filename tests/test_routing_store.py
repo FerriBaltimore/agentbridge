@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import stat
+import time
 
 import pytest
 
@@ -31,14 +32,20 @@ def prepared(tmp_path):
     return store
 
 
-def decision(account_id, *, used=20):
-    return RouteDecision(account_id, MODEL, "known", used, "healthy", 0, "least_used")
+def decision(account_id, *, used=20, previous=None):
+    evidence = ({"account_id": previous, "source": "fixture", "window_id": "primary",
+                 "observed_at": time.time(), "reset_at": None,
+                 "used_percent": 100, "limit_reached": True}
+                if previous is not None and previous != account_id else None)
+    return RouteDecision(account_id, MODEL, "known", used, "healthy", 0, "least_used",
+                         "quota_exhausted" if evidence else None, evidence)
 
 
 def admit(store, run_id, session_id, account_id, *, key=None, context=None, omissions=0,
           excluded_account_refs=()):
+    previous = store.routing(session_id)['affinity_account_id']
     return store.admit(run_id, session_id, "fixture prompt", RunOptions(model=MODEL), key,
-                       account_id=account_id, route_decision=decision(account_id),
+                       account_id=account_id, route_decision=decision(account_id, previous=previous),
                        route_context=context, route_omissions=omissions,
                        route_event_seq=store.last_route_event_seq(session_id) if context else None,
                        excluded_account_refs=excluded_account_refs)
@@ -51,7 +58,7 @@ def test_automatic_admission_persists_route_and_native_completion(tmp_path):
                                           "last_completed_account_id": None,
                                           "last_native_id": None, "provider": None,
                                           "affinity_account_id": "a"}
-    # The first selected account may differ from the creation anchor.
+    # A verified quota rejection can change the creation anchor before the first turn.
     assert admit(store, "run-b", "instance", "b") == ("run-b", True)
     event = store.events(run_id="run-b")[0]
     assert event.kind == "route_selected"
@@ -171,7 +178,7 @@ def test_admission_rejects_portable_context_in_place_of_native_history(tmp_path,
     store.emit("first", "diagnostic", {"reason": "late_evidence"})
     with pytest.raises(BridgeError) as caught:
         store.admit("stale", "instance", "fixture prompt", RunOptions(model=MODEL), None,
-                    account_id="b", route_decision=decision("b"),
+                    account_id="b", route_decision=decision("b", previous="a"),
                     route_context=context, route_event_seq=snapshot)
     assert caught.value.code == "invalid_request"
     assert store.route_load(("b",))["b"]["assigned_turns"] == 0
@@ -306,7 +313,8 @@ def test_native_history_and_replay_keep_the_selected_proxy_account(tmp_path):
     bridge.store.emit("first", "session", {"native_id": "native-a"})
     bridge.store.finish("first", "completed")
     assert bridge.store.admit("switch", "instance", "fixture prompt", RunOptions(model=MODEL),
-                              "switch-key", account_id="b", route_decision=decision("b")) == ("switch", True)
+                              "switch-key", account_id="b",
+                              route_decision=decision("b", previous="a")) == ("switch", True)
     assert bridge.store.routing("instance")["mode"] == "automatic"
     assert bridge.store.get("sessions", "instance")["account_id"] == "b"
     assert bridge.store.get("sessions", "instance")["native_id"] == "native-a"

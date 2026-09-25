@@ -16,6 +16,7 @@ that preference across process restarts and completed or failed turns.
 | Current account is busy or temporarily rate limited | Return a retryable error without changing affinity |
 | Identity verification fails | Block execution without treating the failure as exhausted quota |
 | Account paused, retired, excluded, or incompatible with an explicit model/provider change | Select an eligible replacement |
+| Earned reset pending for the affinity account | Block this turn and queued dispatch until the saved attempt is reconciled; keep affinity |
 | Pinned mode | Use the selected account; no automatic replacement |
 
 Selection uses every applicable quota window, including account-wide and
@@ -32,8 +33,10 @@ Automatic failover occurs at admission of a new, explicitly submitted turn.
 It never retries a failed request, replays a tool call or changes credentials
 inside an executing turn. Stop remains explicit cancellation. Queue delivery
 does not grant permission to replay a failed turn. A route decision, its
-exhaustion evidence when available, and the new affinity are committed in the
-same transaction before execution.
+account-switch reason and bounded evidence, and the new affinity are committed
+in the same transaction before execution. Admission rechecks pending resets and
+the reason for leaving the prior account. A quota rejection observed before a
+known earned reset cannot authorize a later account switch.
 
 ## SDK and CLI
 

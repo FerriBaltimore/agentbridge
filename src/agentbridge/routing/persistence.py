@@ -8,6 +8,7 @@ import time
 from ..errors import BridgeError, BusyError
 from ..models import Account, RunOptions, TERMINAL, identifier, model_id
 from ..native_sessions import bind_native_session, require_native_session
+from .affinity_break import require_affinity_break
 from .binding import has_bound_proxy_login
 from .evidence import route_evidence
 from .service import OBSERVATION_TTL, RoutingService
@@ -288,15 +289,20 @@ class RoutingStoreMixin:
                     raise BridgeError("invalid_request", "Automatic routing requires an account selection.")
                 identifier(account_id)
                 model = options.model or session["model"]
+                affinity = routing["affinity_account_id"]
+                if affinity and db.execute(
+                        "SELECT 1 FROM account_reset_attempts WHERE account_id=? AND state='pending'",
+                        (affinity,)).fetchone():
+                    raise BridgeError('reset_pending',
+                                      'Resolve the affinity account reset before routing new work.')
                 _verified_proxy_config(db, account_id, model, provider=routing["provider"])
                 route_event = route_evidence(route_decision, account_id, model)
-                if (route_event["reason"] == "affinity"
-                        and account_id != routing["affinity_account_id"]):
+                if route_event["reason"] == "affinity" and account_id != affinity:
                     raise BridgeError("invalid_request", "An affinity decision must keep the current account.")
-                broken = route_event.get("affinity_break_evidence")
-                if broken and (broken["account_id"] != routing["affinity_account_id"]
-                               or broken["account_id"] == account_id):
-                    raise BridgeError("invalid_request", "The affinity break must identify the previous route.")
+                require_affinity_break(
+                    db, self, affinity=affinity, selected=account_id, model=model,
+                    provider=routing['provider'], context_window=options.context_window,
+                    exclusions=excluded_account_refs, event=route_event)
                 prior = db.execute("SELECT account_id,state FROM runs WHERE session_id=? "
                                    "ORDER BY rowid DESC LIMIT 1", (session_id,)).fetchone()
                 stable = routing["last_completed_account_id"]

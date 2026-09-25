@@ -1,5 +1,7 @@
 """Manual policy changes preserve account ownership and explicit recovery."""
 
+import time
+
 import pytest
 
 from agentbridge import Bridge, RunOptions
@@ -128,7 +130,11 @@ def test_failed_new_affinity_and_pinning_preserve_conversation_native_thread(bri
     completed(bridge, instance['id'])
     bridge.store.admit('failed-b', instance['id'], 'Next request', RunOptions(model=MODEL), None,
                        account_id='b', route_decision=RouteDecision(
-                           'b', MODEL, 'unknown', None, 'healthy', 0, 'quota_unknown'))
+                           'b', MODEL, 'unknown', None, 'healthy', 0, 'quota_unknown',
+                           'quota_exhausted', {'account_id': 'a', 'source': 'fixture',
+                               'window_id': 'primary', 'observed_at': time.time(),
+                               'reset_at': None, 'used_percent': 100,
+                               'limit_reached': True}))
     bridge.store.finish('failed-b', 'failed', 'provider_failed')
     value = bridge.instance_get(instance['id'])
     assert value['affinity_account_ref'] == 'b'

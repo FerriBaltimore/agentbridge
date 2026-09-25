@@ -1,5 +1,6 @@
 """Model-first route discovery from safe local proxy observations."""
 
+from dataclasses import replace
 import os
 from threading import Lock
 import time
@@ -117,6 +118,9 @@ class RoutingService:
         excluded = {self.accounts.resolve(reference).id for reference in excluded_account_refs}
         paused = self.store.paused_account_ids()
         pending = self.store.pending_reset_account_ids()
+        if affinity_account_id in pending:
+            raise BridgeError('reset_pending',
+                              'Resolve the affinity account reset before routing new work.')
         accounts = [account for account in self.accounts.list()
                     if account.proxy_base_url and model in account.supported_models
                     and (provider is None or account.provider == provider)
@@ -195,6 +199,7 @@ class RoutingService:
         from .admission import normalized_exclusions
 
         excluded = normalized_exclusions(excluded_account_refs)
+        excluded_ids = {self.accounts.resolve(reference).id for reference in excluded}
         if (context_window is not None and
                 (type(context_window) is not int or not 0 < context_window <= 10_000_000)):
             raise BridgeError('invalid_context_window', 'context_window must be a positive token count.')
@@ -202,6 +207,24 @@ class RoutingService:
                                      excluded_account_refs=excluded,
                                      affinity_account_id=affinity_account_id,
                                      fast_affinity=context_window is None)
+        break_reason = None
+        if affinity_account_id is not None and all(
+                item.account_id != affinity_account_id for item in candidates):
+            if affinity_account_id in excluded_ids:
+                break_reason = 'explicit_exclusion'
+            elif self.store.retirement_status(affinity_account_id)['retired']:
+                break_reason = 'account_retired'
+            elif self.store.pause_status(affinity_account_id)['paused']:
+                break_reason = 'account_paused'
+            else:
+                current = self.accounts.get(affinity_account_id)
+                if model not in current.supported_models:
+                    break_reason = 'model_incompatible'
+                elif provider is not None and current.provider != provider:
+                    break_reason = 'provider_incompatible'
+                else:
+                    raise BridgeError('proxy_binding_unverified',
+                                      'The affinity account cannot be routed safely.')
         if context_window is not None:
             declared_candidates = candidates
             eligible = []
@@ -213,10 +236,20 @@ class RoutingService:
                 if ceiling is not None and context_window <= ceiling:
                     eligible.append(item)
             candidates = eligible
+            if (affinity_account_id is not None and break_reason is None
+                    and all(item.account_id != affinity_account_id for item in candidates)):
+                break_reason = 'context_window_incompatible'
             if not candidates and declared_candidates:
                 raise BridgeError('context_window_unavailable',
                                   'No verified account supports the requested context window.')
-        return select_route(model, candidates, affinity_account_id=affinity_account_id)
+        decision = select_route(model, candidates, affinity_account_id=affinity_account_id)
+        if break_reason is not None:
+            evidence = {'account_id': affinity_account_id}
+            if break_reason == 'context_window_incompatible':
+                evidence['context_window'] = context_window
+            return replace(decision, affinity_break_reason=break_reason,
+                           affinity_break_evidence=evidence)
+        return decision
 
     def models(self, *, account_ref=None, provider=None, refresh=False):
         """Return a configured catalog, marking proxy observations separately."""

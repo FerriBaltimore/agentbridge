@@ -205,6 +205,10 @@ def test_excluded_account_cannot_win_initial_or_turn_route(tmp_path, monkeypatch
         assert existing['account_ref'] == ' Alpha '
         turn = bridge.message_create(existing['id'], 'route around deletion',
                                      excluded_account_refs=[' Alpha '])
+        route = [event for event in bridge.turn_events(turn['turn_id'])
+                 if event['kind'] == 'route.selected'][0]['data']
+        assert route['affinity_break_reason'] == 'explicit_exclusion'
+        assert route['affinity_break_evidence'] == {'account_id': 'alpha'}
         assert turn['account_ref'] == 'Beta'
         assert bridge.run(turn['turn_id']).wait(10)['state'] == 'completed'
         with pytest.raises(BridgeError) as error:
