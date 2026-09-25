@@ -48,7 +48,7 @@ def test_missing_native_observation_is_explicit_failure(tmp_path, native_id):
     assert store.get('sessions', 'instance')['native_id'] == 'native-original'
 
 
-@pytest.mark.parametrize('current', ['native-current', None])
+@pytest.mark.parametrize('current', ['native-original', None])
 def test_v12_anchors_current_history_or_last_observation_after_legacy_clear(tmp_path, current):
     store = prepared(tmp_path)
     store.finish('first', 'failed')
@@ -73,6 +73,25 @@ def test_v12_rechecks_version_under_write_lock(tmp_path):
     with store.connect() as db:
         assert migrate_v12(db, 11) == 12
         assert db.execute('SELECT count(*) FROM native_session_bindings').fetchone()[0] == 1
+
+
+def test_legacy_rollback_to_older_thread_does_not_silently_omit_later_history(tmp_path):
+    store = prepared(tmp_path)
+    store.finish('first', 'completed')
+    store.admit('second', 'instance', 'later work', RunOptions(), None)
+    with store.connect() as db:
+        store._event(db, 'second', 'instance', 'session', {'native_id': 'native-later'})
+        db.execute('DROP TABLE native_session_bindings')
+        db.execute('UPDATE metadata SET version=11')
+    store.finish('second', 'failed')
+    migrated = Store(store.root)
+    assert migrated.get('sessions', 'instance')['native_id'] == 'native-original'
+    with migrated.connect() as db, pytest.raises(BridgeError) as caught:
+        require_native_session(db, migrated.get('sessions', 'instance'))
+    assert caught.value.code == 'native_session_diverged'
+    assert len(migrated.session_runs('instance')) == 2
+    assert [event.data['native_id'] for event in migrated.events(session_id='instance')
+            if event.kind == 'session'] == ['native-original', 'native-later']
 
 
 def test_deleting_instance_removes_its_native_binding(tmp_path):

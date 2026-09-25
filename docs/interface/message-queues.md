@@ -152,3 +152,4 @@ and lost acknowledgement. The pinned Codex 0.153.0 executable's generated local
 schema confirms the native steering request and acknowledgement fields.
 These checks establish implementation and fixture coverage; live acceptance
 through upstream providers remains separate and pending.
+See the [recorded acceptance checks](../development/message-queues-acceptance.md).

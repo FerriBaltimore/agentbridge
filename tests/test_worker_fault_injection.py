@@ -24,8 +24,14 @@ def local_proxy():
 
 
 def admitted(tmp_path, monkeypatch, local_proxy,
-             script='import json; print(json.dumps({"type":"turn.completed"}))'):
+             script=None):
     native = tmp_path / 'provider.py'
+    if script is None:
+        script = (
+            'import json\n'
+            'print(json.dumps({"type":"thread.started","thread_id":"fixture-fault-history"}))\n'
+            'print(json.dumps({"type":"turn.completed"}))\n'
+        )
     native.write_text(script)
     bridge = bridge_with_proxy(tmp_path, monkeypatch, local_proxy,
                                command=('/usr/bin/python3', str(native)))

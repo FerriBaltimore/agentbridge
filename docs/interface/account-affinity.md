@@ -72,6 +72,11 @@ upstream provider. Native history remains with Codex; routing changes never
 replace it with a bounded portable transcript. Native version checks and
 divergent-session protection still apply. Missing or divergent state blocks
 continuation explicitly, including after an interrupted or failed turn.
+Legacy chats whose stored identity differs from their latest observed native
+thread also fail with `native_session_diverged`. Restoring an older successful
+thread cannot silently discard the history of a later failed thread. Such
+records require explicit review and recovery or a separate transfer; the SDK
+does not choose a replacement or merge native histories.
 
 Keeping the account, exact model and configuration stable may also preserve
 the reusable prompt prefix. AgentBridge does not add rotating cache keys, time stamps,

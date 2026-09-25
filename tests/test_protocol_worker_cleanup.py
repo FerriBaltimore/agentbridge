@@ -33,6 +33,7 @@ child_code = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); 
 kwargs = {} if sys.argv[2] == 'inherit' else {'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
 child = subprocess.Popen([sys.executable, '-c', child_code], stdin=subprocess.DEVNULL, **kwargs)
 Path(sys.argv[1]).write_text(str(child.pid))
+print(json.dumps({'type':'thread.started','thread_id':'fixture-cleanup-history'}), flush=True)
 print(json.dumps({'type':'turn.completed'}), flush=True)
 ''')
     with management_server() as port:

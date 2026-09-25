@@ -45,10 +45,12 @@ as an execution engine or account onboarding route.
   acceptance.
 - Live login, refresh, model entitlement, provider-specific tools, quota
   accuracy and cross-account continuation remain unverified for the v2 path.
-- Existing chats already split across native sessions retain the currently
-  anchored session; their older threads are not merged retroactively. Stable
-  native identity does not establish hosted-tool availability or cache hits
-  across upstream providers.
+- Existing chats whose stored native identity differs from their latest
+  observed thread fail with `native_session_diverged`, including legacy
+  restoration of an older thread after a later thread failed. They need
+  explicit review and recovery or a separate transfer; native histories are
+  not merged retroactively. Stable native identity does not establish
+  hosted-tool availability or cache hits across upstream providers.
 - PDFs and other binary attachments, persistent advanced defaults,
   provider_options and historical usage aggregation remain unsupported where
   not separately declared. Per-turn context-window override accepts a positive

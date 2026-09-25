@@ -48,6 +48,8 @@ def main():
         text = steer['params']['input'][0]['text']
         if text == 'drop':
             return
+        if text == 'complete_without_ack':
+            break
         if text == 'reject':
             send({'id': steer['id'], 'error': {'code': -32600, 'message': 'Synthetic rejection'}})
             continue

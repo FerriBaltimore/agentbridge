@@ -58,7 +58,9 @@ def test_stderr_is_classified_only_for_failure_and_not_persisted(tmp_path, monke
 
 
 def test_successful_terminal_is_not_overruled_by_unrelated_stderr(tmp_path, monkeypatch):
-    with provider(tmp_path, monkeypatch, [{'type': 'turn.completed'}],
+    events = [{'type': 'thread.started', 'thread_id': 'fixture-native'},
+              {'type': 'turn.completed'}]
+    with provider(tmp_path, monkeypatch, events,
                   stderr='fixture diagnostic mentions a rate limit') as (bridge, session):
         run = bridge.submit(session['id'], 'fixture', options=RunOptions(timeout=5))
         assert run.wait(10)['state'] == 'completed'
