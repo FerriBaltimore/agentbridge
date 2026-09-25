@@ -50,6 +50,10 @@ def bind_proxy_account(store, attempt, route_config, observation):
                              (attempt['id'], attempt['owner'])).fetchone()
         if current is None or current['status'] != 'verified':
             raise BridgeError('authentication_not_verified', 'The login is no longer verified.')
+        if db.execute("SELECT 1 FROM account_reset_attempts WHERE account_id=? "
+                      "AND state='pending'", (account.id,)).fetchone():
+            raise BridgeError('reset_pending',
+                              'Resolve the pending reset attempt before activating this login.')
         previous_row = db.execute('SELECT config FROM accounts WHERE id=?', (account.id,)).fetchone()
         previous = Account(**json.loads(previous_row['config'])) if previous_row else None
         if previous is not None:

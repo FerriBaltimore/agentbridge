@@ -150,6 +150,11 @@ class AccountResetStoreMixin:
             if db.execute("SELECT 1 FROM runs WHERE account_id=? AND state IN ('starting','running','stopping')",
                           (account_id,)).fetchone():
                 raise BusyError()
+            if db.execute("SELECT 1 FROM auth_attempts WHERE account_id=? AND status NOT IN "
+                          "('failed','cancelled','abandoned','expired','revoked','replaced',"
+                          "'bound','usable')", (account_id,)).fetchone():
+                raise BridgeError('authentication_in_progress',
+                                  'Finish the account login before redeeming a reset credit.')
             if db.execute("SELECT 1 FROM account_reset_attempts WHERE account_id=? AND state='pending'",
                           (account_id,)).fetchone():
                 raise BridgeError('reset_pending', 'Resolve the pending reset attempt before starting another.')
