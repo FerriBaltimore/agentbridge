@@ -151,6 +151,21 @@ def test_routing_refreshes_missing_quota_once_and_uses_complete_active_windows(m
         def paused_account_ids(self):
             return set()
 
+        def pending_reset_account_ids(self):
+            return set()
+
+        def pending_reset_attempt(self, account_id):
+            assert account_id == account.id
+            return None
+
+        def reset_invalidation_at(self, account_id):
+            assert account_id == account.id
+            return None
+
+        def reset_generation(self, account_id):
+            assert account_id == account.id
+            return 0
+
         def route_load(self, ids):
             return {key: {'in_flight': 0, 'assigned_turns': 0} for key in ids}
 
@@ -165,8 +180,11 @@ def test_routing_refreshes_missing_quota_once_and_uses_complete_active_windows(m
             assert account_id == account.id
             return {'binding_fingerprint': 'fixture-binding'}
 
-        def usage_observation(self, account_id, source, scope, data, *, stale):
+        def usage_observation(self, account_id, source, scope, data, *, stale,
+                              expected_reset_generation=None):
+            assert expected_reset_generation == 0
             self.active = {'source': source, 'data': data}
+            return True
 
     class Routes(RoutingService):
         def observation(self, selected, *, refresh=False, now=None, include_catalog=True):
