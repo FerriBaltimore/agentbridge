@@ -54,6 +54,10 @@ default. AgentBridge does not silently import or discard the old accounts.
 - Send a message, inspect recorded events, stop a turn, and review its output.
 - Delete a conversation from the Chat list after confirming. Its local history
   and private runtime data are removed once its turn and owned processes end.
+- In a Codex account's usage dialog, check earned reset credits and inspect
+  their reported expiry. Redeeming one requires an explicit confirmation. The
+  browser saves the request key before sending it and offers the same-key retry
+  after an uncertain outcome; opening the dialog never redeems a credit.
 - Remove an account to retire its local route. AgentBridge preserves historical
   conversations; this action does not revoke the upstream OAuth credential.
 

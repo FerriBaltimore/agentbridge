@@ -40,6 +40,23 @@ class PublicBridgeStub:
         self._record('account_usage', account_ref=account_ref, refresh=refresh)
         return {'supported': False, 'stale': True, 'reason': 'not_observed'}
 
+    def account_reset_credits(self, account_ref, *, refresh):
+        self._record('account_reset_credits', account_ref, refresh=refresh)
+        return {'account_id': 'account-id', 'account_ref': account_ref,
+                'provider': 'codex', 'status': 'available', 'available_count': 1,
+                'credits': [{'id': 'fixture-credit', 'status': 'available'}],
+                'observed_at': '2026-09-25T00:00:00Z', 'stale': False,
+                'observation_ref': 'fixture-observation'}
+
+    def account_quota_reset(self, account_ref, *, idempotency_key,
+                            observation_ref, credit_id=None):
+        self._record('account_quota_reset', account_ref,
+                     idempotency_key=idempotency_key,
+                     observation_ref=observation_ref, credit_id=credit_id)
+        return {'outcome': 'reset', 'reset_credits': {
+            **self.account_reset_credits(account_ref, refresh=False),
+            'status': 'none', 'available_count': 0, 'credits': []}}
+
     def account_login_start(self, **options):
         self._record('account_login_start', **options)
         return {'attempt_id': 'login-1', 'owner_ref': 'owner-1', 'status': 'awaiting_user',
@@ -254,6 +271,25 @@ def test_read_routes_expose_safe_account_projection_and_polling(local_server, tm
         'result'][0]['seq'] == 10
     assert ('account_status', (), {'account_ref': 'Personal', 'refresh': True}) in bridge.calls
     assert ('models', (), {'refresh': True}) in bridge.calls
+
+
+def test_reset_routes_use_only_public_sdk_and_require_explicit_mutation(local_server):
+    server, bridge = local_server
+    credits = request(server, 'GET', '/api/accounts/Personal/reset-credits?refresh=1')
+    assert credits[0] == 200 and credits[1]['result']['available_count'] == 1
+    assert ('account_reset_credits', ('Personal',), {'refresh': True}) in bridge.calls
+    operation = {'idempotency_key': 'fixture-request',
+                 'observation_ref': 'fixture-observation', 'credit_id': 'fixture-credit'}
+    status, denied = request(server, 'POST', '/api/accounts/Personal/quota/reset',
+                             body=operation, csrf=False)
+    assert status == 403 and denied['error']['code'] == 'forbidden'
+    status, invalid = request(server, 'POST', '/api/accounts/Personal/quota/reset',
+                              body={**operation, 'extra': 'ignored'})
+    assert status == 400 and invalid['error']['code'] == 'invalid_request'
+    status, result = request(server, 'POST', '/api/accounts/Personal/quota/reset',
+                             body=operation)
+    assert status == 200 and result['result']['outcome'] == 'reset'
+    assert ('account_quota_reset', ('Personal',), operation) in bridge.calls
 
 
 def test_account_projection_uses_sdk_reference_after_name_collision(local_server,

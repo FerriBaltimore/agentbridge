@@ -47,8 +47,12 @@ Inputs and observations also use `invalid_attachment`, `invalid_permissions`,
 Execution adapters additionally distinguish `safety_blocked`, `billing_required`,
 `budget_exhausted`, `context_window_exceeded`, `output_limit_exceeded`,
 `max_turns_exceeded`, `structured_output_failed` and `provider_connection_lost`.
-Reset redemption uses `reset_pending`, `account_changed`, `identity_missing`
-and `identity_changed`; unknown redemption outcomes retain the original key.
+V2 Codex reset redemption uses `reset_observation_changed`,
+`reset_observation_stale`, `reset_credit_unavailable`,
+`reset_credit_changed`, `reset_observation_used`, `reset_pending` and
+`reset_in_progress`. `reset_outcome_unknown` has `outcome: unknown` and retains
+the original key; `reset_attempt_not_started` requires a new observation.
+See [earned resets](account-resets.md) for the exact recovery flow.
 See [usage and failures](../usage-and-failures.md) for scope and validation.
 Reviewed learning additionally uses `invalid_error_evidence`,
 `invalid_error_proposal`, `error_record_not_found`, `error_proposal_not_ready`,

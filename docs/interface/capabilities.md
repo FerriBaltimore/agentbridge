@@ -14,6 +14,7 @@ A fixture-tested route or model catalogue is not live provider acceptance.
 | Credential custody and refresh | CLIProxyAPI owns upstream credentials | Provider refresh behavior needs live acceptance |
 | Account status and model list | Fresh local sidecar identity and model observations | Presence does not prove entitlement |
 | Account usage and quota | Attributable observations where sidecar reports them | Missing values stay unknown |
+| Earned Codex resets | Explicit credit read and idempotent redemption for one bound Codex proxy account | Fixture tested against pinned transport; private backend and live provider acceptance pending |
 | Continuation | Same Codex thread on one route; bounded portable context after account change | Cross-account continuation has fixture evidence |
 | Stop | Explicit supervised cancellation | Unknown outcome is not retried |
 | Tool permissions | Codex host response channel | Provider and model behavior needs acceptance |

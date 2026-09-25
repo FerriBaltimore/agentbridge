@@ -54,6 +54,10 @@ class AuthStoreMixin:
                         raise BridgeError('idempotency_conflict', 'Request key already belongs to a different proxy route.')
                     value['data'] = json.loads(value['data'])
                     return value, False
+            if db.execute("SELECT 1 FROM account_reset_attempts WHERE account_id=? AND state='pending'",
+                          (attempt['account_id'],)).fetchone():
+                raise BridgeError('reset_pending',
+                                  'Resolve the pending reset attempt before authenticating this account.')
             if proxy_route is not None:
                 for row in db.execute('''SELECT id,config FROM accounts
                     WHERE id NOT IN (SELECT account_id FROM retired_accounts)'''):

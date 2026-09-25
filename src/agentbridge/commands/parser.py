@@ -68,6 +68,21 @@ def build_parser():
         command_parser.add_argument('name',help='Unique account name')
         command_parser.add_argument('--refresh',action='store_true',help='Read the local proxy without starting a model turn')
         command_parser.add_argument('--json',action='store_true')
+    resets = add_parser(account_sub, 'reset-credits',
+                        help='Read earned Codex reset credits for one proxy account')
+    resets.add_argument('name', help='Account name or reference')
+    resets.add_argument('--refresh', action='store_true',
+                        help='Ask Codex for a fresh credit observation')
+    resets.add_argument('--json', action='store_true')
+    redeem = add_parser(account_sub, 'quota-reset',
+                        help='Explicitly redeem one earned Codex rate-limit reset')
+    redeem.add_argument('name', help='Account name or reference')
+    redeem.add_argument('--idempotency-key', required=True,
+                        help='Stable key for this one logical redemption attempt')
+    redeem.add_argument('--observation-ref', required=True,
+                        help='Fresh reference returned by reset-credits --refresh')
+    redeem.add_argument('--credit-id', help='Specific available credit ID from that observation')
+    redeem.add_argument('--json', action='store_true')
     history=add_parser(account_sub, 'history',help='Show stored account usage observations')
     history.add_argument('name',help='Unique account name')
     history.add_argument('--limit',type=int,default=100)

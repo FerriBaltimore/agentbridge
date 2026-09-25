@@ -105,6 +105,11 @@ staleness and support state. Quota windows include used values, limits and reset
 times when the provider exposes them. Absence is not zero.
 Account windows are separate observations with stable IDs, labels, periods,
 reset times, scope, used and remaining percentages, and individual freshness.
+Earned Codex reset credits are a separate account resource. Their count,
+optional detail rows and observation reference are read through
+`accounts.reset_credits`; `accounts.quota.reset` consumes at most one credit
+after an explicit request. A window's periodic `resets_at` does not mean an
+earned credit exists. See [account-resets.md](account-resets.md).
 Codex and Claude usage refreshes query the provider through the verified local
 CLIProxyAPI account; status and model reads remain passive. Raw provider
 responses and credential values are not stored. A failed refresh retains

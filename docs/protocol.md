@@ -64,7 +64,9 @@ retains unresolved outcomes and lists omitted evidence explicitly.
 | `error_cases.list/get` | Read safe, deduplicated execution failures. |
 | `error_proposals.create/get/validate`, `error_rules.get/activate/deactivate` | Review and activate scoped failure classifications. |
 
-The earlier `accounts.quota.reset`, direct diagnosis and native account quota
-paths are unsupported in v2. See [implementation status](interface/implementation-status.md),
+Earned Codex resets use the explicit `accounts.reset_credits` read and
+`accounts.quota.reset` redemption through one bound local proxy account.
+Direct diagnosis and native account quota paths remain unsupported in v2. See
+[account resets](interface/account-resets.md), [implementation status](interface/implementation-status.md),
 [usage and failures](usage-and-failures.md) and [error learning](error-learning.md)
 for the current boundaries.

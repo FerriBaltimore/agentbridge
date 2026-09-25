@@ -206,6 +206,8 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                 return bridge.account_status(account_ref=parts[2], refresh=refresh)
             if parts[3] == 'usage':
                 return bridge.account_usage(account_ref=parts[2], refresh=refresh)
+            if parts[3] == 'reset-credits':
+                return bridge.account_reset_credits(parts[2], refresh=refresh)
         if len(parts) == 3 and parts[:2] == ['api', 'accounts'] and method == 'DELETE':
             return bridge.account_delete(parts[2])
         if len(parts) == 4 and parts[:2] == ['api', 'accounts'] and method == 'POST':
@@ -214,6 +216,10 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                 return bridge.account_pause(parts[2])
             if parts[3] == 'resume':
                 return bridge.account_resume(parts[2])
+        if (len(parts) == 5 and parts[:2] == ['api', 'accounts']
+                and parts[3:] == ['quota', 'reset'] and method == 'POST'):
+            values = _fields(body, ('idempotency_key', 'observation_ref'), ('credit_id',))
+            return bridge.account_quota_reset(parts[2], **values)
         if parts == ['api', 'models'] and method == 'GET':
             return bridge.models(refresh=_query_flag(query, 'refresh'))
         if parts == ['api', 'instances'] and method == 'GET':

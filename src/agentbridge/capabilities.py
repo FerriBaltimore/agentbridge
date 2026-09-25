@@ -8,7 +8,8 @@ OPERATIONS = (
     "accounts.login",
     "accounts.login.list", "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel", "accounts.login.callback",
-    "models.list", "usage.get", "usage.history", "accounts.quota.reset",
+    "models.list", "usage.get", "usage.history", "accounts.reset_credits",
+    "accounts.quota.reset",
     "instances.create", "instances.get",
     "instances.list", "instances.update", "instances.archive", "instances.delete",
     "instances.discard_evaluation",
@@ -23,7 +24,7 @@ OPERATIONS = (
 
 def proxy_payload(*, include_parameters=True):
     """Declare only the supported Codex-to-local-proxy execution surface."""
-    unsupported = {'accounts.quota.reset', 'error_cases.diagnose'}
+    unsupported = {'error_cases.diagnose'}
     operations = {}
     for operation in OPERATIONS:
         enabled = operation not in unsupported
@@ -43,6 +44,14 @@ def proxy_payload(*, include_parameters=True):
         elif operation in {'accounts.pause', 'accounts.resume'}:
             item['limitations'] = ['new_work_only', 'active_turns_continue',
                                    'upstream_credential_remains']
+        elif operation == 'accounts.reset_credits':
+            item['limitations'] = ['codex_proxy_accounts_only', 'explicit_refresh_for_provider_read',
+                                   'private_upstream_endpoint', 'live_provider_acceptance_pending']
+        elif operation == 'accounts.quota.reset':
+            item['limitations'] = ['codex_proxy_accounts_only', 'explicit_redemption_only',
+                                   'fresh_observation_ref_required', 'durable_idempotency_key_required',
+                                   'unknown_outcome_requires_same_key',
+                                   'private_upstream_endpoint', 'live_provider_acceptance_pending']
         elif operation.startswith('contracts.'):
             item['limitations'] = ['schema_audit_only', 'execution_engine_is_codex']
         elif operation == 'models.list':

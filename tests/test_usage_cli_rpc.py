@@ -14,18 +14,93 @@ from test_accounts_service import configured_proxy, proxy_responses
 from test_proxy_management import local_management
 
 
-def test_quota_reset_is_unsupported_in_rpc_and_absent_from_cli(tmp_path, capsys):
+def test_reset_credit_rpc_and_cli_use_only_the_public_sdk(tmp_path, monkeypatch, capsys):
+    seen = []
+
+    def credits(self, account_ref=None, *, account_id=None, refresh=False):
+        seen.append(("read", account_ref, account_id, refresh))
+        return {"account_ref": account_ref, "available_count": 1,
+                "status": "available", "stale": False,
+                "observed_at": "2026-09-25T10:00:00Z", "observation_ref": "revision-1",
+                "credits": [{"id": "credit-1", "status": "available"}]}
+
+    def redeem(self, account_ref=None, *, account_id=None, idempotency_key,
+               observation_ref, credit_id=None):
+        seen.append(("redeem", account_ref, account_id, idempotency_key,
+                     observation_ref, credit_id))
+        return {"account_ref": account_ref, "outcome": "reset", "windows_reset": 1,
+                "reset_credits": {"available_count": 0}}
+
+    monkeypatch.setattr(Bridge, "account_reset_credits", credits)
+    monkeypatch.setattr(Bridge, "account_quota_reset", redeem)
     bridge = Bridge(tmp_path)
-    with pytest.raises(BridgeError) as error:
-        dispatch(bridge, "accounts.quota.reset", {
-            "account_ref": "fixture", "idempotency_key": "key"})
-    assert error.value.code == "unsupported"
-    with pytest.raises(SystemExit) as exit_status:
+    operations = bridge.capabilities()["operations"]
+    for name in ("accounts.reset_credits", "accounts.quota.reset"):
+        assert operations[name]["support"] == "adapter"
+        assert operations[name]["maturity"] == "fixture_tested"
+        assert "live_provider_acceptance_pending" in operations[name]["limitations"]
+
+    assert dispatch(bridge, "accounts.reset_credits", {
+        "account_ref": "fixture", "refresh": True})["observation_ref"] == "revision-1"
+    assert dispatch(bridge, "accounts.quota.reset", {
+        "account_ref": "fixture", "idempotency_key": "logical-1",
+        "observation_ref": "revision-1", "credit_id": "credit-1"})["outcome"] == "reset"
+
+    main(["--root", str(tmp_path), "accounts", "reset-credits", "fixture",
+          "--refresh", "--json"])
+    assert json.loads(capsys.readouterr().out)["observation_ref"] == "revision-1"
+    main(["--root", str(tmp_path), "accounts", "quota-reset", "fixture",
+          "--idempotency-key", "logical-1", "--observation-ref", "revision-1",
+          "--credit-id", "credit-1", "--json"])
+    assert json.loads(capsys.readouterr().out)["outcome"] == "reset"
+    assert seen == [
+        ("read", "fixture", None, True),
+        ("redeem", "fixture", None, "logical-1", "revision-1", "credit-1"),
+        ("read", "fixture", None, True),
+        ("redeem", "fixture", None, "logical-1", "revision-1", "credit-1"),
+    ]
+
+
+def test_quota_reset_cli_requires_explicit_key_and_observation(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
         main(["--root", str(tmp_path), "accounts", "quota-reset", "fixture",
-              "--idempotency-key", "key"])
-    assert exit_status.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
-    assert bridge.capabilities()["operations"]["accounts.quota.reset"]["support"] == "unsupported"
+              "--idempotency-key", "logical-1"])
+    assert error.value.code == 2
+    assert "--observation-ref" in capsys.readouterr().err
+
+
+def test_reset_credit_human_output_shows_reference_for_explicit_redemption(
+        tmp_path, monkeypatch, capsys):
+    def credits(self, account_ref=None, *, account_id=None, refresh=False):
+        return {"account_ref": account_ref, "available_count": 1,
+                "status": "available", "stale": False,
+                "observed_at": "2026-09-25T10:00:00Z", "observation_ref": "revision-1",
+                "credits": [{"id": "credit-1", "status": "available"}]}
+
+    monkeypatch.setattr(Bridge, "account_reset_credits", credits)
+    main(["--root", str(tmp_path), "accounts", "reset-credits", "fixture", "--refresh"])
+    output = capsys.readouterr().out
+    assert "Reset credits: 1" in output
+    assert "Observation reference: revision-1" in output
+    assert "Credit: credit-1 (available)" in output
+
+
+def test_quota_reset_cli_preserves_unknown_outcome(tmp_path, monkeypatch, capsys):
+    def unknown(self, account_ref=None, *, account_id=None, idempotency_key,
+                observation_ref, credit_id=None):
+        raise BridgeError("reset_outcome_unknown", "The Codex reset outcome is unknown.",
+                          phase="redemption", outcome="unknown")
+
+    monkeypatch.setattr(Bridge, "account_quota_reset", unknown)
+    with pytest.raises(SystemExit) as error:
+        main(["--root", str(tmp_path), "accounts", "quota-reset", "fixture",
+              "--idempotency-key", "logical-1", "--observation-ref", "revision-1",
+              "--json"])
+    assert error.value.code == 1
+    failure = json.loads(capsys.readouterr().err)
+    assert failure["error"] == "reset_outcome_unknown"
+    assert failure["data"]["outcome"] == "unknown"
+    assert failure["data"]["retryable"] is False
 
 
 def test_account_usage_methods_match_capability_discovery_and_rpc_dispatch(tmp_path, monkeypatch):

@@ -22,6 +22,14 @@ def account_command(bridge, args):
         return bridge.account_pause(args.name)
     if command == 'resume':
         return bridge.account_resume(args.name)
+    if command == 'reset-credits':
+        args.account_name = args.name
+        return bridge.account_reset_credits(args.name, refresh=args.refresh)
+    if command == 'quota-reset':
+        args.account_name = args.name
+        return bridge.account_quota_reset(
+            args.name, idempotency_key=args.idempotency_key,
+            observation_ref=args.observation_ref, credit_id=args.credit_id)
     if command in {"status", "usage", "history", "check"}:
         account = bridge.resolve_account(args.name)
         args.account_name, args.id = account.name, account.id
