@@ -99,5 +99,6 @@ documents earned-credit reading, idempotent consumption and the four outcomes.
 The current v2 adapter uses the corresponding backend requests through the
 pinned CLIProxyAPI management transport. That backend HTTP surface is private
 and may change independently of the published app-server method. The request,
-normalization, binding and replay rules have deterministic fixture tests;
-live provider reading and redemption still need separate acceptance.
+normalization, binding and replay rules have deterministic fixture tests.
+One live Codex account returned an earned-credit count and details during a
+read-only check; live redemption has not been accepted.
