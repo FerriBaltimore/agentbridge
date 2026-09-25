@@ -11,7 +11,7 @@
 #view-activity .section-heading { flex: none; margin-bottom: 12px; }
 #view-activity .event-list-large { flex: 1; min-height: 0; overflow: auto; }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   #accounts-list { --account-header-height: 16px; --account-row-height: 151px; overflow-x: hidden; }
   .account-table { width: 100%; min-width: 0; display: block; }
   .account-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

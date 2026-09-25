@@ -33,10 +33,21 @@ accept a live turn.
 
 ## Login, recovery and account identity
 
-The sole Add account flow asks for a provider and display name, then starts
-`accounts.login.start` through GrantBridge and the account's isolated
-CLIProxyAPI sidecar. For Codex and Claude, AgentBridge checks the local OAuth
-callback port before dispatch: 1455 for Codex and 54545 for Claude. A known
+The sole Add account flow asks for a provider, display name and optional
+expected email, then starts `accounts.login.start` through GrantBridge and the
+account's isolated CLIProxyAPI sidecar. A local private browser profile opens
+automatically for a new attempt. If it cannot open, the UI asks the user to
+cancel and retry after checking the local browser setup. The browser and its
+profile close when the terminal attempt state is observed; orphaned profiles
+are removed on a later launch after their process is confirmed gone. An
+expected email prevents binding a different observed
+provider identity. A concrete email mismatch ends the unbound attempt so the
+user can start again. A managed proxy stops after a confirmed failed, expired or
+cancelled attempt; an unverified stop is reported and can be retried from the
+saved terminal attempt.
+
+For Codex and Claude, AgentBridge checks the local OAuth callback port before
+dispatch: 1455 for Codex and 54545 for Claude. A known
 bind conflict returns `oauth_callback_port_busy` with an actionable message.
 This check cannot rule out a later race after dispatch; a lost or uncertain
 start response remains `authentication_outcome_unknown`.

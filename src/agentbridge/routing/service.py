@@ -103,10 +103,11 @@ class RoutingService:
 
     def candidates(self, model, *, provider=None, refresh=False, excluded_account_refs=()):
         excluded = {self.accounts.resolve(reference).id for reference in excluded_account_refs}
+        paused = self.store.paused_account_ids()
         accounts = [account for account in self.accounts.list()
                     if account.proxy_base_url and model in account.supported_models
                     and (provider is None or account.provider == provider)
-                    and account.id not in excluded]
+                    and account.id not in excluded and account.id not in paused]
         loads = self.store.route_load([account.id for account in accounts])
         result = []
         for account in accounts:
@@ -161,7 +162,8 @@ class RoutingService:
 
     def models(self, *, account_ref=None, provider=None, refresh=False):
         """Return a configured catalog, marking proxy observations separately."""
-        accounts = [account for account in self.accounts.list() if account.proxy_base_url]
+        accounts = [account for account in self.accounts.list() if account.proxy_base_url
+                    and account.id not in self.store.paused_account_ids()]
         if account_ref is not None:
             selected = self.accounts.resolve(account_ref)
             accounts = [account for account in accounts if account.id == selected.id]

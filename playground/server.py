@@ -54,11 +54,20 @@ def _fields(body, required, optional=()):
 class PlaygroundServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, bridge, *, static_root=STATIC_ROOT, workspace_path=None):
+    def __init__(self, address, bridge, *, static_root=STATIC_ROOT, workspace_path=None,
+                 auth_browser=None):
         self.bridge = bridge
         self.static_root = Path(static_root).resolve()
         self.workspace_path = str(Path(workspace_path or '.').resolve())
+        self.auth_browser = auth_browser
         super().__init__(address, PlaygroundHandler)
+
+    def server_close(self):
+        try:
+            if self.auth_browser is not None:
+                self.auth_browser.close()
+        finally:
+            super().server_close()
 
 
 class PlaygroundHandler(BaseHTTPRequestHandler):
@@ -158,24 +167,39 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
         if parts == ['api', 'accounts'] and method == 'GET':
             return [_account(item, bridge) for item in bridge.accounts()]
         if parts == ['api', 'accounts', 'login', 'start'] and method == 'POST':
-            values = _fields(body, ('provider', 'name'))
-            return bridge.account_login_start(**values)
+            values = _fields(body, ('provider', 'name'), ('email',))
+            attempt = bridge.account_login_start(**values)
+            opened = (self.server.auth_browser.launch(attempt)
+                      if self.server.auth_browser is not None else False)
+            return {**attempt, 'browser_opened': opened}
         if parts == ['api', 'accounts', 'login', 'attempts'] and method == 'GET':
             return bridge.account_login_attempts(
                 provider=query.get('provider', [None])[-1],
                 limit=_query_number(query, 'limit', 3),
                 cursor=_query_number(query, 'cursor', 0))
         if len(parts) == 4 and parts[:3] == ['api', 'accounts', 'login'] and method == 'GET':
-            return bridge.account_login_status(parts[3], owner_ref=query.get('owner_ref', [None])[-1])
+            attempt = bridge.account_login_status(
+                parts[3], owner_ref=query.get('owner_ref', [None])[-1])
+            browser = self.server.auth_browser
+            if browser is not None and attempt['status'] not in {
+                    'starting', 'awaiting_user', 'exchanging'}:
+                browser.stop(parts[3])
+            return {**attempt, 'browser_opened': browser.active(parts[3]) if browser else False}
         if len(parts) == 5 and parts[:3] == ['api', 'accounts', 'login'] and method == 'POST':
             values = _fields(body, ('owner_ref',))
             if parts[4] == 'check':
                 return bridge.account_login_check(parts[3], **values)
             if parts[4] == 'complete':
                 result = bridge.account_login_complete(parts[3], **values)
+                if self.server.auth_browser is not None:
+                    self.server.auth_browser.stop(parts[3])
                 return {**result, 'account': _account(result['account'], bridge)}
             if parts[4] == 'cancel':
-                return bridge.account_login_cancel(parts[3], **values)
+                attempt = bridge.account_login_cancel(parts[3], **values)
+                if self.server.auth_browser is not None and attempt['status'] in {
+                        'failed', 'cancelled', 'expired', 'interrupted', 'abandoned'}:
+                    self.server.auth_browser.stop(parts[3])
+                return attempt
         if len(parts) == 4 and parts[:2] == ['api', 'accounts'] and method == 'GET':
             refresh = _query_flag(query, 'refresh')
             if parts[3] == 'status':
@@ -184,6 +208,12 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                 return bridge.account_usage(account_ref=parts[2], refresh=refresh)
         if len(parts) == 3 and parts[:2] == ['api', 'accounts'] and method == 'DELETE':
             return bridge.account_delete(parts[2])
+        if len(parts) == 4 and parts[:2] == ['api', 'accounts'] and method == 'POST':
+            _fields(body, ())
+            if parts[3] == 'pause':
+                return bridge.account_pause(parts[2])
+            if parts[3] == 'resume':
+                return bridge.account_resume(parts[2])
         if parts == ['api', 'models'] and method == 'GET':
             return bridge.models(refresh=_query_flag(query, 'refresh'))
         if parts == ['api', 'instances'] and method == 'GET':
@@ -270,9 +300,10 @@ for _method in ('GET', 'POST', 'DELETE', 'OPTIONS'):
 
 
 def create_server(root=None, *, port=8765, bridge=None, static_root=STATIC_ROOT,
-                  workspace_path=None):
+                  workspace_path=None, auth_browser=None):
     return PlaygroundServer(('127.0.0.1', port), bridge or Bridge(root),
-                            static_root=static_root, workspace_path=workspace_path)
+                            static_root=static_root, workspace_path=workspace_path,
+                            auth_browser=auth_browser)
 
 
 def main(argv=None):
@@ -283,8 +314,13 @@ def main(argv=None):
     options = parser.parse_args(argv)
     if not 0 <= options.port <= 65535:
         parser.error('--port must be between 0 and 65535')
-    with create_server(options.root, port=options.port,
-                       workspace_path=options.workspace_path) as server:
+    from .auth_browser import IsolatedAuthBrowser
+
+    bridge = Bridge(options.root)
+    auth_browser = IsolatedAuthBrowser(bridge.store.root)
+    with create_server(options.root, port=options.port, bridge=bridge,
+                       workspace_path=options.workspace_path,
+                       auth_browser=auth_browser) as server:
         print(f'AgentBridge playground: http://127.0.0.1:{server.server_port}/')
         try:
             server.serve_forever(poll_interval=0.1)

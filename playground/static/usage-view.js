@@ -91,8 +91,11 @@ export function usageWindowRow(row, { compact = false } = {}) {
   const wrapper = node('div', compact ? 'account-usage-window is-compact' : 'account-usage-window');
   wrapper.dataset.testid = 'account-usage-window';
   const head = node('div', 'account-usage-head');
-  const name = node('strong', 'account-usage-name', row.display_label);
-  name.title = row.display_label;
+  const compactDuration = compact && typeof row.window_seconds === 'number'
+    && Number.isFinite(row.window_seconds) && row.window_seconds > 0
+    ? ` · ${durationLabel(row.window_seconds)}` : '';
+  const name = node('strong', 'account-usage-name', `${row.display_label}${compactDuration}`);
+  name.title = `${row.display_label}${compactDuration}`;
   const value = node('span', row.used_percent === null ? 'usage-unknown' : row.stale ? 'usage-stale' : 'usage-known', usageValue(row));
   head.append(name, value);
   wrapper.append(head);

@@ -18,6 +18,10 @@ def account_command(bridge, args):
                               'Provide either an account reference or --account-id.')
         return (bridge.account_delete(account_id=args.account_id) if args.account_id
                 else bridge.account_delete(args.name))
+    if command == 'pause':
+        return bridge.account_pause(args.name)
+    if command == 'resume':
+        return bridge.account_resume(args.name)
     if command in {"status", "usage", "history", "check"}:
         account = bridge.resolve_account(args.name)
         args.account_name, args.id = account.name, account.id

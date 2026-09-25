@@ -77,6 +77,9 @@ def _session_payload(account_id, cwd, model, native_id, parent_id, context,
 
 
 def _verified_proxy_config(db, account_id, model, *, provider=None):
+    if db.execute('SELECT 1 FROM paused_accounts WHERE account_id=?',
+                  (account_id,)).fetchone():
+        raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
     if db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
                   (account_id,)).fetchone():
         raise BridgeError('account_retired', 'The selected proxy account was retired.')

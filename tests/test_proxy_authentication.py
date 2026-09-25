@@ -135,6 +135,24 @@ def test_owned_remote_callback_is_transient_and_matches_pending_state(tmp_path, 
             assert 'private-code' not in repr(saved)
 
 
+def test_expected_email_rejects_a_different_proxy_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv('LAB_MANAGEMENT_KEY', secrets.token_hex(16))
+    monkeypatch.setenv('LAB_PROXY_KEY', secrets.token_hex(16))
+    responses = proxy_responses()
+    with local_management(responses) as (port, _):
+        with Bridge(tmp_path / 'state') as bridge:
+            use_fake_grantbridge(monkeypatch, FakeProxyGrantBridge(responses))
+            started = bridge.account_login_start(
+                provider='codex', name='Work', email='expected@example.test',
+                proxy_base_url=f'http://127.0.0.1:{port}/v1',
+                key_env='LAB_PROXY_KEY', management_key_env='LAB_MANAGEMENT_KEY')
+            with pytest.raises(BridgeError) as error:
+                bridge.account_login_check(
+                    started['attempt_id'], owner_ref=started['owner_ref'])
+            assert error.value.code == 'identity_changed'
+            assert bridge.accounts() == []
+
+
 def test_login_cannot_convert_a_direct_account_to_proxy(tmp_path, monkeypatch):
     monkeypatch.setenv('LAB_MANAGEMENT_KEY', secrets.token_hex(16))
     with local_management(proxy_responses()) as (port, _):

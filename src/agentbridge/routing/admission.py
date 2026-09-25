@@ -75,6 +75,8 @@ def prepare_turn(bridge, session, options, *, excluded_account_refs=()):
         if excluded_account_refs:
             raise BridgeError('invalid_request', 'Pinned accounts cannot use route exclusions.')
         account = bridge.account(session['account_id'])
+        if bridge.store.pause_status(account.id)['paused']:
+            raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
         verify_proxy_model(bridge.routes, account, options.model or session['model'],
                            refresh=True, context_window=options.context_window)
         return account, None, None, 0, None

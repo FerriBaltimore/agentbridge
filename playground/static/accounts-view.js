@@ -11,6 +11,7 @@ let accountRows = [];
 let accountUsageRows = new Map();
 let accountStatuses = new Map();
 let removeAccount = null;
+let accountsChanged = null;
 let accountPage = 0;
 let accountPageSize = 6;
 let paginationReady = false;
@@ -33,8 +34,16 @@ function queuePageLayout() {
     layoutQueued = false;
     const next = visiblePageSize();
     if (next !== accountPageSize) {
+      const previousStart = accountPage * accountPageSize;
+      const previousEnd = Math.min(previousStart + accountPageSize, accountRows.length);
       accountPageSize = next;
-      renderAccountRows();
+      const nextPage = Math.min(accountPage,
+        Math.max(0, Math.ceil(accountRows.length / next) - 1));
+      const nextStart = nextPage * next;
+      const nextEnd = Math.min(nextStart + next, accountRows.length);
+      if (nextPage !== accountPage || nextStart !== previousStart || nextEnd !== previousEnd) {
+        renderAccountRows();
+      }
     }
   });
 }
@@ -55,6 +64,9 @@ function setupPagination() {
 }
 
 function accountStatus(account, observed) {
+  if (observed?.routing?.paused || account.routing?.paused) {
+    return statusPill('Paused', 'muted');
+  }
   const status = observed?.authentication?.status || observed?.status
     || account.authentication?.status || 'unknown';
   const tone = ['active', 'usable'].includes(status) ? 'good'
@@ -84,7 +96,7 @@ function accountUsage(account, snapshot) {
   }
   for (const window of windows.slice(0, 2)) wrapper.append(usageWindowRow(window, { compact: true }));
   const details = node('button', 'account-usage-open', windows.length > 2
-    ? `View all ${windows.length} windows` : 'Usage details');
+    ? `View ${windows.length} windows` : 'Usage details');
   details.type = 'button';
   details.dataset.testid = 'account-usage-open';
   details.dataset.accountRef = account.account_ref;
@@ -96,14 +108,39 @@ function accountUsage(account, snapshot) {
 
 function renderUsageDialog(account, snapshot) {
   const windows = usageWindows(snapshot);
+  const current = windows.filter((window) => !window.stale);
+  const older = windows.filter((window) => window.stale);
+  const previousOlderOpen = byId('account-usage-dialog').open
+    ? byId('account-usage-content').querySelector('.usage-older-section')?.open : undefined;
   byId('account-usage-heading').textContent = `Usage for ${account.name || account.account_ref}`;
-  byId('account-usage-subtitle').textContent = `${account.provider || 'Historical'} account · ${windows.length} observed window${windows.length === 1 ? '' : 's'}`;
+  byId('account-usage-subtitle').textContent = `${account.provider || 'Historical'} · ${current.length} current · ${older.length} older observation${older.length === 1 ? '' : 's'}`;
   const content = clear(byId('account-usage-content'));
   if (!windows.length) {
     content.append(node('p', 'account-detail-note', usageUnavailable(snapshot)));
     return;
   }
-  for (const window of windows) content.append(usageWindowRow(window));
+  let help = 'Each bar is a provider-reported quota window. Its duration and reset appear below the bar.';
+  if (account.provider === 'codex') {
+    help += ' Primary and secondary name window slots, not account rankings.';
+    const namedPool = windows.map((window) =>
+      /^(.+) · (?:primary|secondary)$/i.exec(window.display_label)?.[1]).find(Boolean);
+    if (namedPool) help += ` ${namedPool} is a provider-reported quota group, not another account.`;
+  }
+  const explainer = node('p', 'usage-explainer', help);
+  content.append(explainer);
+  if (current.length) {
+    const section = node('section', 'usage-window-section');
+    section.append(node('h3', '', `Current windows · ${current.length}`));
+    for (const window of current) section.append(usageWindowRow(window));
+    content.append(section);
+  }
+  if (older.length) {
+    const section = node('details', 'usage-older-section');
+    section.open = previousOlderOpen ?? !current.length;
+    section.append(node('summary', '', `Older observations · ${older.length}`));
+    for (const window of older) section.append(usageWindowRow(window));
+    content.append(section);
+  }
   if (snapshot?.refresh_reason) {
     content.append(node('p', 'account-detail-note',
       `Current quota refresh unavailable (${String(snapshot.refresh_reason).replaceAll('_', ' ')}). Showing observed usage.`));
@@ -123,7 +160,13 @@ function openUsage(account, snapshot) {
 function ensureUsageDialog() {
   if (usageDialogReady) return;
   usageDialogReady = true;
-  byId('account-usage-dialog').addEventListener('close', () => {
+  const dialog = byId('account-usage-dialog');
+  byId('account-usage-close').addEventListener('click', () => dialog.close());
+  byId('account-usage-done').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener('close', () => {
     const ref = selectedUsageAccountRef;
     selectedUsageAccountRef = null;
     const button = [...byId('accounts-list').querySelectorAll('[data-testid="account-usage-open"]')]
@@ -174,12 +217,29 @@ function accountRow(account, snapshot, status, onRemove) {
   modelsButton.addEventListener('click', () => openModels(account, status));
   models.append(modelsButton);
   const actions = node('td', 'account-table-actions');
+  const paused = status?.routing?.paused || account.routing?.paused;
+  const toggle = node('button', 'account-pause-button', paused ? 'Resume' : 'Pause');
+  toggle.type = 'button';
+  toggle.dataset.testid = 'account-pause-toggle';
+  toggle.setAttribute('aria-label', `${paused ? 'Resume' : 'Pause'} ${name}`);
+  toggle.addEventListener('click', async () => {
+    toggle.disabled = true;
+    try {
+      if (paused) await api.resumeAccount(account.account_ref);
+      else await api.pauseAccount(account.account_ref);
+      toast(`${name} ${paused ? 'resumed' : 'paused'} for new work.`);
+      await accountsChanged();
+    } catch (error) {
+      toast(describeError(error), true);
+      toggle.disabled = false;
+    }
+  });
   const remove = node('button', 'remove-button', 'Remove');
   remove.type = 'button';
   remove.dataset.testid = 'remove-account';
   remove.setAttribute('aria-label', `Remove ${name}`);
   remove.addEventListener('click', () => onRemove(account));
-  actions.append(remove);
+  actions.append(toggle, remove);
   row.append(identity, provider, health, usage, models, actions);
   return row;
 }
@@ -223,7 +283,7 @@ function renderAccountRows() {
   }
 }
 
-export function renderAccounts(accounts, usage, { statuses, onRemove }) {
+export function renderAccounts(accounts, usage, { statuses, onRemove, onChanged }) {
   ensureModelsDialog();
   ensureUsageDialog();
   setupPagination();
@@ -231,6 +291,7 @@ export function renderAccounts(accounts, usage, { statuses, onRemove }) {
   accountUsageRows = usage;
   accountStatuses = statuses;
   removeAccount = onRemove;
+  accountsChanged = onChanged;
   const summary = clear(byId('accounts-summary'));
   summary.hidden = !accountRows.length;
   byId('accounts-removal-note').hidden = !accountRows.length;

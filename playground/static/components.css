@@ -38,7 +38,7 @@
 .account-summary .pulse-dot { flex: none; }
 .account-table-wrap { min-width: 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 15px; background: #fff; box-shadow: var(--shadow); }
 .account-table-wrap.is-empty { border: 0; background: transparent; box-shadow: none; }
-.account-table { width: 100%; min-width: 740px; border-collapse: separate; border-spacing: 0; text-align: left; }
+.account-table { width: 100%; min-width: 810px; border-collapse: separate; border-spacing: 0; text-align: left; }
 .account-table th, .account-table td { padding: 15px 17px; border-bottom: 1px solid #edf0f5; vertical-align: middle; }
 .account-table thead th { padding-top: 13px; padding-bottom: 13px; background: #f9fbfe; color: #8b98aa; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
 .account-table tbody tr:last-child th, .account-table tbody tr:last-child td { border-bottom: 0; }
@@ -48,7 +48,7 @@
 .account-table-status { width: 12%; }
 .account-table-usage-cell { min-width: 210px; width: 30%; }
 .account-table-models { width: 15%; }
-.account-table-actions { width: 8%; text-align: right; }
+.account-table-actions { width: 13%; text-align: right; white-space: nowrap; }
 .account-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .account-identity-text { min-width: 0; }
 .account-avatar { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 11px; background: #eaf0ff; color: #536fdb; font-size: 16px; font-weight: 850; }
@@ -69,8 +69,21 @@
 .account-usage-details { color: #8b97a9; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .account-usage-open { justify-self: start; padding: 0; border: 0; background: none; color: #526fdd; cursor: pointer; font-size: 9px; font-weight: 750; }
 .account-usage-open:hover { text-decoration: underline; }
-.account-usage-dialog { width: min(640px, calc(100vw - 28px)); }
-.account-usage-content { display: grid; gap: 9px; margin-top: 22px; }
+.modal.account-usage-dialog { width: min(680px, calc(100vw - 28px)); overflow: hidden; }
+.account-usage-dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
+.account-usage-dialog .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
+.account-usage-dialog .modal-body h2, .account-usage-dialog .modal-lead { padding-right: 32px; }
+.account-usage-dialog .modal-close-form { z-index: 3; top: 18px; right: 18px; }
+.usage-dialog-footer { display: flex; flex: none; justify-content: flex-end; padding: 12px 22px; border-top: 1px solid #e8edf4; background: #fff; }
+.usage-dialog-footer .button { min-width: 80px; }
+.account-usage-content { display: grid; gap: 18px; margin-top: 21px; }
+.usage-explainer { margin: 0; padding: 13px 15px; border: 1px solid #dfe8f7; border-radius: 11px; background: #f5f8fe; color: #667995; font-size: 11px; line-height: 1.55; }
+.usage-window-section, .usage-older-section { display: grid; gap: 10px; min-width: 0; }
+.usage-window-section h3, .usage-older-section summary { margin: 0 0 2px; color: #40546f; font-size: 11px; font-weight: 800; letter-spacing: .025em; }
+.usage-older-section { padding-top: 14px; border-top: 1px solid #e8edf4; }
+.usage-older-section summary { cursor: pointer; list-style-position: inside; }
+.usage-older-section:not([open]) .account-usage-window { display: none; }
+.usage-window-section .account-usage-window, .usage-older-section .account-usage-window { padding: 14px 16px; border-radius: 11px; background: #fbfcff; }
 .account-usage-dialog .modal-body h2 { overflow-wrap: anywhere; }
 .account-models-button { min-height: 32px; padding: 7px 9px; font-size: 10px; }
 .model-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 6px; background: #edf2ff; color: #5572dc; font-size: 9px; }
@@ -88,6 +101,9 @@
 .account-detail-note { margin: 0; color: #8998ad; font-size: 11px; line-height: 1.5; }
 .account-models-dialog .modal-body h2 { overflow-wrap: anywhere; }
 .remove-button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: #b75b62; font-size: 10px; font-weight: 750; }
+.account-pause-button { display: inline-flex; align-items: center; margin-right: 3px; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: #526fdd; cursor: pointer; font-size: 10px; font-weight: 750; }
+.account-pause-button:hover { background: #eff3ff; }
+.account-pause-button:disabled { opacity: .5; cursor: wait; }
 .remove-button:hover { background: #fff0f1; }
 .remove-button svg { width: 13px; height: 13px; }
 .info-strip { display: flex; align-items: flex-start; gap: 11px; margin-top: 20px; padding: 14px 17px; border: 1px solid #dfe7f5; border-radius: 11px; background: #f5f8fe; color: #72839c; }

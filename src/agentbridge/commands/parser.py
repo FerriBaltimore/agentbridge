@@ -57,6 +57,11 @@ def build_parser():
     delete.add_argument('name', nargs='?', help='Account name or reference')
     delete.add_argument('--account-id', help='Exact account ID for a retirement retry')
     delete.add_argument('--json',action='store_true')
+    for name, help_text in (('pause', 'Pause account routing for new work'),
+                            ('resume', 'Resume account routing for new work')):
+        command_parser = add_parser(account_sub, name, help=help_text)
+        command_parser.add_argument('name', help='Account name or reference')
+        command_parser.add_argument('--json', action='store_true')
     for name, help_text in (('status','Read configured and observed authentication state'),
                             ('usage','Read account quota and token-activity observations')):
         command_parser=add_parser(account_sub, name,help=help_text)

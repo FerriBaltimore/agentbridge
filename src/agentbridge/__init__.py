@@ -5,5 +5,5 @@ from .errors import BridgeError, BusyError, UnsupportedError
 from .models import Account, Event, RunOptions
 from .grantbridge import GrantBridgeClient
 
-__version__='2.3.2'
+__version__='2.3.3'
 __all__=['Bridge','Run','GrantBridgeClient','Account','RunOptions','Event','ContextBundle','BridgeError','BusyError','UnsupportedError']

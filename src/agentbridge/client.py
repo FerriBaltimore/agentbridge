@@ -29,9 +29,10 @@ from .evaluation.service import EvaluationMixin
 from .state_path import default_root
 from .workspace_policy import validate_execution_workspace, validate_workspace
 from .account_retirement import AccountRetirementMixin
+from .account_pause import AccountPauseMixin
 
 
-class Bridge(EventStreamMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
+class Bridge(EventStreamMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
     def __init__(self, root=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
@@ -170,6 +171,8 @@ class Bridge(EventStreamMixin, AccountRetirementMixin, EvaluationMixin, MessageS
                                                     evaluation=evaluation)
         if replayed:
             return {**self.get_session(replayed), 'replayed': True}
+        if self.store.pause_status(account.id)['paused']:
+            raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
         from .routing.admission import verify_proxy_model
         verify_proxy_model(self.routes, account, model, refresh=True)
         id=uuid4().hex

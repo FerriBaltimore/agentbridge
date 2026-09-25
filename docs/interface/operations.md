@@ -10,6 +10,8 @@ where the implementation declares support.
     accounts.list(authentication?, limit?, cursor?)
     accounts.status(account_ref?, account_id?, refresh?)
     accounts.delete(account_ref?, account_id?)
+    accounts.pause(account_ref?, account_id?)
+    accounts.resume(account_ref?, account_id?)
     accounts.login.list(provider?, limit?, cursor?)
     accounts.login.start(provider, name, request_key?, owner_ref?, email?,
                          mode?, browser?, proxy_base_url?, key_env?,
@@ -66,7 +68,14 @@ Neither API-key values nor OAuth tokens enter public account configuration or th
 database. The supervisor generates client and management key values and
 delivers them over private local channels during login and execution.
 
-`accounts.delete` requires exactly one of `account_ref` or `account_id`.
+`accounts.delete`, `accounts.pause` and `accounts.resume` each require exactly
+one of `account_ref` or `account_id`. Pausing is a durable local routing choice:
+it excludes the account from automatic selection, model route discovery and
+new pinned turns. It leaves authentication, quota observations, history and
+already admitted turns intact. Resuming restores new-work eligibility after
+the usual live proxy checks. Both operations are idempotent and return the
+account reference plus `routing.paused` and `routing.paused_at`. A pause does
+not cancel a running turn or revoke a provider credential.
 Account names are unique within each provider after trimming and case folding.
 Codex and Claude accounts may share the same human name. Login start and
 completion enforce that provider-scoped claim in database transactions; a

@@ -342,7 +342,7 @@ def test_rpc_accounts_are_safe_and_registration_is_blocked(tmp_path, bridge_for_
     rpc(bridge, io.StringIO(json.dumps(request) + '\n'), out)
     account = json.loads(out.getvalue())['result'][0]
     assert set(account) <= {'account_ref', 'name', 'email', 'provider', 'supported_models',
-                            'authentication', 'identity', 'reason'}
+                            'authentication', 'identity', 'routing', 'reason'}
     assert account['provider'] == 'codex' and account['supported_models'] == ['fixture-model', 'gpt-test']
     assert 'home' not in account and 'command' not in account and 'env_names' not in account
     out = io.StringIO()

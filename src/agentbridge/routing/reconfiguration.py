@@ -26,6 +26,9 @@ def require_declared_route(db, model, *, provider=None, account_id=None):
     for row in rows:
         if account_id is not None and row['id'] != account_id:
             continue
+        if db.execute('SELECT 1 FROM paused_accounts WHERE account_id=?',
+                      (row['id'],)).fetchone():
+            continue
         try:
             account = Account(**json.loads(row['config']))
         except (BridgeError, TypeError, ValueError):

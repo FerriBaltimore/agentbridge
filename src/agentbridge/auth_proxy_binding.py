@@ -12,6 +12,11 @@ from .models import Account, account_name_key
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
 
 
+def _same_email(left, right):
+    return (isinstance(left, str) and isinstance(right, str)
+            and left.casefold() == right.casefold())
+
+
 def bind_proxy_account(store, attempt, route_config, observation):
     """Bind only a verified, single-credential proxy to the authenticated name."""
     if attempt['status'] != 'verified':
@@ -27,7 +32,7 @@ def bind_proxy_account(store, attempt, route_config, observation):
                for value in (binding, identity)):
         raise BridgeError('proxy_binding_unverified', 'The proxy credential identity is unavailable.')
     email = observation.get('email')
-    if attempt.get('email') and email != attempt['email']:
+    if attempt.get('email') and not _same_email(attempt['email'], email):
         raise BridgeError('identity_changed', 'The proxy identity does not match the selected account.')
     models = tuple(item['id'] for item in observation.get('models', ())
                    if isinstance(item, dict) and isinstance(item.get('id'), str))
@@ -54,7 +59,7 @@ def bind_proxy_account(store, attempt, route_config, observation):
                     or previous.key_env != account.key_env
                     or previous.management_key_env != account.management_key_env):
                 raise BridgeError('account_changed', 'Reauthentication cannot change the account route.')
-            if previous.email and email and previous.email != email:
+            if previous.email and email and not _same_email(previous.email, email):
                 raise BridgeError('identity_changed', 'Reauthentication cannot replace the account identity.')
         active = db.execute("SELECT 1 FROM runs WHERE account_id=? AND state IN ('starting','running','stopping')",
                             (account.id,)).fetchone()

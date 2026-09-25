@@ -105,15 +105,6 @@ export function setupLogin({ providers, onComplete }) {
     startButton.disabled = !values.length;
   }
 
-  function safeAuthorizationUrl(value) {
-    try {
-      const url = new URL(value);
-      return url.protocol === 'https:' ? url.href : null;
-    } catch {
-      return null;
-    }
-  }
-
   function showAttempt(value) {
     attempt = { ...attempt, ...value };
     recoveryGeneration += 1;
@@ -135,10 +126,6 @@ export function setupLogin({ providers, onComplete }) {
       abandoned: 'This sign-in attempt was closed.',
     };
     byId('login-status').textContent = messages[status] || `OAuth state: ${status}`;
-    const url = safeAuthorizationUrl(attempt.authorization_url);
-    const link = byId('login-open-url');
-    link.hidden = !url || !PENDING.has(status);
-    if (url) link.href = url;
     const code = attempt.user_code;
     byId('login-user-code').hidden = !code || !PENDING.has(status);
     byId('login-code-value').textContent = code || '';
@@ -146,6 +133,10 @@ export function setupLogin({ providers, onComplete }) {
       ? 'The previous authorization may still be active. Check your provider account before trying again.'
       : status === 'interrupted'
         ? 'You can close this attempt, but AgentBridge cannot confirm that authorization stopped.'
+        : PENDING.has(status) && attempt.browser_opened === true
+          ? 'Complete authorization in the separate private browser window. AgentBridge checks the account identity before connecting it.'
+          : PENDING.has(status)
+            ? 'The private browser could not open. Cancel this attempt, check that Chrome or Chromium and a desktop session are available, then try again.'
         : 'AgentBridge verifies your account after authorization before adding it.';
     cancelButton.textContent = FINISHED.has(status) ? 'Close' : status === 'interrupted' ? 'Abandon attempt' : 'Cancel login';
     cancelButton.hidden = status === 'authorized' || status === 'verified' || status === 'bound';
@@ -174,8 +165,15 @@ export function setupLogin({ providers, onComplete }) {
         toast(`Account connected, but the local view could not refresh: ${describeError(error)}`, true);
       }
     } catch (error) {
+      if (error?.code === 'identity_changed' && attempt) {
+        try {
+          showAttempt(await api.loginStatus(attempt.attempt_id, attempt.owner_ref));
+        } catch {
+          // Keep the original identity error visible if status is unavailable.
+        }
+      }
       setFeedback(feedback, describeError(error));
-      retryButton.hidden = false;
+      retryButton.hidden = !attempt || !['authorized', 'verified'].includes(attempt.status);
     } finally {
       busy = false;
       retryButton.disabled = false;
@@ -208,6 +206,8 @@ export function setupLogin({ providers, onComplete }) {
       provider: byId('login-provider').value,
       name: byId('login-name').value.trim(),
     };
+    const email = byId('login-email').value.trim();
+    if (email) values.email = email;
     let completeImmediately = false;
     try {
       const started = await api.loginStart(values);

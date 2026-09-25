@@ -22,6 +22,7 @@ let usageExpiryTimer = null;
 
 function navigate(view) {
   if (!Object.hasOwn(titles, view)) return;
+  if (window.location.hash !== `#${view}`) window.history.pushState(null, '', `#${view}`);
   for (const [name] of Object.entries(titles)) {
     const active = name === view;
     byId(`view-${name}`).hidden = !active;
@@ -54,6 +55,7 @@ function renderAccountSummaries() {
   renderAccounts(state.accounts, state.usage, {
     statuses: state.statuses,
     onRemove: openRemove,
+    onChanged: refreshAll,
   });
 }
 
@@ -67,7 +69,7 @@ function scheduleUsageExpiry() {
     if (refreshPromise) return;
     renderAccountSummaries();
     scheduleUsageExpiry();
-  }, Math.max(1, expiry - Date.now() + 25));
+  }, Math.min(2_147_483_647, Math.max(1, expiry - Date.now() + 25)));
 }
 
 function render() {
@@ -139,5 +141,8 @@ for (const link of document.querySelectorAll('[data-go]')) {
 byId('accounts-add').addEventListener('click', openLogin);
 byId('refresh-button').addEventListener('click', () => refreshAll().catch((error) => toast(describeError(error), true)));
 
-navigate('overview');
+window.addEventListener('popstate', () => navigate(window.location.hash.slice(1) || 'overview'));
+window.addEventListener('hashchange', () => navigate(window.location.hash.slice(1) || 'overview'));
+navigate(Object.hasOwn(titles, window.location.hash.slice(1))
+  ? window.location.hash.slice(1) : 'overview');
 refreshAll().catch((error) => setGlobalError(describeError(error)));

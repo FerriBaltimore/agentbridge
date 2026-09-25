@@ -75,8 +75,9 @@ that same pending login.
 {"jsonrpc":"2.0","id":10,"method":"models.list","params":{"refresh":true,"limit":100,"cursor":0}}
 ```
 
-`accounts.status` reports configured provider/model references and observed
-authentication and identity. `accounts.usage` reports `scope: "account"`,
+`accounts.status` reports configured provider/model references, observed
+authentication and identity, and `routing.paused` with `routing.paused_at`.
+The routing state is independent of authentication. `accounts.usage` reports `scope: "account"`,
 `supported`, `stale` and `reason`; `source` and `quota_windows` are present
 when known.
 Each window has `id`, `label`, `scope`, optional `model_id`, `used_percent`,
@@ -178,6 +179,19 @@ explicit user or host recovery decision; it never authorizes a new account or
 an automatic rerun. `turns.stop` explicitly cancels a known turn; `recover`
 classifies a lost worker. See [errors.md](errors.md) and
 [events.md](events.md) for their limits.
+
+## Pause or resume an account route
+
+```json
+{"jsonrpc":"2.0","id":16,"method":"accounts.pause","params":{"account_ref":"team-codex-1"}}
+{"jsonrpc":"2.0","id":17,"method":"accounts.resume","params":{"account_ref":"team-codex-1"}}
+```
+
+Pause excludes the account from new automatic selections and pinned turns.
+It preserves its authorization, history, quota observations and turns already
+admitted. Resume restores eligibility after normal proxy checks. These calls
+are idempotent; read `accounts.status.routing` to reconcile an uncertain
+response. Paused accounts are absent from the routable `models.list` catalogue.
 
 ## Remove a local account route
 

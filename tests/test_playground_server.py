@@ -42,7 +42,8 @@ class PublicBridgeStub:
 
     def account_login_start(self, **options):
         self._record('account_login_start', **options)
-        return {'attempt_id': 'login-1', 'owner_ref': 'owner-1', 'status': 'awaiting_user'}
+        return {'attempt_id': 'login-1', 'owner_ref': 'owner-1', 'status': 'awaiting_user',
+                'authorization_url': 'https://auth.example.test/authorize'}
 
     def account_login_status(self, attempt_id, *, owner_ref):
         self._record('account_login_status', attempt_id, owner_ref=owner_ref)
@@ -123,6 +124,27 @@ class PublicBridgeStub:
         return {'permission_id': permission_id, 'decision': options['decision']}
 
 
+class FakeAuthBrowser:
+    def __init__(self):
+        self.launched = []
+        self.stopped = []
+        self.closed = False
+
+    def launch(self, attempt):
+        self.launched.append(attempt)
+        return True
+
+    def stop(self, attempt_id):
+        self.stopped.append(attempt_id)
+
+    def active(self, attempt_id):
+        return (any(attempt['attempt_id'] == attempt_id for attempt in self.launched)
+                and attempt_id not in self.stopped)
+
+    def close(self):
+        self.closed = True
+
+
 @pytest.fixture
 def local_server(tmp_path):
     static = tmp_path / 'static'
@@ -140,6 +162,24 @@ def local_server(tmp_path):
         server.shutdown()
         worker.join(timeout=3)
         server.server_close()
+
+
+@pytest.fixture
+def browser_server(tmp_path):
+    bridge = PublicBridgeStub()
+    auth_browser = FakeAuthBrowser()
+    server = create_server(port=0, bridge=bridge, workspace_path=tmp_path,
+                           auth_browser=auth_browser)
+    worker = Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01},
+                    daemon=True)
+    worker.start()
+    try:
+        yield server, bridge, auth_browser
+    finally:
+        server.shutdown()
+        worker.join(timeout=3)
+        server.server_close()
+        assert auth_browser.closed
 
 
 def request(server, method, path, *, body=None, headers=None, csrf=True):
@@ -249,6 +289,48 @@ def test_login_and_removal_only_call_public_sdk(local_server):
                        'upstream_credential_removed': False}
     assert ('account_login_start', (), start) in bridge.calls
     assert ('account_delete', ('Personal',), {}) in bridge.calls
+
+
+def test_login_start_opens_isolated_browser_once_and_forwards_email(browser_server):
+    server, bridge, auth_browser = browser_server
+    values = {'provider': 'claude', 'name': 'Work', 'email': 'work@example.test'}
+    status, payload = request(server, 'POST', '/api/accounts/login/start', body=values)
+    assert status == 200
+    assert payload['result']['browser_opened'] is True
+    assert auth_browser.launched == [{
+        'attempt_id': 'login-1', 'owner_ref': 'owner-1', 'status': 'awaiting_user',
+        'authorization_url': 'https://auth.example.test/authorize'}]
+    assert ('account_login_start', (), values) in bridge.calls
+    status_result = request(server, 'GET', '/api/accounts/login/login-1?owner_ref=owner-1')
+    assert status_result[0] == 200
+    assert status_result[1]['result']['browser_opened'] is False
+    assert len(auth_browser.launched) == 1
+
+
+def test_isolated_browser_stops_after_terminal_status(browser_server, monkeypatch):
+    server, bridge, auth_browser = browser_server
+    request(server, 'POST', '/api/accounts/login/start',
+            body={'provider': 'claude', 'name': 'Work'})
+    pending = lambda *_args, **_kwargs: {'status': 'awaiting_user'}
+    monkeypatch.setattr(bridge, 'account_login_status', pending)
+    pending_result = request(server, 'GET', '/api/accounts/login/login-1?owner_ref=owner-1')
+    assert pending_result[1]['result']['browser_opened'] is True
+    assert auth_browser.stopped == []
+    authorized = lambda *_args, **_kwargs: {'status': 'authorized'}
+    monkeypatch.setattr(bridge, 'account_login_status', authorized)
+    authorized_result = request(server, 'GET', '/api/accounts/login/login-1?owner_ref=owner-1')
+    assert authorized_result[1]['result']['browser_opened'] is False
+    assert auth_browser.stopped == ['login-1']
+
+
+def test_isolated_browser_stops_after_cancel(browser_server):
+    server, _, auth_browser = browser_server
+    request(server, 'POST', '/api/accounts/login/start',
+            body={'provider': 'claude', 'name': 'Work'})
+    request(server, 'POST', '/api/accounts/login/login-1/cancel',
+            body={'owner_ref': 'owner-1'})
+    assert auth_browser.stopped == ['login-1']
+    assert len(auth_browser.launched) == 1
 
 
 def test_chat_routes_forward_optional_turn_controls(local_server, tmp_path):

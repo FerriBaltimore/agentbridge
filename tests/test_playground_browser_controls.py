@@ -16,6 +16,7 @@ from test_playground_browser import (
     local_playground, playwright_api,
 )
 from test_proxy_management import local_management
+from test_playground_server import FakeAuthBrowser
 
 
 class ControllableGrantBridge:
@@ -69,7 +70,8 @@ def controlled_playground(tmp_path, monkeypatch):
         try:
             yield {'url': f'http://127.0.0.1:{server.server_port}/',
                    'bridge': bridge, 'grantbridge': grantbridge,
-                   'responses': responses, 'port': port, 'managed': managed}
+                   'responses': responses, 'port': port, 'managed': managed,
+                   'server': server}
         finally:
             server.shutdown()
             thread.join(timeout=3)
@@ -150,17 +152,9 @@ def test_oauth_validation_pending_reopen_and_confirmed_cancel(controlled_playgro
             page.get_by_test_id('login-status').get_by_text(
                 'Waiting for authorization in your browser').wait_for()
             assert len(controlled_playground['managed'].provisioned) == 1
-            assert page.get_by_test_id('login-open-url').get_attribute('href') == (
-                'https://auth.example.test/authorize')
+            assert page.locator('#login-open-url').count() == 0
             page.locator('#login-user-code').get_by_text('ABCD-EFGH').wait_for()
-            page.context.route('https://auth.example.test/**', lambda route: route.fulfill(
-                status=200, content_type='text/html', body='<title>Fixture OAuth</title>'))
-            with page.expect_popup() as opened:
-                page.get_by_test_id('login-open-url').click()
-            popup = opened.value
-            popup.wait_for_load_state()
-            assert popup.url == 'https://auth.example.test/authorize'
-            popup.close()
+            assert 'could not open' in page.locator('#login-progress-help').inner_text().lower()
             page.get_by_role('button', name='Close dialog').click()
             assert not page.get_by_test_id('login-dialog').is_visible()
             page.get_by_test_id('add-account').click()
@@ -182,6 +176,32 @@ def test_oauth_validation_pending_reopen_and_confirmed_cancel(controlled_playgro
             page.get_by_test_id('login-status').get_by_text(
                 'Waiting for authorization in your browser').wait_for()
             assert grantbridge.starts == 2
+            assert errors == []
+        finally:
+            browser.close()
+
+
+def test_oauth_auto_open_hides_manual_link_and_sends_expected_email(controlled_playground):
+    fixture = controlled_playground
+    auth_browser = FakeAuthBrowser()
+    fixture['server'].auth_browser = auth_browser
+    with playwright_api.sync_playwright() as playwright:
+        browser = _launch_browser(playwright)
+        try:
+            page, errors = _page(browser, fixture['url'])
+            _fill_login(page, name='Claude Work')
+            page.get_by_test_id('login-email').fill('work@example.test')
+            with page.expect_request(lambda request: request.method == 'POST'
+                                     and request.url.endswith('/api/accounts/login/start')) as sent:
+                page.get_by_test_id('login-start').click()
+            assert sent.value.post_data_json == {
+                'provider': 'grok', 'name': 'Claude Work', 'email': 'work@example.test'}
+            page.get_by_test_id('login-status').get_by_text(
+                'Waiting for authorization in your browser').wait_for()
+            assert page.locator('#login-open-url').count() == 0
+            page.locator('#login-progress-help').get_by_text(
+                'separate private browser window').wait_for()
+            assert len(auth_browser.launched) == 1
             assert errors == []
         finally:
             browser.close()

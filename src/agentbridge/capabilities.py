@@ -3,6 +3,7 @@
 OPERATIONS = (
     "contracts.list", "contracts.get", "contracts.check", "contracts.inspect",
     "capabilities.get", "accounts.list", "accounts.status", "accounts.delete",
+    "accounts.pause", "accounts.resume",
     "accounts.usage", "accounts.usage_history",
     "accounts.login",
     "accounts.login.list", "accounts.login.start", "accounts.login.status", "accounts.login.check",
@@ -38,6 +39,9 @@ def proxy_payload(*, include_parameters=True):
             item['limitations'] = ['local_same_host_browser', 'live_oauth_acceptance_pending']
         elif operation == 'accounts.delete':
             item['limitations'] = ['local_retirement_only', 'upstream_credential_remains']
+        elif operation in {'accounts.pause', 'accounts.resume'}:
+            item['limitations'] = ['new_work_only', 'active_turns_continue',
+                                   'upstream_credential_remains']
         elif operation.startswith('contracts.'):
             item['limitations'] = ['schema_audit_only', 'execution_engine_is_codex']
         elif operation == 'models.list':

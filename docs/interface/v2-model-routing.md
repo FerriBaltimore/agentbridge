@@ -46,6 +46,11 @@ uses `accounts login-start`, then `login-status`, `login-check` and
 `login-complete`. Neither registration nor SDK access offers a second way to
 create a usable account. The initial browser route assumes browser and sidecar
 are on the same host; remote OAuth browser acceptance remains pending.
+The local playground opens the authorization URL in a fresh private browser
+profile for each started attempt and closes that browser when the attempt ends.
+If the browser cannot open, the user cancels and retries after checking the
+local browser setup. An optional expected email is checked against the observed
+provider identity before binding; the account name remains only a local label.
 
 ```sh
 agentbridge accounts login --provider codex --name Example

@@ -47,7 +47,9 @@ still needs controlled live acceptance. See the
 [implementation inventory](docs/interface/implementation-status.md).
 
 The CLI also provides `accounts list`, `accounts status`, `accounts usage`,
-`accounts check` and `accounts delete`. Delete retires the local route and
+`accounts check`, `accounts pause`, `accounts resume` and `accounts delete`.
+Pause excludes an account from new routing while preserving its login and
+current turns. Delete retires the local route and
 preserves its history; it does not remove the upstream proxy credential.
 Use `accounts delete --account-id ID` for an exact retry after an uncertain
 stop or a reused account name.
@@ -106,8 +108,8 @@ python -m playground.server --workspace-path . --port 8765
 ```
 
 Open `http://127.0.0.1:8765/`. The server binds only to loopback. Accounts
-can be added through GrantBridge OAuth, inspected for current usage, and
-removed from AgentBridge. Removal retires the local route and preserves its
+can be added through GrantBridge OAuth, inspected for current usage, paused,
+resumed and removed from AgentBridge. Removal retires the local route and preserves its
 history; it does not revoke or delete the upstream CLIProxyAPI credential.
 Model, provider, reasoning and context controls appear when the local proxy
 reports them. Unknown usage and unavailable controls stay visible as unknown.

@@ -21,6 +21,9 @@ function observedModelRefs(models) {
 }
 
 function accountHealth(account, status, routeRefs) {
+  if (status?.routing?.paused || account.routing?.paused) {
+    return { ready: false, label: 'Paused', detail: 'Excluded from new work', tone: 'muted' };
+  }
   const state = status?.status || status?.authentication?.status || 'unknown';
   const auth = status?.authentication?.status || state;
   const verified = status?.binding_verified === true;

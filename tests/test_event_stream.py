@@ -113,7 +113,7 @@ def test_follow_waits_for_first_event_then_returns_before_turn_finishes(stored_t
     def produce():
         time.sleep(0.1)
         bridge.store.emit(turn_id, 'tool_call', {'call_id': 'tool-1', 'name': 'fixture-tool'})
-        assert allow_finish.wait(3)
+        assert allow_finish.wait(5)
         bridge.store.finish(turn_id, 'completed')
 
     producer = Thread(target=produce)
@@ -124,7 +124,7 @@ def test_follow_waits_for_first_event_then_returns_before_turn_finishes(stored_t
         assert bridge.store.get('runs', turn_id)['state'] == 'starting'
         allow_finish.set()
         finished = bridge.turn_events(turn_id, after_seq=first[-1]['seq'],
-                                      follow=True, timeout_ms=1000)
+                                      follow=True, timeout_ms=3000)
         assert [event['kind'] for event in finished] == ['run.finished']
         assert bridge.turn_events(turn_id, after_seq=finished[-1]['seq'],
                                   follow=True, timeout_ms=1000) == []

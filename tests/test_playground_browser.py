@@ -365,7 +365,8 @@ def test_browser_login_and_local_account_removal(local_playground):
             page.get_by_test_id('add-account').click()
             page.get_by_test_id('login-provider').select_option('grok')
             page.get_by_test_id('login-name').fill('Grok Lab')
-            assert page.get_by_test_id('login-dialog').locator('input, select').count() == 2
+            assert page.get_by_test_id('login-dialog').locator('input, select').count() == 3
+            assert page.get_by_test_id('login-email').is_visible()
             with page.expect_request(lambda request: request.method == 'POST'
                                      and request.url.endswith('/api/accounts/login/start')) as sent:
                 page.get_by_test_id('login-start').click()

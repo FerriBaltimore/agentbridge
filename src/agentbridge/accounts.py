@@ -135,15 +135,16 @@ class AccountService:
         account = self.get(account_id)
         retired = account.id in self.store.retired_account_ids()
         observation = self.store.latest_account_observation(account.id)
+        routing = self.store.pause_status(account.id)
         configured = {'name': account.name, 'email': account.email,
                       'provider': account.provider, 'supported_models': list(account.supported_models),
                       'credential_ref': bool(account.env_names or account.key_env or account.home or account.credential_ref)}
         if not observation:
-            return {'account_id': account.id, 'configured': configured,
+            return {'account_id': account.id, 'configured': configured, 'routing': routing,
                     'authentication': {'status': 'retired' if retired else 'not_observed',
                                        'source': None, 'observed_at': None},
                     'identity': {}, 'reason': 'account_removed' if retired else 'no_observation'}
-        result = {'account_id': account.id, 'configured': configured,
+        result = {'account_id': account.id, 'configured': configured, 'routing': routing,
                 'authentication': {'status': observation['status'], 'source': observation['source'],
                                    'observed_at': stamp(observation['observed_at'])},
                 **observation['data']}

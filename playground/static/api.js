@@ -83,6 +83,8 @@ export const api = {
   loginComplete: (id, ownerRef) => request(`/api/accounts/login/${ref(id)}/complete`, { method: 'POST', body: { owner_ref: ownerRef } }),
   loginCancel: (id, ownerRef) => request(`/api/accounts/login/${ref(id)}/cancel`, { method: 'POST', body: { owner_ref: ownerRef } }),
   deleteAccount: (account) => request(`/api/accounts/${ref(account)}`, { method: 'DELETE' }),
+  pauseAccount: (account) => request(`/api/accounts/${ref(account)}/pause`, { method: 'POST', body: {} }),
+  resumeAccount: (account) => request(`/api/accounts/${ref(account)}/resume`, { method: 'POST', body: {} }),
   createInstance: (values) => request('/api/instances', { method: 'POST', body: values }),
   updateInstance: (id, values) => request(`/api/instances/${ref(id)}`,
     { method: 'POST', body: values }),

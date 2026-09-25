@@ -17,13 +17,14 @@ from .routing.reconfiguration import PROVIDER_UNSET, require_declared_route, val
 from .evaluation.schema import migrate_v6
 from .evaluation.persistence import EvaluationStoreMixin
 from .account_retirement import AccountRetirementStoreMixin, migrate_v7
+from .account_pause import AccountPauseStoreMixin, migrate_v8
 
 
 def dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-class Store(AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
+class Store(AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
             RoutingStoreMixin, AuthStoreMixin):
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve()
@@ -142,7 +143,8 @@ class Store(AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStore
             version = migrate_v5(db, version)
             version = migrate_v6(db, version)
             version = migrate_v7(db, version)
-            if version != 7:
+            version = migrate_v8(db, version)
+            if version != 8:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)

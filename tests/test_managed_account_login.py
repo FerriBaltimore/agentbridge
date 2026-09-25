@@ -13,6 +13,8 @@ class FixtureManagedProxy:
         self.monkeypatch = monkeypatch
         self.provisions = 0
         self.ensures = 0
+        self.retires = []
+        self.on_retire = None
 
     def _route(self, account_id):
         self.monkeypatch.setenv('LAB_PROXY_KEY', 'managed-fixture-client-secret')
@@ -32,6 +34,12 @@ class FixtureManagedProxy:
         result = self._route(account_id)
         assert result['proxy_base_url'] == base_url
         return result
+
+    def retire(self, account_id):
+        self.retires.append(account_id)
+        if self.on_retire:
+            self.on_retire(account_id)
+        return {'retired': True, 'upstream_credential_removed': False}
 
     @staticmethod
     def is_managed(config, account_id):
@@ -66,6 +74,7 @@ def test_provider_and_name_login_provisions_proxy_before_grantbridge(tmp_path, m
             assert account['provider'] == 'codex'
             assert account['proxy_base_url'] == f'http://127.0.0.1:{port}/v1'
             assert managed.ensures >= 3
+            assert managed.retires == []
 
             monkeypatch.delenv('LAB_PROXY_KEY')
             monkeypatch.delenv('LAB_MANAGEMENT_KEY')

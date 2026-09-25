@@ -23,6 +23,7 @@ def public_account(account, status=None, account_ref=None):
         result['supported_models'] = list(value['supported_models'])
     if status:
         result['authentication'] = status.get('authentication', {})
+        result['routing'] = status.get('routing', {'paused': False, 'paused_at': None})
         result['identity'] = status.get('identity', {})
         if status.get('reason'):
             result['reason'] = status['reason']
@@ -66,6 +67,10 @@ def dispatch(bridge,method,params):
         raise BridgeError('authentication_required', 'Create accounts through the proxy login flow.')
     if method=='accounts.delete':
         return bridge.account_delete(**params)
+    if method=='accounts.pause':
+        return bridge.account_pause(**params)
+    if method=='accounts.resume':
+        return bridge.account_resume(**params)
     if method=='accounts.status':
         return bridge.account_status(**params)
     if method=='accounts.usage':

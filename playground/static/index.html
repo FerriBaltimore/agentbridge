@@ -110,15 +110,16 @@
     <div class="modal-body">
       <span class="overline">CONNECT AN IDENTITY</span>
       <h2>Add an account</h2>
-      <p class="modal-lead">Choose a provider and name, then authorize the account in your browser.</p>
+      <p class="modal-lead">Choose a provider and name. A fresh private browser opens for authorization.</p>
       <ol class="stepper" aria-label="Login progress"><li id="login-step-config" class="is-current"><span>1</span>Choose</li><li id="login-step-authorize"><span>2</span>Authorize</li><li id="login-step-verify"><span>3</span>Verify</li></ol>
       <div id="login-feedback" class="form-feedback" role="alert" hidden></div>
       <form id="login-form">
         <div class="form-grid">
           <label>Provider<select id="login-provider" data-testid="login-provider" required></select></label>
           <label>Account name<input id="login-name" data-testid="login-name" type="text" maxlength="128" autocomplete="off" placeholder="Personal account" required></label>
+          <label class="full-span">Expected account email (optional)<input id="login-email" data-testid="login-email" type="email" maxlength="254" autocomplete="off" placeholder="you@example.com"></label>
         </div>
-        <p class="field-help">The name is only used to identify this account in AgentBridge.</p>
+        <p class="field-help">The name is only a label. If you enter an email, AgentBridge checks it before connecting the account.</p>
         <div class="modal-actions"><button id="login-start" data-testid="login-start" class="button button-primary" type="submit">Start sign-in <svg><use href="#icon-arrow"></use></svg></button></div>
       </form>
       <section id="login-recovery" class="status-banner" aria-label="Unfinished sign-ins" hidden>
@@ -129,7 +130,6 @@
       </section>
       <div id="login-progress" hidden>
         <div id="login-status" data-testid="login-status" class="status-banner" aria-live="polite"></div>
-        <a id="login-open-url" data-testid="login-open-url" class="button button-primary external-button" target="_blank" rel="noopener noreferrer" hidden>Open authorization page <svg><use href="#icon-external"></use></svg></a>
         <div id="login-user-code" class="user-code" hidden><small>Verification code</small><strong id="login-code-value"></strong></div>
         <p id="login-progress-help" class="field-help">Waiting for the provider authorization to finish in your browser.</p>
         <div class="modal-actions"><button id="login-retry-check" class="button button-secondary" type="button" hidden>Retry verification</button><button id="login-cancel" data-testid="login-cancel" class="button button-ghost" type="button">Cancel login</button></div>
@@ -141,8 +141,9 @@
     <div class="modal-body"><span class="overline">ACCOUNT CATALOG</span><h2 id="account-models-heading">Account models</h2><p id="account-models-subtitle" class="modal-lead"></p><div id="account-models-content" class="account-models-content"></div></div>
   </dialog>
   <dialog id="account-usage-dialog" data-testid="account-usage-dialog" class="modal account-usage-dialog" aria-labelledby="account-usage-heading" aria-describedby="account-usage-subtitle">
-    <form method="dialog" class="modal-close-form"><button id="account-usage-close" class="icon-button" aria-label="Close usage dialog" title="Close usage dialog"><svg><use href="#icon-close"></use></svg></button></form>
+    <div class="modal-close-form"><button id="account-usage-close" class="icon-button" type="button" aria-label="Close usage dialog" title="Close usage dialog"><svg><use href="#icon-close"></use></svg></button></div>
     <div class="modal-body"><span class="overline">PROVIDER QUOTAS</span><h2 id="account-usage-heading">Account usage</h2><p id="account-usage-subtitle" class="modal-lead"></p><div id="account-usage-content" class="account-usage-content"></div></div>
+    <div class="usage-dialog-footer"><button id="account-usage-done" class="button button-secondary" type="button">Close</button></div>
   </dialog>
   <dialog id="remove-dialog" data-testid="remove-dialog" class="modal confirm-modal"><div class="modal-body"><span class="danger-symbol"><svg><use href="#icon-trash"></use></svg></span><h2>Remove account?</h2><p id="remove-account-name" class="confirm-name"></p><p>This stops AgentBridge from using the account. Its provider authorization is not revoked.</p><div id="remove-feedback" class="form-feedback" role="alert" hidden></div><div class="modal-actions"><button id="remove-cancel" class="button button-secondary" type="button">Keep account</button><button id="remove-confirm" data-testid="remove-confirm" class="button button-danger" type="button">Remove account</button></div></div></dialog>
   <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>

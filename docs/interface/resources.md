@@ -14,7 +14,9 @@ key values or upstream credentials.
 
 `accounts.list` returns safe public items with `account_ref`, `name`, `email`
 and, when present, `provider`, `supported_models`, `authentication`,
-`identity` and `reason`. `accounts.status` adds a configured reference summary
+`identity`, `routing` and `reason`. `routing` has `paused` and `paused_at`;
+it describes local admission, separately from observed authentication.
+`accounts.status` adds a configured reference summary
 and observations; it is not a credential export.
 
 Authentication is an observation, not a promise that a future model request

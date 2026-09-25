@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from . import auth_contract
 from .auth_proxy_binding import bind_proxy_account
+from .auth_proxy_retirement import retire_managed_proxy, retire_terminal_proxy
 from .auth_callback import validate_callback
 from .errors import BridgeError
 from .grantbridge import GrantBridgeClient
@@ -51,6 +52,10 @@ class AuthenticationService:
             raise BridgeError('invalid_provider', 'Choose a supported proxy provider.')
         if not isinstance(name, str) or not name.strip() or len(name) > 128:
             raise BridgeError('invalid_name', 'Account name must contain 1-128 non-space characters.')
+        if email is not None and (not isinstance(email, str) or not 1 <= len(email) <= 320
+                                  or email.strip() != email or '@' not in email
+                                  or any(ord(char) <= 32 or ord(char) >= 127 for char in email)):
+            raise BridgeError('invalid_request', 'email must be a valid account email when supplied.')
         if mode != 'browser' or browser != 'same_host':
             raise BridgeError('unsupported_operation', 'Proxy login currently supports a local browser.')
         if request_key is not None and (not isinstance(request_key, str) or not 1 <= len(request_key) <= 256):
@@ -108,12 +113,10 @@ class AuthenticationService:
         try:
             saved, created = self.store.create_auth_attempt(
                 attempt, request_key=request_key, connection=connection, proxy_route=config)
-        except BridgeError:
+        except BridgeError as error:
             if managed_created:
-                try:
-                    self.managed_proxy.retire(account_id)
-                except BridgeError:
-                    pass
+                retire_managed_proxy(self.managed_proxy, account_id,
+                                     prior_error_code=error.code)
             raise
         if not created:
             return self._public(saved)
@@ -123,16 +126,13 @@ class AuthenticationService:
             else:
                 management.ensure_empty()
         except BridgeError as error:
-            self.store.update_auth_attempt(
+            saved = self.store.update_auth_attempt(
                 attempt['id'], owner, status='failed', data={'error': {'code': error.code}})
-            if managed_created:
-                try:
-                    self.managed_proxy.retire(account_id)
-                except BridgeError:
-                    pass
+            retire_terminal_proxy(saved, self.store, self.accounts, self.managed_proxy)
             raise
-        client = GrantBridgeClient(**connection)
+        client = None
         try:
+            client = GrantBridgeClient(**connection)
             remote = client.proxy_start(provider, proxy_base_url, management_key_env)
             remote = auth_contract.attempt(remote, engine=provider)
             saved = self.store.update_auth_attempt(
@@ -141,14 +141,10 @@ class AuthenticationService:
         except BridgeError as error:
             if error.code in KNOWN_START_FAILURES:
                 # These failures happen before the request reaches CLIProxyAPI.
-                self.store.update_auth_attempt(
+                saved = self.store.update_auth_attempt(
                     attempt['id'], owner, status='failed',
                     data={'error': {'code': error.code}})
-                if managed_created:
-                    try:
-                        self.managed_proxy.retire(account_id)
-                    except BridgeError:
-                        pass
+                retire_terminal_proxy(saved, self.store, self.accounts, self.managed_proxy)
                 raise
             # Once dispatched, an interrupted response cannot prove whether
             # CLIProxyAPI created an OAuth session. Do not retry automatically.
@@ -160,13 +156,16 @@ class AuthenticationService:
                               outcome='unknown',
                               details={'attempt_id': attempt['id'], 'owner_ref': owner}) from error
         finally:
-            client.close()
+            if client is not None:
+                client.close()
+        retire_terminal_proxy(saved, self.store, self.accounts, self.managed_proxy)
         return self._public(saved)
 
     def status(self, attempt_id, *, owner_ref=None, account_ref=None,
                grantbridge_root=None, data_dir=None):
         row = self._owned(attempt_id, owner_ref, account_ref)
         if row['status'] in TERMINAL | {'verified', 'bound', 'usable'}:
+            retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
             return self._public(row)
         if not row['grantbridge_id']:
             raise BridgeError('authentication_attempt_not_ready', 'Authentication has not started.')
@@ -189,6 +188,7 @@ class AuthenticationService:
                                                  data={**row['data'], **remote})
         finally:
             client.close()
+        retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
         return self._public(row)
 
     def callback(self, attempt_id, *, owner_ref=None, redirect_url):
@@ -232,7 +232,7 @@ class AuthenticationService:
         observed = ManagementClient(
             ProxyRoute(row['account_id'], route['proxy_base_url'], route['key_env']),
             route['management_key_env']).observe()
-        self._verify_observation(row, observed)
+        self._verify_or_fail_new_email(row, observed)
         data = {**row['data'], 'verification': {'proxyBinding': 'passed'},
                 'proxy_binding': {'binding_fingerprint': observed['binding_fingerprint'],
                                   'identity_fingerprint': observed['identity_fingerprint']}}
@@ -255,7 +255,7 @@ class AuthenticationService:
         observed = ManagementClient(
             ProxyRoute(row['account_id'], route['proxy_base_url'], route['key_env']),
             route['management_key_env']).observe()
-        self._verify_observation(row, observed)
+        self._verify_or_fail_new_email(row, observed)
         checked = row['data'].get('proxy_binding') or {}
         if any(checked.get(key) != observed.get(key) for key in
                ('binding_fingerprint', 'identity_fingerprint')):
@@ -273,6 +273,7 @@ class AuthenticationService:
             row = self.store.update_auth_attempt(attempt_id, row['owner'], status='abandoned')
             return self._public(row)
         if row['status'] in TERMINAL | {'bound'}:
+            retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
             return self._public(row)
         if row['status'] in {'authorized', 'verified'}:
             raise BridgeError('already_finished',
@@ -308,19 +309,14 @@ class AuthenticationService:
                 raise BridgeError('already_finished',
                                   'OAuth already completed; the proxy credential remains available for activation.')
             if outcome == 'failed':
-                return self._public(self.store.update_auth_attempt(
-                    attempt_id, row['owner'], status='failed', data=remote))
+                row = self.store.update_auth_attempt(
+                    attempt_id, row['owner'], status='failed', data=remote)
+                retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
+                return self._public(row)
             if outcome != 'cancelled':
                 raise BridgeError('provider_protocol_error', 'The proxy did not confirm cancellation.')
         row = self.store.update_auth_attempt(attempt_id, row['owner'], status='cancelled')
-        if self.managed_proxy and not any(
-                account.id == row['account_id'] for account in self.accounts.list()):
-            route = self.store.auth_proxy_route(row['id'])['config']
-            if self.managed_proxy.is_managed(route, row['account_id']):
-                try:
-                    self.managed_proxy.retire(row['account_id'])
-                except BridgeError:
-                    pass
+        retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
         return self._public(row)
 
     def login(self, *, provider, name, proxy_base_url=None, key_env=None, management_key_env=None,
@@ -372,13 +368,32 @@ class AuthenticationService:
                 or observed.get('disabled') is not False
                 or observed.get('unavailable') is not False or not observed.get('models')):
             raise BridgeError('proxy_binding_unverified', 'The authenticated proxy account is not usable.')
-        if row.get('email') and row['email'] != observed.get('email'):
+        expected_email, observed_email = row.get('email'), observed.get('email')
+        if expected_email and (not isinstance(expected_email, str)
+                               or not isinstance(observed_email, str)
+                               or expected_email.casefold() != observed_email.casefold()):
             raise BridgeError('identity_changed', 'The proxy identity does not match the requested email.')
         existing = next((account for account in self.accounts.list() if account.id == row['account_id']), None)
         if existing:
             binding = self.store.proxy_binding(existing.id)
             if binding is None or binding['identity_fingerprint'] != observed['identity_fingerprint']:
                 raise BridgeError('identity_changed', 'Reauthentication cannot replace the account identity.')
+
+    def _verify_or_fail_new_email(self, row, observed):
+        try:
+            self._verify_observation(row, observed)
+        except BridgeError as error:
+            expected, actual = row.get('email'), observed.get('email')
+            if (error.code == 'identity_changed' and isinstance(expected, str) and expected
+                    and isinstance(actual, str) and '@' in actual
+                    and actual.casefold() != expected.casefold()
+                    and not any(account.id == row['account_id'] for account in self.accounts.list())):
+                saved = self.store.update_auth_attempt(
+                    row['id'], row['owner'], status='failed',
+                    data={**row['data'], 'verification': {'proxyBinding': 'failed'},
+                          'error': {'code': 'identity_changed'}})
+                retire_terminal_proxy(saved, self.store, self.accounts, self.managed_proxy)
+            raise
 
     def _route(self, row):
         saved = self.store.auth_proxy_route(row['id'])
