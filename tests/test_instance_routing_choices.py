@@ -68,23 +68,23 @@ def test_pinned_default_and_mode_toggles_keep_native_thread(bridge, tmp_path):
 
 
 @pytest.mark.parametrize('mode', ['automatic', 'pinned'])
-def test_manual_account_change_seeds_bounded_context_without_foreign_native(bridge, tmp_path, mode):
+def test_manual_account_change_preserves_native_thread_without_replaying_context(bridge, tmp_path, mode):
     instance = create(bridge, tmp_path, account_ref='a')
     completed(bridge, instance['id'])
     updated = bridge.instance_update(instance['id'], account_ref='b', routing_mode=mode,
                                      expected_version=1)
     assert updated['account_ref'] == 'b'
-    assert updated['native_session_id'] is None
+    assert updated['native_session_id'] == 'native-a'
     assert bridge.store.routing(instance['id'])['last_completed_account_id'] == 'a'
     account, decision, context, omissions, snapshot = prepare_turn(
         bridge, bridge.get_session(instance['id']), RunOptions(model=MODEL))
     assert account.id == 'b'
-    assert 'Original user request' in context and 'Original response' in context
+    assert context is None and omissions == 0
     bridge.store.admit('next', instance['id'], 'Next request', RunOptions(model=MODEL), None,
                        account_id=account.id, route_decision=decision, route_context=context,
                        route_omissions=omissions, route_event_seq=snapshot)
-    assert bridge.get_session(instance['id'])['native_id'] is None
-    assert bridge.get_session(instance['id'])['context'] == context
+    assert bridge.get_session(instance['id'])['native_id'] == 'native-a'
+    assert not bridge.get_session(instance['id'])['context']
 
 
 def test_account_only_update_pins_and_checks_model_atomically(bridge, tmp_path):
@@ -123,18 +123,16 @@ def test_pinned_requires_account_and_initial_account_must_be_eligible(bridge, tm
     assert error.value.code == 'account_paused'
 
 
-def test_failed_new_affinity_is_visible_without_owning_old_native(bridge, tmp_path):
+def test_failed_new_affinity_and_pinning_preserve_conversation_native_thread(bridge, tmp_path):
     instance = create(bridge, tmp_path, account_ref='a', routing_mode='automatic')
     completed(bridge, instance['id'])
     bridge.store.admit('failed-b', instance['id'], 'Next request', RunOptions(model=MODEL), None,
                        account_id='b', route_decision=RouteDecision(
-                           'b', MODEL, 'unknown', None, 'healthy', 0, 'quota_unknown'),
-                       route_context='Bounded previous evidence',
-                       route_event_seq=bridge.store.last_route_event_seq(instance['id']))
+                           'b', MODEL, 'unknown', None, 'healthy', 0, 'quota_unknown'))
     bridge.store.finish('failed-b', 'failed', 'provider_failed')
     value = bridge.instance_get(instance['id'])
     assert value['affinity_account_ref'] == 'b'
-    assert value['account_ref'] == 'a' and value['native_session_id'] == 'native-a'
+    assert value['account_ref'] == 'b' and value['native_session_id'] == 'native-a'
     pinned = bridge.instance_update(instance['id'], routing_mode='pinned')
-    assert pinned['account_ref'] == 'b' and pinned['native_session_id'] is None
+    assert pinned['account_ref'] == 'b' and pinned['native_session_id'] == 'native-a'
     assert bridge.store.session_run_count(instance['id']) == 2

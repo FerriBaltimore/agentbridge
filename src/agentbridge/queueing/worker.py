@@ -27,6 +27,7 @@ class Dispatcher:
         self.execution = {}
         self.stopped = False
         self.next_recovery = 0
+        self.next_admission = 0
         with self.bridge.store.connect() as db:
             db.execute('INSERT OR IGNORE INTO conversation_queues(session_id) VALUES (?)', (instance_id,))
             db.execute('UPDATE conversation_queues SET dispatcher_pid=?,dispatcher_identity=? WHERE session_id=?',
@@ -98,6 +99,8 @@ class Dispatcher:
             return False
         if queue['paused'] or running or rows[0]['state'] != 'queued':
             return True
+        if time.monotonic() < self.next_admission:
+            return True
         # A terminal commit can precede the owner's final cleanup. Never overlap
         # native processes or change accounts while that owner is still alive.
         if previous and (alive(previous['worker_pid'], previous['worker_identity'])
@@ -114,7 +117,9 @@ class Dispatcher:
                                message_id=row['id'], execution=execution,
                                excluded_account_refs=json.loads(row['exclusions']))
         except BridgeError as error:
-            if error.code not in {'busy', 'account_busy', 'context_stale'}:
+            if error.code in {'busy', 'account_busy', 'context_stale'}:
+                self.next_admission = time.monotonic() + .5
+            else:
                 self.queue.block(self.instance_id, row['id'], error.code)
         except Exception:
             self.queue.block(self.instance_id, row['id'], 'queue_dispatch_failed')

@@ -7,42 +7,20 @@ import time
 
 from ..errors import BridgeError, BusyError
 from ..models import Account, RunOptions, TERMINAL, identifier, model_id
+from ..native_sessions import bind_native_session, require_native_session
 from .binding import has_bound_proxy_login
 from .evidence import route_evidence
 from .service import OBSERVATION_TTL, RoutingService
-
-
-MAX_ROUTE_CONTEXT_BYTES = 128_000
 
 
 def _dumps(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-def _route_context(context, omissions, *, required):
-    if type(omissions) is not int or omissions < 0:
-        raise BridgeError("invalid_request", "route_omissions must be a nonnegative count.")
-    if required:
-        if not isinstance(context, str) or not context:
-            raise BridgeError("context_required", "This turn requires bounded portable context.")
-        if len(context.encode("utf-8")) > MAX_ROUTE_CONTEXT_BYTES:
-            raise BridgeError("context_over_budget", "Portable context exceeds the route budget.")
-    elif context is not None or omissions:
-        raise BridgeError("invalid_request", "Portable context is not required for this turn.")
-
-
-def _route_snapshot(db, session_id, event_seq, *, required):
-    if not required:
-        if event_seq is not None:
-            raise BridgeError("invalid_request", "An event snapshot is not needed for this turn.")
-        return
-    if type(event_seq) is not int or event_seq < 0:
-        raise BridgeError("invalid_request", "Portable context requires an event snapshot.")
-    current = db.execute("SELECT COALESCE(MAX(seq),0) FROM events WHERE session_id=?",
-                         (session_id,)).fetchone()[0]
-    if current != event_seq:
-        raise BridgeError("context_stale", "Conversation evidence changed before admission.",
-                          retryable=True)
+def _require_native_context(context, omissions, event_seq):
+    if type(omissions) is not int or omissions != 0 or context is not None or event_seq is not None:
+        raise BridgeError("invalid_request",
+                          "Proxy routing preserves native Codex history and cannot replace it with portable context.")
 
 
 def _reject_deleted_instance(db, session_id):
@@ -164,6 +142,8 @@ class RoutingStoreMixin:
             _verified_proxy_config(db, account_id, model, provider=routing_provider)
             db.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)",
                        (id, account_id, cwd, model, native_id, parent_id, context, time.time()))
+            if native_id is not None:
+                bind_native_session(db, id, native_id)
             db.execute("INSERT INTO instance_metadata(session_id,state,version,updated) VALUES (?,?,?,?)",
                        (id, "active", 1, time.time()))
             db.execute("INSERT INTO session_routing(session_id,mode,last_completed_account_id,last_native_id,provider,affinity_account_id) "
@@ -259,7 +239,7 @@ class RoutingStoreMixin:
 
     def admit(self, id, session_id, prompt, options, key, message_id=None, *,
               account_id=None, route_decision=None, route_context=None, route_omissions=0,
-              route_event_seq=None, excluded_account_refs=()):
+              route_event_seq=None, excluded_account_refs=(), expected_instance_version=None):
         message_id = message_id or id
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -279,8 +259,14 @@ class RoutingStoreMixin:
             session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
             if not session:
                 raise BridgeError("not_found", "Session does not exist.")
-            metadata = db.execute("SELECT state FROM instance_metadata WHERE session_id=?",
+            metadata = db.execute("SELECT state,version FROM instance_metadata WHERE session_id=?",
                                   (session_id,)).fetchone()
+            if expected_instance_version is not None:
+                if type(expected_instance_version) is not int or expected_instance_version < 1:
+                    raise BridgeError("invalid_request", "Expected instance version must be positive.")
+                current_version = metadata["version"] if metadata else 1
+                if expected_instance_version != current_version:
+                    raise BridgeError("version_conflict", "Instance changed before turn admission.")
             if metadata and metadata["state"] == "archived":
                 raise BridgeError("instance_archived", "Archived instances cannot accept new messages.")
             evaluation = db.execute('SELECT status FROM evaluation_instances WHERE session_id=?',
@@ -293,6 +279,8 @@ class RoutingStoreMixin:
             routing = db.execute("SELECT * FROM session_routing WHERE session_id=?", (session_id,)).fetchone()
             if routing is None:
                 raise BridgeError("schema_version", "Session routing metadata is missing.")
+            _require_native_context(route_context, route_omissions, route_event_seq)
+            require_native_session(db, session)
             selected = session["account_id"]
             route_event = None
             if routing["mode"] == "automatic":
@@ -315,18 +303,12 @@ class RoutingStoreMixin:
                 previous = prior["account_id"] if prior is not None else None
                 switched = ((previous is not None and previous != account_id)
                             or (stable is not None and stable != account_id))
-                needs_context = (prior is not None and
-                                 (switched or session["native_id"] is None
-                                  or routing["last_native_id"] is None
-                                  or prior["state"] != "completed"))
-                _route_context(route_context, route_omissions, required=needs_context)
-                _route_snapshot(db, session_id, route_event_seq, required=needs_context)
                 route_event.update({"previous_account_id": previous,
                                     "last_completed_account_id": stable,
                                     "account_changed": switched,
-                                    "portable_context_used": needs_context,
-                                    "context_omitted_count": route_omissions,
-                                    "context_bytes": len(route_context.encode("utf-8")) if needs_context else 0})
+                                    "portable_context_used": False,
+                                    "context_omitted_count": 0,
+                                    "context_bytes": 0})
                 selected = account_id
             else:
                 if account_id is not None and account_id != selected:
@@ -334,15 +316,6 @@ class RoutingStoreMixin:
                 if route_decision is not None:
                     raise BridgeError("invalid_request", "Pinned sessions do not accept route decisions.")
                 _verified_proxy_config(db, selected, options.model or session["model"])
-                prior = db.execute("SELECT account_id FROM runs WHERE session_id=? "
-                                   "ORDER BY rowid DESC LIMIT 1", (session_id,)).fetchone()
-                stable = routing["last_completed_account_id"]
-                needs_context = prior is not None and (
-                    prior["account_id"] != selected
-                    or (stable is not None and stable != selected)
-                    or (session["native_id"] is None and routing["last_native_id"] is not None))
-                _route_context(route_context, route_omissions, required=needs_context)
-                _route_snapshot(db, session_id, route_event_seq, required=needs_context)
             now = time.time()
             from ..queueing.records import admit as admit_queue_message
             admit_queue_message(self, db, session_id, message_id, id, prompt, options,
@@ -359,17 +332,10 @@ class RoutingStoreMixin:
                 db.execute('INSERT INTO run_route_exclusions(run_id,refs) VALUES (?,?)',
                            (id, _dumps(list(excluded_account_refs))))
             if route_event is not None:
-                if route_event["portable_context_used"]:
-                    db.execute("UPDATE sessions SET account_id=?,native_id=NULL,context=? WHERE id=?",
-                               (selected, route_context, session_id))
-                else:
-                    db.execute("UPDATE sessions SET account_id=? WHERE id=?", (selected, session_id))
+                db.execute("UPDATE sessions SET account_id=? WHERE id=?", (selected, session_id))
                 db.execute("UPDATE session_routing SET affinity_account_id=? WHERE session_id=?",
                            (selected, session_id))
                 self._event(db, id, session_id, "route_selected", route_event)
-            elif needs_context:
-                db.execute("UPDATE sessions SET native_id=NULL,context=? WHERE id=?",
-                           (route_context, session_id))
             from ..attachments import descriptors
             self._event(db, id, session_id, "user",
                         {"text": prompt, "attachments": descriptors(options.attachments),
@@ -395,17 +361,8 @@ class RoutingStoreMixin:
                        (state, code, exit_code, time.time(), id))
             from ..queueing.records import finished
             finished(self, db, row, state)
-            routing = db.execute("SELECT * FROM session_routing WHERE session_id=?",
-                                 (row["session_id"],)).fetchone()
             if state == "completed":
                 current = db.execute("SELECT native_id FROM sessions WHERE id=?",
                                      (row["session_id"],)).fetchone()
                 db.execute("UPDATE session_routing SET last_completed_account_id=?,last_native_id=? "
                            "WHERE session_id=?", (row["account_id"], current["native_id"], row["session_id"]))
-            elif routing is not None and routing["mode"] == "automatic":
-                previous = routing["last_completed_account_id"]
-                if previous is None:
-                    db.execute("UPDATE sessions SET native_id=NULL WHERE id=?", (row["session_id"],))
-                else:
-                    db.execute("UPDATE sessions SET account_id=?,native_id=? WHERE id=?",
-                               (previous, routing["last_native_id"], row["session_id"]))

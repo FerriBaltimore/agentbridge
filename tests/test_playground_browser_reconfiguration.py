@@ -139,6 +139,7 @@ def test_pinned_chat_can_switch_account_provider_model_effort_and_context_in_pla
             assert len(bridge.instances()) == 1
             changed = bridge.instance_get(instance_id)
             assert changed['routing_mode'] == 'pinned'
+            assert changed['native_session_id'] == first['native_session_id']
             assert changed['account_ref'] == 'Claude Research'
             assert changed['model'] == CLAUDE_MODEL
             assert changed['version'] == first['version'] + 1
@@ -150,6 +151,10 @@ def test_pinned_chat_can_switch_account_provider_model_effort_and_context_in_pla
             assert len(calls) == 2
             first_call = next(call for call in calls if OPENAI_MODEL in call['argv'])
             second_call = next(call for call in calls if CLAUDE_MODEL in call['argv'])
+            assert 'resume' not in first_call['argv']
+            resume_index = second_call['argv'].index('resume')
+            assert second_call['argv'][resume_index + 1] == first['native_session_id']
+            assert second_call['prompt'] == 'Second route'
             assert 'model_context_window=131072' in first_call['argv']
             assert 'model_reasoning_effort="high"' in first_call['argv']
             assert 'model_context_window=65536' in second_call['argv']
@@ -233,6 +238,8 @@ def test_automatic_chat_changes_provider_and_model_without_new_instance(
             provider.select_option('claude')
             model.select_option(CLAUDE_MODEL)
             assert 'Pending' in page.locator('#route-summary').inner_text()
+            assert 'least-used eligible account' in account.locator('option').first.inner_text()
+            assert 'least-used eligible account' in page.locator('#route-summary').inner_text()
             assert bridge.instance_get(instance_id)['model'] == OPENAI_MODEL
             with page.expect_request(lambda request: request.method == 'POST'
                                      and request.url.endswith(f'/api/instances/{instance_id}')) as updated:
@@ -244,13 +251,18 @@ def test_automatic_chat_changes_provider_and_model_without_new_instance(
             assert len(bridge.instances()) == 1
             changed = bridge.instance_get(instance_id)
             assert changed['routing_mode'] == 'automatic'
+            assert changed['native_session_id'] == first['native_session_id']
             assert changed['routing_provider'] == 'claude'
             assert changed['model'] == CLAUDE_MODEL
             turns = bridge.turns(instance_id=instance_id)
             assert len(turns) == 2
             assert [bridge.turn(turn['id'])['account_ref'] for turn in turns] == [
                 'OpenAI Personal', 'Claude Research']
-            assert len(_native_calls(route_change_playground['capture'])) == 2
+            calls = _native_calls(route_change_playground['capture'])
+            assert len(calls) == 2
+            resume_index = calls[1]['argv'].index('resume')
+            assert calls[1]['argv'][resume_index + 1] == first['native_session_id']
+            assert calls[1]['prompt'] == 'Automatic Claude turn'
             assert errors == []
         finally:
             browser.close()

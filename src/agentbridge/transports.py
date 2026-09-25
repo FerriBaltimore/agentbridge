@@ -4,6 +4,7 @@ import sys
 from .errors import BridgeError, UnsupportedError
 from .attachments import images
 from .codex_executable import codex_argv
+from .native_sessions import validate_native_id
 
 
 def require_proxy_account(account):
@@ -21,6 +22,8 @@ def duplex(account, options):
 def command(account, session, options, *, native_transport=False, state_root=None):
     require_proxy_account(account)
     native=session.get('native_id')
+    if native is not None:
+        validate_native_id(native)
     model=options.model or session.get('model')
     from .proxy import ProxyRoute, codex_overrides
     route_args = list(codex_overrides(ProxyRoute(account.id, account.proxy_base_url, account.key_env)))

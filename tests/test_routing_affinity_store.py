@@ -1,6 +1,7 @@
 """A selected automatic route has durable ownership independent of native state."""
 
 import time
+import sqlite3
 
 import pytest
 
@@ -8,6 +9,7 @@ from agentbridge import Bridge
 from agentbridge.errors import BridgeError
 from agentbridge.models import RunOptions
 from agentbridge.routing import RouteDecision
+from agentbridge.routing.schema import migrate_v11
 from agentbridge.store import Store
 from fixtures.test_proxy_account_fixture import register_verified_proxy_account
 
@@ -20,6 +22,18 @@ def prepared(tmp_path):
     register_verified_proxy_account(store, "a", 8301, model=MODEL)
     register_verified_proxy_account(store, "b", 8302, model=MODEL)
     return store
+
+
+def downgrade_routing_to_v10(store):
+    with store.connect() as db:
+        db.executescript('''
+            CREATE TABLE session_routing_v10 AS
+                SELECT session_id,mode,last_completed_account_id,last_native_id,provider
+                  FROM session_routing;
+            DROP TABLE session_routing;
+            ALTER TABLE session_routing_v10 RENAME TO session_routing;
+            UPDATE metadata SET version=10;
+        ''')
 
 
 def admit(store, run_id, account_id, *, reason=None, context=None, key=None):
@@ -51,17 +65,17 @@ def test_automatic_creation_persists_affinity_and_explicit_initial_choice(tmp_pa
         assert caught.value.code == "idempotency_conflict"
 
 
-def test_failed_new_route_keeps_affinity_and_restores_last_good_native(tmp_path):
+def test_failed_new_route_keeps_affinity_and_the_same_native_session(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     assert admit(store, "first", "a") == ("first", True)
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
 
-    assert admit(store, "first-b", "b", context="bounded history") == (
+    assert admit(store, "first-b", "b") == (
         "first-b", True)
     assert store.routing("instance")["affinity_account_id"] == "b"
-    store.emit("first-b", "session", {"native_id": "unstable-native-b"})
+    store.emit("first-b", "session", {"native_id": "native-a"})
     store.finish("first-b", "failed", "provider_failed")
 
     reopened = Store(tmp_path / "state")
@@ -70,9 +84,8 @@ def test_failed_new_route_keeps_affinity_and_restores_last_good_native(tmp_path)
     assert route["last_completed_account_id"] == "a"
     assert route["last_native_id"] == "native-a"
     session = reopened.get("sessions", "instance")
-    assert (session["account_id"], session["native_id"]) == ("a", "native-a")
-    assert admit(reopened, "retry-b", "b", reason="affinity",
-                 context="history including failed B") == (
+    assert (session["account_id"], session["native_id"]) == ("b", "native-a")
+    assert admit(reopened, "retry-b", "b", reason="affinity") == (
         "retry-b", True)
     assert reopened.events(run_id="retry-b")[0].data["reason"] == "affinity"
 
@@ -85,10 +98,10 @@ def test_rejected_or_replayed_admission_cannot_change_affinity(tmp_path):
     assert store.routing("instance")["affinity_account_id"] == "a"
     store.finish("first", "failed", "provider_failed")
     with pytest.raises(BridgeError) as caught:
-        admit(store, "false-affinity", "b", reason="affinity", context="prior history")
+        admit(store, "false-affinity", "b", reason="affinity")
     assert caught.value.code == "invalid_request"
     with pytest.raises(BridgeError) as caught:
-        admit(store, "invalid", "b", reason="least_used", context="prior history")
+        admit(store, "invalid", "b", reason="least_used")
     assert caught.value.code == "invalid_request"
     assert store.routing("instance")["affinity_account_id"] == "a"
     assert store.route_load(("b",))["b"]["assigned_turns"] == 0
@@ -102,17 +115,9 @@ def test_v10_migration_recovers_last_admitted_route_after_failure(tmp_path):
     admit(store, "first", "a")
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
-    admit(store, "failed-b", "b", context="prior history")
+    admit(store, "failed-b", "b")
     store.finish("failed-b", "failed", "provider_failed")
-    with store.connect() as db:
-        db.executescript('''
-            CREATE TABLE session_routing_v10 AS
-                SELECT session_id,mode,last_completed_account_id,last_native_id,provider
-                  FROM session_routing;
-            DROP TABLE session_routing;
-            ALTER TABLE session_routing_v10 RENAME TO session_routing;
-            UPDATE metadata SET version=10;
-        ''')
+    downgrade_routing_to_v10(store)
 
     upgraded = Store(tmp_path / "state")
     assert upgraded.routing("instance")["affinity_account_id"] == "b"
@@ -120,7 +125,30 @@ def test_v10_migration_recovers_last_admitted_route_after_failure(tmp_path):
     assert upgraded.routing("untouched")["affinity_account_id"] == "b"
     assert upgraded.routing("pinned")["affinity_account_id"] is None
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 13
+
+
+def test_v11_migration_rechecks_a_stale_version_argument(tmp_path):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    downgrade_routing_to_v10(store)
+    first = sqlite3.connect(store.path)
+    second = sqlite3.connect(store.path)
+    try:
+        stale_first = first.execute("SELECT version FROM metadata").fetchone()[0]
+        stale_second = second.execute("SELECT version FROM metadata").fetchone()[0]
+        assert stale_first == stale_second == 10
+        assert migrate_v11(first, stale_first) == 11
+        first.commit()
+        assert migrate_v11(second, stale_second) == 11
+        second.commit()
+    finally:
+        first.close()
+        second.close()
+    with store.connect() as db:
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 11
+        assert db.execute("SELECT affinity_account_id FROM session_routing "
+                          "WHERE session_id='instance'").fetchone()[0] == "a"
 
 
 def test_quota_break_evidence_identifies_previous_affinity(tmp_path):
@@ -141,64 +169,46 @@ def test_quota_break_evidence_identifies_previous_affinity(tmp_path):
     assert store.routing("instance")["affinity_account_id"] == "b"
 
 
-def test_pinned_change_requires_snapshot_and_clears_other_account_native(tmp_path):
+def test_pinned_change_preserves_native_history(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL)
     options = RunOptions(model=MODEL)
     store.admit("first", "instance", "first prompt", options, None, account_id="a")
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
-    with store.connect() as db:
-        db.execute("UPDATE sessions SET account_id='b',native_id=NULL WHERE id='instance'")
-
-    with pytest.raises(BridgeError) as caught:
-        store.admit("missing", "instance", "next prompt", options, None, account_id="b")
-    assert caught.value.code == "context_required"
-    with pytest.raises(BridgeError) as caught:
-        store.admit("stale", "instance", "next prompt", options, None, account_id="b",
-                    route_context="bounded history", route_event_seq=0)
-    assert caught.value.code == "context_stale"
+    store.update_session("instance", routing_account_id="b")
     with pytest.raises(BridgeError) as caught:
         store.admit("wrong-account", "instance", "next prompt", options, None,
-                    account_id="a", route_context="bounded history",
-                    route_event_seq=store.last_route_event_seq("instance"))
+                    account_id="a")
     assert caught.value.code == "invalid_request"
 
-    store.admit("switched", "instance", "next prompt", options, None, account_id="b",
-                route_context="bounded history", route_event_seq=store.last_route_event_seq("instance"))
+    store.admit("switched", "instance", "next prompt", options, None, account_id="b")
     session = store.get("sessions", "instance")
     assert (session["account_id"], session["native_id"], session["context"]) == (
-        "b", None, "bounded history")
+        "b", "native-a", None)
     assert store.routing("instance")["last_completed_account_id"] == "a"
     assert store.routing("instance")["last_native_id"] == "native-a"
     assert store.routing("instance")["affinity_account_id"] is None
     assert all(event.kind != "route_selected" for event in store.events(run_id="switched"))
 
 
-def test_pinned_failed_switch_does_not_resume_unstable_native(tmp_path):
+def test_pinned_failed_switch_resumes_the_original_native_session(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL)
     options = RunOptions(model=MODEL)
     store.admit("first", "instance", "first prompt", options, None, account_id="a")
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
-    with store.connect() as db:
-        db.execute("UPDATE sessions SET account_id='b',native_id=NULL WHERE id='instance'")
-    store.admit("failed-b", "instance", "next prompt", options, None, account_id="b",
-                route_context="bounded history", route_event_seq=store.last_route_event_seq("instance"))
-    store.emit("failed-b", "session", {"native_id": "unstable-native-b"})
+    store.update_session("instance", routing_account_id="b")
+    store.admit("failed-b", "instance", "next prompt", options, None, account_id="b")
+    store.emit("failed-b", "session", {"native_id": "native-a"})
     store.finish("failed-b", "failed", "provider_failed")
-    with pytest.raises(BridgeError) as caught:
-        store.admit("unsafe", "instance", "third prompt", options, None, account_id="b")
-    assert caught.value.code == "context_required"
-    store.admit("safe", "instance", "third prompt", options, None, account_id="b",
-                route_context="history including failed B",
-                route_event_seq=store.last_route_event_seq("instance"))
-    assert store.get("sessions", "instance")["native_id"] is None
+    store.admit("continued", "instance", "third prompt", options, None, account_id="b")
+    assert store.get("sessions", "instance")["native_id"] == "native-a"
 
 
 @pytest.mark.parametrize("mode", ("pinned", "automatic"))
-def test_manual_a_b_a_without_b_turn_restores_owned_native(tmp_path, mode):
+def test_manual_a_b_a_without_b_turn_preserves_native_at_every_step(tmp_path, mode):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode=mode)
     options = RunOptions(model=MODEL)
@@ -210,7 +220,7 @@ def test_manual_a_b_a_without_b_turn_restores_owned_native(tmp_path, mode):
     store.finish("first", "completed")
 
     store.update_session("instance", routing_mode=mode, routing_account_id="b")
-    assert store.get("sessions", "instance")["native_id"] is None
+    assert store.get("sessions", "instance")["native_id"] == "native-a"
     store.update_session("instance", routing_mode=mode, routing_account_id="a")
     session = store.get("sessions", "instance")
     assert (session["account_id"], session["native_id"]) == ("a", "native-a")
@@ -222,7 +232,7 @@ def test_manual_a_b_a_without_b_turn_restores_owned_native(tmp_path, mode):
         store.admit("next", "instance", "next prompt", options, None, account_id="a")
 
 
-def test_auto_admission_requires_context_if_native_was_cleared(tmp_path):
+def test_routing_mode_changes_preserve_native_history(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(store, "first", "a")
@@ -230,12 +240,9 @@ def test_auto_admission_requires_context_if_native_was_cleared(tmp_path):
     store.finish("first", "completed")
     store.update_session("instance", routing_mode="pinned", routing_account_id="b")
     store.update_session("instance", routing_mode="automatic")
-    assert store.get("sessions", "instance")["native_id"] is None
-    with pytest.raises(BridgeError) as caught:
-        admit(store, "unsafe", "a", reason="least_used")
-    assert caught.value.code == "context_required"
-    admit(store, "safe", "a", reason="least_used", context="bounded history")
-    assert store.get("sessions", "instance")["native_id"] is None
+    assert store.get("sessions", "instance")["native_id"] == "native-a"
+    admit(store, "continued", "b", reason="affinity")
+    assert store.get("sessions", "instance")["native_id"] == "native-a"
 
 
 @pytest.mark.parametrize("mode", ("pinned", "automatic"))
@@ -256,3 +263,36 @@ def test_explicit_create_replays_after_account_retirement(tmp_path, monkeypatch,
     with pytest.raises(BridgeError) as caught:
         bridge.instance_create(**{**request, "idempotency_key": "new-request"})
     assert caught.value.code == "account_removed"
+
+
+def test_stale_prepared_turn_cannot_override_manual_affinity(tmp_path):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    prepared_version = store.get("sessions", "instance")["version"]
+    store.update_session("instance", routing_mode="automatic", routing_account_id="b",
+                         expected_version=prepared_version)
+    with pytest.raises(BridgeError) as caught:
+        store.admit("stale", "instance", "fixture prompt", RunOptions(model=MODEL), None,
+                    account_id="a", route_decision=RouteDecision(
+                        "a", MODEL, "known", 20, "healthy", 0, "affinity"),
+                    expected_instance_version=prepared_version)
+    assert caught.value.code == "version_conflict"
+    assert store.routing("instance")["affinity_account_id"] == "b"
+    assert store.route_load(("a",))["a"]["assigned_turns"] == 0
+
+
+def test_idempotent_turn_replay_ignores_later_instance_version(tmp_path):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    options = RunOptions(model=MODEL)
+    decision = RouteDecision("a", MODEL, "known", 20, "healthy", 0, "affinity")
+    first = store.admit("first", "instance", "fixture prompt", options, "turn-key",
+                        account_id="a", route_decision=decision, expected_instance_version=1)
+    store.emit("first", "session", {"native_id": "native-a"})
+    store.finish("first", "completed")
+    store.update_session("instance", routing_mode="automatic", routing_account_id="b")
+    replay = store.admit("replayed", "instance", "fixture prompt", options, "turn-key",
+                         account_id="a", route_decision=decision, expected_instance_version=1)
+    assert first == ("first", True)
+    assert replay == ("first", False)
+    assert store.routing("instance")["affinity_account_id"] == "b"

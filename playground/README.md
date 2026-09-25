@@ -32,14 +32,15 @@ default. AgentBridge does not silently import or discard the old accounts.
 
 - Add a provider account through the GrantBridge browser flow, then inspect
   status, exact observed models and usage. Missing usage stays unknown.
-- In a new Chat conversation, choose a provider, then Automatic or a named
-  observed account, then a model. Automatic routing balances eligible accounts
-  within the selected provider; a named choice pins that account. Start a new
-  conversation to choose a specific account when the current one uses
-  automatic routing.
-- Change the provider and model between turns within the same conversation.
-  A pinned account can be switched to automatic routing; its next turn uses
-  portable context if the account changes.
+- In a new Chat conversation, choose a provider, routing mode, optional
+  observed account and model. Automatic routing starts with the least-used
+  eligible account unless one is selected, then keeps that account until
+  confirmed exhaustion or ineligibility. Pinned routing stays on the selected
+  account.
+- Change the provider, model, routing mode or preferred account between turns
+  within the same conversation. These changes retain the same native Codex
+  session and history. Inspect route evidence for the selected account; a
+  missing or divergent native session blocks continuation explicitly.
 - Chat restores the last viewed conversation. Its inline timeline displays
   observed tools, permissions, partial responses and compaction progress while
   a turn runs; private reasoning is not displayed. A local SSE connection

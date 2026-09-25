@@ -29,7 +29,8 @@ class TransferMixin:
             if validate_only:
                 return {'supported': False, 'mode': 'portable', 'same_engine': True,
                         'reason': 'native_continuation_unavailable'}
-            raise UnsupportedError('Cross-account continuation uses portable context.')
+            raise UnsupportedError('Native transfer between instances is unsupported. '
+                                   'Update the existing instance route to keep its Codex conversation.')
         target_model = model if model is not None else source['model'] if old.engine == target.engine else None
         from .routing.admission import verify_proxy_model
         if validate_only:

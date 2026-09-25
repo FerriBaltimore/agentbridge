@@ -109,7 +109,9 @@ Codex session total may be cumulative; it is not silently substituted for
 one turn's usage. Instance usage returns at most 10,000 turn observations;
 `partial` and `observation_limit` identify truncation. An absent turn usage
 observation is unknown, not zero. Portable continuation records context
-omissions separately from token usage.
+omissions separately from token usage when explicitly transferring into a
+separate conversation. Ordinary model, account and provider changes retain
+the same native Codex session and its history.
 
 ## Failures and interruptions
 
@@ -130,6 +132,8 @@ compatibility text; unrecognized evidence keeps an unknown classification.
 | `max_turns_exceeded`, `structured_output_failed` | Execution control stopped work |
 | `provider_connection_lost`, `provider_timeout` | Transport ended or timed out |
 | `unknown_outcome` | Completion or effects could not be established |
+| `native_session_missing` | The bound Codex session is unavailable |
+| `native_session_diverged` | The Codex session identity changed or mismatched |
 
 Provider retry notifications can be observed without starting another
 AgentBridge turn. Partial text is marked incomplete. Retracted messages are
@@ -139,6 +143,8 @@ cancelled. A clean process exit without a completion event is not success.
 In-flight tools without results keep unknown outcomes. Terminal failures are
 not automatically retried, and a safety block never triggers fallback to
 another account.
+Missing or divergent native state never triggers a replacement thread or a
+portable reconstruction of the conversation.
 
 Unknown future failures may enter the
 [reviewed error-learning workflow](error-learning.md), with explicit rule

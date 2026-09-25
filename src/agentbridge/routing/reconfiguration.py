@@ -4,6 +4,7 @@ import json
 
 from ..errors import BridgeError
 from ..models import Account, model_id
+from ..native_sessions import require_native_session
 from .binding import has_bound_proxy_login
 
 
@@ -55,6 +56,7 @@ def require_declared_route(db, model, *, provider=None, account_id=None):
 def configure_route(db, session, model, *, mode=PROVIDER_UNSET,
                     provider=PROVIDER_UNSET, account_id=PROVIDER_UNSET):
     """Change policy atomically while preserving native-session ownership."""
+    require_native_session(db, session)
     routing = db.execute('SELECT * FROM session_routing WHERE session_id=?',
                          (session['id'],)).fetchone()
     if routing is None:
@@ -75,13 +77,6 @@ def configure_route(db, session, model, *, mode=PROVIDER_UNSET,
     db.execute('UPDATE session_routing SET mode=?,provider=?,affinity_account_id=? WHERE session_id=?',
                (mode, selected_provider, chosen if mode == 'automatic' else None, session['id']))
     if (mode == 'pinned' or account_id is not PROVIDER_UNSET) and chosen != session['account_id']:
-        # Never resume a native session under the newly selected account.
-        # Admission reconstructs bounded portable context from durable events.
-        prior = db.execute('SELECT account_id,state FROM runs WHERE session_id=? '
-                           'ORDER BY rowid DESC LIMIT 1', (session['id'],)).fetchone()
-        safe_native = (routing['last_native_id']
-                       if prior is not None and prior['state'] == 'completed'
-                       and prior['account_id'] == chosen
-                       and routing['last_completed_account_id'] == chosen else None)
-        return {'account_id': chosen, 'native_id': safe_native}
+        # The proxy account is an upstream route; Codex owns the conversation.
+        return {'account_id': chosen}
     return {}

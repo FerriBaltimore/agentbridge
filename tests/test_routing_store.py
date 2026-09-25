@@ -66,63 +66,57 @@ def test_automatic_admission_persists_route_and_native_completion(tmp_path):
     assert store.routing("instance")["last_native_id"] == "native-b"
 
 
-def test_switch_requires_bounded_context_and_failure_restores_stable_native(tmp_path):
+def test_switch_and_failure_preserve_the_original_native_session(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(store, "first", "instance", "a")
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
-    with pytest.raises(BridgeError) as caught:
-        admit(store, "missing-context", "instance", "b")
-    assert caught.value.code == "context_required"
-    assert store.route_load(("b",))["b"]["assigned_turns"] == 0
-    with pytest.raises(BridgeError) as caught:
-        admit(store, "oversized", "instance", "b", context="x" * 128_001)
-    assert caught.value.code == "context_over_budget"
-    admit(store, "switch", "instance", "b", context="bounded history", omissions=3)
+    admit(store, "switch", "instance", "b")
     session = store.get("sessions", "instance")
-    assert session["account_id"] == "b" and session["native_id"] is None
-    assert session["context"] == "bounded history"
+    assert session["account_id"] == "b" and session["native_id"] == "native-a"
+    assert session["context"] is None
     route_event = store.events(run_id="switch")[0]
     assert route_event.data["account_changed"] is True
-    assert route_event.data["context_omitted_count"] == 3
-    store.emit("switch", "session", {"native_id": "failed-native-b"})
+    assert route_event.data["portable_context_used"] is False
+    assert route_event.data["context_omitted_count"] == 0
+    store.emit("switch", "session", {"native_id": "native-a"})
     store.finish("switch", "failed", "provider_failed")
     session = store.get("sessions", "instance")
-    assert (session["account_id"], session["native_id"]) == ("a", "native-a")
+    assert (session["account_id"], session["native_id"]) == ("b", "native-a")
     assert store.routing("instance")["last_native_id"] == "native-a"
     store.finish("switch", "completed")  # Terminal replay cannot promote failed state.
     assert store.routing("instance")["last_completed_account_id"] == "a"
-    admit(store, "next", "instance", "b", context="updated history")
-    store.emit("next", "session", {"native_id": "native-b"})
+    admit(store, "next", "instance", "b")
+    store.emit("next", "session", {"native_id": "native-a"})
     store.finish("next", "completed")
     assert store.routing("instance")["last_completed_account_id"] == "b"
-    assert store.routing("instance")["last_native_id"] == "native-b"
+    assert store.routing("instance")["last_native_id"] == "native-a"
 
 
-def test_failed_first_run_requires_context_on_next_turn(tmp_path):
+@pytest.mark.parametrize("terminal", ("failed", "cancelled", "interrupted"))
+def test_unsuccessful_first_run_preserves_observed_native_id(tmp_path, terminal):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(store, "failed", "instance", "a")
-    store.emit("failed", "session", {"native_id": "unstable-native"})
+    store.emit("failed", "session", {"native_id": "native-first"})
     store.emit("failed", "tool_call", {"call_id": "fixture-call", "name": "shell"})
-    store.finish("failed", "interrupted", "worker_lost")
-    assert store.get("sessions", "instance")["native_id"] is None
-    with pytest.raises(BridgeError) as caught:
-        admit(store, "without-context", "instance", "a")
-    assert caught.value.code == "context_required"
-    admit(store, "continued", "instance", "a", context="Unknown prior tool outcome")
+    store.finish("failed", terminal, "worker_lost")
+    store = Store(tmp_path / "state")
+    assert store.get("sessions", "instance")["native_id"] == "native-first"
+    admit(store, "continued", "instance", "a")
     event = store.events(run_id="continued")[0]
-    assert event.data["portable_context_used"] is True
+    assert event.data["portable_context_used"] is False
     assert event.data["account_changed"] is False
-    assert store.get("sessions", "instance")["native_id"] is None
+    assert store.get("sessions", "instance")["native_id"] == "native-first"
 
 
-def test_automatic_resume_leaves_portable_context_to_turn_admission(tmp_path):
+def test_automatic_resume_uses_the_same_native_history(tmp_path):
     bridge = Bridge(tmp_path / "state")
     register_verified_proxy_account(bridge.store, "a", 8301, model=MODEL)
     bridge.store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(bridge.store, "failed", "instance", "a")
+    bridge.store.emit("failed", "session", {"native_id": "native-first"})
     bridge.store.emit("failed", "tool_call", {"call_id": "fixture-call", "name": "shell"})
     bridge.store.finish("failed", "failed", "provider_failed")
     seen = {}
@@ -134,11 +128,12 @@ def test_automatic_resume_leaves_portable_context_to_turn_admission(tmp_path):
     bridge.submit = capture_submit
     bridge.run("failed").resume()
     assert seen["session_id"] == "instance"
+    assert bridge.store.get("sessions", "instance")["native_id"] == "native-first"
     assert "Historical conversation evidence" not in seen["prompt"]
     assert "Unknown previous outcomes" not in seen["prompt"]
 
 
-def test_completed_without_native_requires_context_even_on_same_account(tmp_path):
+def test_completed_without_native_id_cannot_start_a_replacement_thread(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(store, "first", "instance", "a")
@@ -146,30 +141,27 @@ def test_completed_without_native_requires_context_even_on_same_account(tmp_path
     assert store.routing("instance")["last_native_id"] is None
     with pytest.raises(BridgeError) as caught:
         admit(store, "second", "instance", "a")
-    assert caught.value.code == "context_required"
-    admit(store, "second", "instance", "a", context="Previous completed answer")
-    assert store.events(run_id="second")[0].data["portable_context_used"] is True
+    assert caught.value.code == "native_session_missing"
+    assert store.session_run_count("instance") == 1
 
 
-def test_failed_switch_requires_context_when_returning_to_stable_account(tmp_path):
+def test_return_after_failed_switch_keeps_the_same_native_session(tmp_path):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(store, "first", "instance", "a")
     store.emit("first", "session", {"native_id": "native-a"})
     store.finish("first", "completed")
-    admit(store, "failed-b", "instance", "b", context="prior history")
+    admit(store, "failed-b", "instance", "b")
     store.finish("failed-b", "failed", "provider_failed")
-    with pytest.raises(BridgeError) as caught:
-        admit(store, "return-a", "instance", "a")
-    assert caught.value.code == "context_required"
-    admit(store, "return-a", "instance", "a", context="History including failed B turn")
+    admit(store, "return-a", "instance", "a")
     event = store.events(run_id="return-a")[0]
     assert event.data["account_changed"] is True
-    assert event.data["portable_context_used"] is True
-    assert store.get("sessions", "instance")["native_id"] is None
+    assert event.data["portable_context_used"] is False
+    assert store.get("sessions", "instance")["native_id"] == "native-a"
 
 
-def test_admission_rejects_context_built_before_new_evidence(tmp_path):
+@pytest.mark.parametrize("context", ("bounded history", "x" * 128_001))
+def test_admission_rejects_portable_context_in_place_of_native_history(tmp_path, context):
     store = prepared(tmp_path)
     store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
     admit(store, "first", "instance", "a")
@@ -180,8 +172,8 @@ def test_admission_rejects_context_built_before_new_evidence(tmp_path):
     with pytest.raises(BridgeError) as caught:
         store.admit("stale", "instance", "fixture prompt", RunOptions(model=MODEL), None,
                     account_id="b", route_decision=decision("b"),
-                    route_context="history before the diagnostic", route_event_seq=snapshot)
-    assert caught.value.code == "context_stale"
+                    route_context=context, route_event_seq=snapshot)
+    assert caught.value.code == "invalid_request"
     assert store.route_load(("b",))["b"]["assigned_turns"] == 0
 
 
@@ -284,7 +276,7 @@ def test_v3_migration_preserves_pinned_proxy_session_and_replay(tmp_path):
         db.execute("UPDATE metadata SET version=3")
     upgraded = Store(tmp_path / "state")
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 13
     assert upgraded.routing("legacy") == {"mode": "pinned",
                                           "last_completed_account_id": "a",
                                           "last_native_id": "native-a", "provider": None,
@@ -305,7 +297,7 @@ def test_legacy_account_cannot_start_a_new_session_after_v2_upgrade(tmp_path):
     assert store.list("sessions") == []
 
 
-def test_portable_context_and_replay_keep_the_selected_proxy_account(tmp_path):
+def test_native_history_and_replay_keep_the_selected_proxy_account(tmp_path):
     bridge = Bridge(tmp_path / "state")
     register_verified_proxy_account(bridge.store, "a", 8301, model=MODEL)
     register_verified_proxy_account(bridge.store, "b", 8302, model=MODEL)
@@ -313,13 +305,11 @@ def test_portable_context_and_replay_keep_the_selected_proxy_account(tmp_path):
     admit(bridge.store, "first", "instance", "a")
     bridge.store.emit("first", "session", {"native_id": "native-a"})
     bridge.store.finish("first", "completed")
-    bundle = bridge.export_context("instance")
     assert bridge.store.admit("switch", "instance", "fixture prompt", RunOptions(model=MODEL),
-                              "switch-key", account_id="b", route_decision=decision("b"),
-                              route_context=bundle.text, route_omissions=len(bundle.omitted),
-                              route_event_seq=bridge.store.last_route_event_seq("instance")) == ("switch", True)
+                              "switch-key", account_id="b", route_decision=decision("b")) == ("switch", True)
     assert bridge.store.routing("instance")["mode"] == "automatic"
     assert bridge.store.get("sessions", "instance")["account_id"] == "b"
+    assert bridge.store.get("sessions", "instance")["native_id"] == "native-a"
     assert bridge.store.admit("retry", "instance", "fixture prompt", RunOptions(model=MODEL),
                               "switch-key", account_id="a", route_decision=decision("a")) == ("switch", False)
     assert bridge.store.get("sessions", "instance")["account_id"] == "b"
@@ -371,3 +361,51 @@ def test_rejects_inconsistent_route_evidence_before_admission(tmp_path):
                     account_id="a", route_decision=inconsistent)
     assert caught.value.code == "invalid_request"
     assert store.route_load(("a",))["a"]["assigned_turns"] == 0
+
+
+@pytest.mark.parametrize("native_id,code", (
+    (None, "native_session_missing"),
+    ("replacement-native", "native_session_diverged"),
+))
+def test_admission_and_reconfiguration_reject_damaged_native_binding(tmp_path, native_id, code):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    admit(store, "first", "instance", "a")
+    store.emit("first", "session", {"native_id": "native-original"})
+    store.finish("first", "failed", "provider_failed")
+    with store.connect() as db:
+        db.execute("UPDATE sessions SET native_id=? WHERE id='instance'", (native_id,))
+    reopened = Store(tmp_path / "state")
+
+    with pytest.raises(BridgeError) as caught:
+        admit(reopened, "replacement", "instance", "b")
+    assert caught.value.code == code
+    with pytest.raises(BridgeError) as caught:
+        reopened.update_session("instance", routing_account_id="b")
+    assert caught.value.code == code
+    assert reopened.session_run_count("instance") == 1
+    assert reopened.routing("instance")["affinity_account_id"] == "a"
+    assert reopened.get("sessions", "instance")["native_id"] == native_id
+
+
+@pytest.mark.parametrize("terminal", ("failed", "cancelled", "interrupted"))
+def test_execution_without_native_identity_cannot_start_a_replacement(tmp_path, terminal):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    admit(store, "first", "instance", "a")
+    store.emit("first", "tool_call", {"call_id": "observed-call", "name": "shell"})
+    store.finish("first", terminal, "worker_lost")
+    with pytest.raises(BridgeError) as caught:
+        admit(store, "replacement", "instance", "b")
+    assert caught.value.code == "native_session_missing"
+    assert store.route_load(("b",))["b"]["assigned_turns"] == 0
+
+
+def test_prelaunch_failure_without_native_execution_can_start_first_thread(tmp_path):
+    store = prepared(tmp_path)
+    store.add_session("instance", "a", str(tmp_path), MODEL, routing_mode="automatic")
+    admit(store, "first", "instance", "a")
+    store.finish("first", "failed", "credential_unavailable")
+    assert admit(store, "first-execution", "instance", "a") == ("first-execution", True)
+    store.emit("first-execution", "session", {"native_id": "native-first"})
+    assert store.get("sessions", "instance")["native_id"] == "native-first"

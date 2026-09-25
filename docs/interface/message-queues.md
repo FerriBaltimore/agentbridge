@@ -77,6 +77,8 @@ or compatibility turns launched with the one-shot transport return
 retains the active account, model, permissions and execution context. Conflicting
 settings, fresh context packages and account exclusions are rejected instead
 of changing the running turn. Provider-native protocol fields remain internal.
+New steering messages inherit omitted controls from the active turn; explicitly
+conflicting values are rejected. Promoted queue entries retain their saved controls.
 An outstanding tool approval can delay delivery until that interaction ends.
 
 ## Observation and recovery

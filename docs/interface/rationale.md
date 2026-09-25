@@ -36,9 +36,12 @@ zero.
 instances.create validates account, workspace and defaults without invoking a
 model. instances.get and instances.list make the durable conversation visible.
 instances.update uses expected_version to prevent lost writes. instances.archive
-is reversible at the storage layer and refuses an active turn. instances.export
-produces a bounded portable evidence bundle. instances.transfer reports native,
-portable or unavailable continuation and leaves the source independent.
+is reversible at the storage layer and refuses an active turn. A conversation
+binds once to a native Codex session; model, provider and account updates change
+the next route without replacing that session or its native history. Missing
+or divergent state blocks continuation. instances.export produces a bounded
+portable evidence bundle. instances.transfer explicitly creates an independent
+destination conversation; it does not implement a normal route change.
 instances.delete removes one ordinary local conversation after its work and
 owned processes have ended, with a minimal receipt to prevent recreation by a
 replayed creation request.

@@ -65,7 +65,9 @@ def test_worker_learns_reviewed_cause_without_repeating_execution(tmp_path, monk
     value = {'code': 'novel-provider-code', 'message': 'private-error billing credit expired'}
     event = {'type': 'bridge_error', 'error': normalize('codex', value)}
     native = tmp_path / 'provider.py'
-    native.write_text('import json\nprint(json.dumps(' + repr(event) + '),flush=True)\n')
+    session_event = {'type': 'thread.started', 'thread_id': 'fixture-error-history'}
+    native.write_text('import json\nprint(json.dumps(' + repr(session_event) + '),flush=True)\n'
+                      'print(json.dumps(' + repr(event) + '),flush=True)\n')
     with management_server() as port:
         bridge = bridge_with_proxy(tmp_path, monkeypatch, port,
                                    command=('/usr/bin/python3', str(native)))

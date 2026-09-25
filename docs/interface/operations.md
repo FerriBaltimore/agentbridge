@@ -182,12 +182,12 @@ rejects competing edits. Active turns, pending queue work, archived instances
 and evaluation instances prevent route changes. Declared support is checked
 on update; admission repeats fresh identity and model verification.
 
-`account_ref` identifies the owner of the stored native session or manually
-selected account. In automatic mode, `affinity_account_ref` identifies the
-preferred route for the next turn. These may differ after an unsuccessful
-handoff: its failure preserves the last completed native session and the new
-account affinity independently. A turn's `account_ref` identifies its actual
-route. See [account affinity](account-affinity.md) for selection and continuity.
+`account_ref` identifies the selected or admitted account, including after a
+failed turn, or the manually selected account. In automatic mode,
+`affinity_account_ref` identifies the preferred route for the next turn.
+Neither field owns the native session: its immutable binding belongs to the
+instance. A turn's `account_ref` identifies its actual route. See
+[account affinity](account-affinity.md) for selection and continuity.
 
 The signature includes target optional controls. This adapter rejects
 nondefault effort, context window, permission, sandbox and tool controls on
@@ -235,10 +235,13 @@ recreate or rerun that evaluation. `instances.get` then returns `not_found`.
 
 `messages.create` continues a conversation. On an automatic instance, the
 account may change before a new turn. The selected route stays fixed through
-the turn and its tool calls. A change starts a fresh Codex thread with bounded
-portable context and explicit omissions. Historical direct instances remain
-readable but cannot submit another turn. `turns.resume` is explicit recovery;
-it never replays an uncertain side effect or changes account silently.
+the turn and its tool calls. The instance binds once to a native Codex session;
+model, upstream provider and account changes resume that session with its
+native history. A route change never constructs a replacement thread from
+portable context. Missing or divergent native state blocks continuation.
+Historical direct instances remain readable but cannot submit another turn.
+`turns.resume` is explicit recovery; it never replays an uncertain side effect,
+changes account silently or replaces an already bound native session.
 
 `delivery="queue"` persists input until it can execute. `steer` introduces input
 to an active interactive turn; `interrupt` explicitly replaces the active turn
@@ -270,10 +273,13 @@ permission responses.
                      include_unknowns?)
     recover(instance_id?, turn_id?)
 
-Transfer uses bounded portable context between proxy accounts and keeps the
-source independent. Native cross-account transfer is unavailable. Execution
-at the destination still requires a verified proxy account. A repeated
-`idempotency_key` returns the previously created destination.
+Transfer explicitly creates a separate destination instance using bounded
+portable context and keeps the source and its native session independent.
+It is a fork, not the mechanism for changing a conversation's model or route.
+Native cross-account copying for this fork is unavailable. Execution at the
+destination still requires a verified proxy account and establishes its own
+native session. A repeated `idempotency_key` returns the previously created
+destination. Export and transfer retain explicit context omissions.
 
 ## Shared response and concurrency rules
 

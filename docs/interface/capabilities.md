@@ -14,8 +14,8 @@ A fixture-tested route or model catalogue is not live provider acceptance.
 | Credential custody and refresh | CLIProxyAPI owns upstream credentials | Provider refresh behavior needs live acceptance |
 | Account status and model list | Fresh local sidecar identity and model observations | Presence does not prove entitlement |
 | Account usage and quota | Attributable observations where sidecar reports them | Missing values stay unknown |
-| Earned Codex resets | Explicit credit read and idempotent redemption for one bound Codex proxy account | Fixture tested against pinned transport; private backend and live provider acceptance pending |
-| Continuation | Same Codex thread on one route; bounded portable context after account change | Cross-account continuation has fixture evidence |
+| Earned Codex resets | Explicit credit read and idempotent redemption for one bound Codex proxy account | Fixture tested against pinned transport; one live read; private backend and live redemption unverified |
+| Continuation | One immutable Codex session per instance across model, account and provider changes; explicit failure on missing or divergent state | Deterministic continuity coverage is separate from pending live provider acceptance |
 | Stop | Explicit supervised cancellation | Unknown outcome is not retried |
 | Tool permissions | Codex host response channel | Provider and model behavior needs acceptance |
 | Images and subagents | Codex request and event mapping where supported | Provider and model support varies |
@@ -42,8 +42,9 @@ the exact requested model. Both proxy client and management key references
 must be present. A pinned route meets the same requirements. Fresh applicable
 quota guides least-used selection; unknown quota is not zero. The route is
 persisted before execution and remains fixed through the turn. A switch may
-occur only before a later admitted turn and uses bounded portable context.
-Stop and recovery never trigger a hidden account switch or rerun.
+occur only before a later admitted turn and retains the instance's native
+Codex session. Stop and recovery never trigger a hidden account switch, native
+session replacement or rerun.
 
 ## Parameter validation
 

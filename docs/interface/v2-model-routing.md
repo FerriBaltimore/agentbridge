@@ -107,9 +107,13 @@ identity and model checks. See [account affinity](account-affinity.md) for the
 full transition rules, cache rationale and evidence limits.
 
 The chosen endpoint stays fixed during a complete turn, including tool calls.
-An account change starts a fresh Codex thread with bounded portable context
-and explicit omissions. No turn can execute through a historical direct
-Codex or Claude Code account.
+Every conversation binds once to one native Codex session. Model, account and
+upstream provider changes resume that same session through the new route,
+preserving its native history. They do not export or reconstruct a bounded
+transcript. Native Codex compaction remains observable. Missing, incompatible
+or divergent native session state blocks continuation rather than creating a
+replacement thread. No turn can execute through a historical direct Codex or
+Claude Code account.
 
 Every selected route must have one active upstream auth file, a clean inventory
 with no hidden API-key or plugin credential route, a stable provider identity,

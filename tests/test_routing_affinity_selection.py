@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentbridge.errors import BridgeError
-from agentbridge.routing.quota import route_quota
+from agentbridge.routing.quota import needs_active_refresh, route_quota
 from agentbridge.routing.selector import QuotaObservation, RouteCandidate, select_route
 from agentbridge.routing.service import RoutingService
 from agentbridge.store import Store
@@ -49,10 +49,13 @@ def test_affinity_retains_unknown_quota_and_waits_for_temporary_limits():
                         affinity_account_id='a').reason == 'affinity'
     for current, code in ((_candidate('a', 10, in_flight=1), 'account_busy'),
                           (_candidate('a', 10, cooldown_until=NOW + 7), 'rate_limited'),
-                          (_candidate('a', 10, health='unhealthy'), 'proxy_binding_unverified')):
+                          (_candidate('a', 10, health='unhealthy'), 'proxy_binding_unverified'),
+                          (_candidate('a', 10, health='unknown'), 'proxy_binding_unverified')):
         with pytest.raises(BridgeError) as caught:
             select_route(MODEL, (current, available), now=NOW, affinity_account_id='a')
         assert caught.value.code == code
+        if code in {'account_busy', 'rate_limited'}:
+            assert caught.value.retryable is True
     assert select_route(MODEL, (available,), now=NOW,
                         affinity_account_id='a').account_id == 'b'
 
@@ -93,7 +96,8 @@ def test_confirmed_exhaustion_outweighs_cooldown_and_stale_fallback_is_unknown()
 
 def test_exhaustion_evidence_sanitizes_provider_window_label():
     noisy = RouteCandidate('a', (MODEL,), (
-        QuotaObservation(100, NOW, MODEL, source='fixture', window_id='résumé'),))
+        QuotaObservation(100, NOW, MODEL, source='fixture', window_id='résumé'),),
+        health='healthy')
     decision = select_route(MODEL, (noisy, _candidate('b', 40)), now=NOW,
                             affinity_account_id='a')
     assert decision.affinity_break_evidence['window_id'] is None
@@ -114,6 +118,16 @@ def test_route_quota_preserves_proven_windows_and_marks_ambiguous_scope_unknown(
     assert [row.reset_at for row in windows[:2]] == [NOW + 300, NOW + 600]
     decision = select_route(MODEL, (RouteCandidate('a', (MODEL,), windows),), now=NOW)
     assert decision.quota_state == 'unknown' and decision.used_percent is None
+
+
+def test_active_quota_refreshes_after_reset_or_when_only_other_model_was_read():
+    row = {'source': 'cliproxy_upstream_usage', 'scope': 'model', 'model_id': MODEL,
+           'used_percent': 40, 'observed_at': NOW - 10, 'resets_at': NOW - 1}
+    assert needs_active_refresh({'quota_windows': [row]}, MODEL, now=NOW) is True
+    row['resets_at'] = NOW + 50
+    assert needs_active_refresh({'quota_windows': [row]}, MODEL, now=NOW) is False
+    row['model_id'] = 'other-model'
+    assert needs_active_refresh({'quota_windows': [row]}, MODEL, now=NOW) is True
 
 
 def test_routing_refreshes_missing_quota_once_and_uses_complete_active_windows(monkeypatch):
@@ -229,7 +243,7 @@ def test_service_observes_only_usable_affinity_until_confirmed_exhaustion(tmp_pa
     assert decision.affinity_break_evidence['window_id'] == 'primary'
 
 
-def test_failed_active_refresh_is_durably_throttled_between_selections(tmp_path, monkeypatch):
+def test_failed_active_refresh_is_throttled_between_services_in_one_process(tmp_path, monkeypatch):
     account = SimpleNamespace(id='a', provider='codex',
                               proxy_base_url='http://127.0.0.1:1/v1',
                               key_env='LAB_ROUTING_FAILURE_CLIENT_KEY',
@@ -264,8 +278,6 @@ def test_failed_active_refresh_is_durably_throttled_between_selections(tmp_path,
     monkeypatch.setattr('agentbridge.routing.service.ManagementClient', Management)
     routes = Routes(store, Accounts())
     assert routes.candidates(MODEL, refresh=True)[0].quota == ()
-    assert routes.candidates(MODEL, refresh=True)[0].quota == ()
+    assert Routes(store, Accounts()).candidates(MODEL, refresh=True)[0].quota == ()
     assert calls == ['fixture-binding']
-    saved = store.latest_usage_observation('a', source='cliproxy_upstream_refresh')
-    assert saved['data']['reason'] == 'upstream_quota_unavailable'
-    assert 'Private fixture body' not in repr(saved)
+    assert store.usage_history('a') == []

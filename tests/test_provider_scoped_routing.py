@@ -171,7 +171,7 @@ def test_route_change_refuses_active_archived_and_evaluation_instances(tmp_path)
     assert bridge.instance_get('evaluation')['routing_provider'] == 'codex'
 
 
-def test_pinned_chat_can_switch_provider_with_portable_context(tmp_path, monkeypatch):
+def test_pinned_chat_can_switch_provider_with_same_native_thread(tmp_path, monkeypatch):
     bridge = Bridge(tmp_path / 'state')
     _accounts(bridge.store)
     bridge.store.add_session('conversation', 'openai', str(tmp_path), MODEL)
@@ -191,7 +191,7 @@ def test_pinned_chat_can_switch_provider_with_portable_context(tmp_path, monkeyp
     account, decision, context, omissions, snapshot = prepare_turn(
         bridge, bridge.get_session('conversation'), RunOptions(model=MODEL))
     assert account.id == 'anthropic'
-    assert 'prior user request' in context
+    assert context is None and omissions == 0
     bridge.store.admit('next', 'conversation', 'new request', RunOptions(model=MODEL), None,
                        account_id=account.id, route_decision=decision,
                        route_context=context, route_omissions=omissions,
@@ -199,8 +199,9 @@ def test_pinned_chat_can_switch_provider_with_portable_context(tmp_path, monkeyp
     route = [event.data for event in bridge.store.events(run_id='next')
              if event.kind == 'route_selected'][0]
     assert route['account_changed'] is True
-    assert route['portable_context_used'] is True
+    assert route['portable_context_used'] is False
     assert route['previous_account_id'] == 'openai'
+    assert bridge.instance_get('conversation')['native_session_id'] == 'native-openai'
 
 
 @pytest.mark.parametrize('provider', [None, 'codex'])

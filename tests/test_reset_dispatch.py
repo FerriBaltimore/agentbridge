@@ -126,11 +126,12 @@ def test_version_eight_store_upgrades_to_reset_tables(tmp_path):
     with store.connect() as db:
         db.execute("DROP TABLE account_reset_observations")
         db.execute("DROP TABLE account_reset_attempts")
+        db.execute("DROP TABLE account_reset_generations")
         db.execute("ALTER TABLE session_routing DROP COLUMN affinity_account_id")
         db.execute("UPDATE metadata SET version=8")
     upgraded = Store(root)
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 13
         assert db.execute("PRAGMA table_info(account_reset_attempts)").fetchall()
     assert upgraded.pending_reset_account_ids() == set()
 
@@ -141,12 +142,29 @@ def test_version_nine_store_without_reset_tables_upgrades(tmp_path):
     with store.connect() as db:
         db.execute("DROP TABLE account_reset_observations")
         db.execute("DROP TABLE account_reset_attempts")
+        db.execute("DROP TABLE account_reset_generations")
         db.execute("DROP TABLE queued_messages")
         db.execute("DROP TABLE conversation_queues")
         db.execute("ALTER TABLE session_routing DROP COLUMN affinity_account_id")
         db.execute("UPDATE metadata SET version=9")
     upgraded = Store(root)
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 12
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 13
         assert db.execute("PRAGMA table_info(account_reset_attempts)").fetchall()
         assert db.execute("PRAGMA table_info(queued_messages)").fetchall()
+
+
+def test_version_twelve_store_without_reset_tables_upgrades(tmp_path):
+    root = tmp_path / "state"
+    store = Store(root)
+    with store.connect() as db:
+        db.execute("DROP TABLE account_reset_observations")
+        db.execute("DROP TABLE account_reset_attempts")
+        db.execute("DROP TABLE account_reset_generations")
+        db.execute("UPDATE metadata SET version=12")
+    upgraded = Store(root)
+    with upgraded.connect() as db:
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 13
+        assert db.execute("PRAGMA table_info(native_session_bindings)").fetchall()
+        assert db.execute("PRAGMA table_info(account_reset_observations)").fetchall()
+        assert db.execute("PRAGMA table_info(account_reset_generations)").fetchall()

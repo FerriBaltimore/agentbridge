@@ -32,8 +32,12 @@ AgentBridge is an execution and observation layer. The host chooses the model,
 authorizes tools and external side effects, and owns product retry policy.
 For automatic proxy instances, AgentBridge selects an account before each
 turn and persists the route and its evidence. Pinned proxy instances keep an
-explicit account. Historical direct instances remain readable but cannot
-execute. AgentBridge never silently retries an
+explicit account. Codex is the sole execution engine. Each instance binds once
+to one native Codex session, which remains unchanged across model, provider
+and account changes. Its native history stays with the conversation; normal
+continuation never substitutes a portable transcript or a new thread. Missing
+or divergent native state blocks continuation explicitly. Historical direct
+instances remain readable but cannot execute. AgentBridge never silently retries an
 unknown provider outcome or changes accounts during a turn.
 
 The AgentBridge contract is the only public contract. Provider protocols,

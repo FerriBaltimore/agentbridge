@@ -144,9 +144,6 @@ class Run:
                       'Original request:\n' + row['prompt'])
         if pending and not automatically_routed:
             prompt += '\nUnknown previous outcomes:\n' + dumps(pending)
-        if not automatically_routed and not self.session['native_id']:
-            bundle = self.bridge.export_context(row['session_id'])
-            prompt = bundle.text + '\n\n' + prompt
         return self.bridge.submit(
             row['session_id'], prompt,
             options=options or RunOptions(**json.loads(row['options'])),
