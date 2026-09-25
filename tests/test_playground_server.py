@@ -82,6 +82,10 @@ class PublicBridgeStub:
         self._record('instance_create', **options)
         return {'instance_id': 'instance-1', 'model': options['model']}
 
+    def instance_delete(self, instance_id):
+        self._record('instance_delete', instance_id)
+        return {'instance_id': instance_id, 'deleted': True, 'pending': False}
+
     def instance_get(self, instance_id, *, include_last_turn):
         self._record('instance_get', instance_id, include_last_turn=include_last_turn)
         return {'instance_id': instance_id,
@@ -289,6 +293,18 @@ def test_login_and_removal_only_call_public_sdk(local_server):
                        'upstream_credential_removed': False}
     assert ('account_login_start', (), start) in bridge.calls
     assert ('account_delete', ('Personal',), {}) in bridge.calls
+
+
+def test_delete_conversation_uses_public_sdk_and_mutation_guard(local_server):
+    server, bridge = local_server
+    status, rejected = request(server, 'DELETE', '/api/instances/instance-1', csrf=False)
+    assert status == 403 and rejected['error']['code'] == 'forbidden'
+    assert not any(call[0] == 'instance_delete' for call in bridge.calls)
+    status, payload = request(server, 'DELETE', '/api/instances/instance-1')
+    assert status == 200
+    assert payload['result'] == {'instance_id': 'instance-1', 'deleted': True,
+                                 'pending': False}
+    assert ('instance_delete', ('instance-1',), {}) in bridge.calls
 
 
 def test_login_start_opens_isolated_browser_once_and_forwards_email(browser_server):

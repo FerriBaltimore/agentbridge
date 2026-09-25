@@ -122,6 +122,7 @@ def dispatch(bridge,method,params):
     if method=='instances.list':return bridge.instances(**params)
     if method=='instances.update':return bridge.instance_update(**params)
     if method=='instances.archive':return bridge.instance_archive(**params)
+    if method=='instances.delete':return bridge.instance_delete(**params)
     if method=='instances.discard_evaluation':return bridge.instance_discard_evaluation(**params)
     if method=='instances.events':return bridge.instance_events(**params)
     if method=='instances.export':

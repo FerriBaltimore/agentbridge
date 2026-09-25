@@ -1,5 +1,4 @@
 import { byId, clear, formatTime, node } from './ui.js';
-import { observedPercent, usageValue } from './usage-view.js';
 
 function metadataFor(status, modelId) {
   const metadata = status?.model_metadata;
@@ -16,15 +15,11 @@ export function accountModels(account, status) {
   }));
 }
 
-function modelUsage(model) {
-  const value = observedPercent(model?.used_percent);
-  return value === null ? 'Usage unknown' : `${usageValue({ used_percent: value, stale: false })} · observed`;
-}
-
 function modelDetail(entry, status) {
   const row = node('article', 'account-detail-model');
   const top = node('div', 'account-detail-model-head');
-  top.append(node('strong', '', entry.id), node('span', '', modelUsage(entry.observed)));
+  top.append(node('strong', '', entry.id),
+    node('span', '', entry.observed ? 'Observed model' : 'Saved model'));
   row.append(top);
   const facts = node('div', 'account-detail-facts');
   if (!entry.observed) {
@@ -35,9 +30,6 @@ function modelDetail(entry, status) {
       cooldown && cooldown.getTime() > Date.now()
         ? `Cooldown until ${formatTime(entry.observed.cooldown_until)}`
         : status?.cooldown_known === true ? 'No current cooldown observed' : 'Cooldown unknown'));
-    facts.append(node('span', '', entry.observed.quota_observed_at
-      ? `Quota observed ${formatTime(entry.observed.quota_observed_at)}` : 'Quota time unknown'));
-    if (entry.observed.quota_scope) facts.append(node('span', '', `Quota scope: ${entry.observed.quota_scope}`));
   }
   const metadata = metadataFor(status, entry.id);
   const efforts = entry.observed?.reasoning_efforts || metadata.reasoning_efforts;

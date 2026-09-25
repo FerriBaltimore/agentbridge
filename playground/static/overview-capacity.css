@@ -28,7 +28,6 @@
 .capacity-window { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
 .capacity-window strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .capacity-window span { flex: none; color: #538e73; font-size: 9px; font-weight: 750; white-space: nowrap; }
-.capacity-window .is-stale { color: #8c6d44; }
 .capacity-pager { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; padding-top: 9px; border-top: 1px solid #edf0f5; }
 .capacity-pager > span { color: #8794a8; font-size: 10px; }
 .capacity-pager > div { display: flex; gap: 7px; }

@@ -1,11 +1,11 @@
 """Atomic deletion and idempotent receipt for one disposable evaluation."""
 
-import shutil
 import time
 
 from ..errors import BridgeError
 from ..models import TERMINAL, identifier
 from ..process import alive
+from ..proxy.home import remove_session_home
 
 
 def _table_exists(db, name):
@@ -24,27 +24,6 @@ def _process_may_run(run):
 
 
 class EvaluationStoreMixin:
-    def _remove_evaluation_home(self, instance_id):
-        runtime = self.root / 'codex-runtime'
-        if runtime.is_symlink():
-            raise BridgeError('unsafe_store', 'The Codex runtime directory is unsafe.')
-        if not runtime.exists():
-            return
-        if not runtime.is_dir() or runtime.resolve() != runtime:
-            raise BridgeError('unsafe_store', 'The Codex runtime directory is unsafe.')
-        home = runtime / instance_id
-        if home.is_symlink():
-            raise BridgeError('unsafe_store', 'The evaluation home is unsafe.')
-        if not home.exists():
-            return
-        if not home.is_dir() or not shutil.rmtree.avoids_symlink_attacks:
-            raise BridgeError('unsafe_store', 'The evaluation home is unsafe.')
-        try:
-            shutil.rmtree(home)
-        except OSError:
-            raise BridgeError('evaluation_cleanup_failed',
-                              'The evaluation home could not be removed; retry discard.') from None
-
     def discard_evaluation(self, instance_id, *, account_id=None):
         """Purge only marked evaluations after all owned processes have exited."""
         identifier(instance_id)
@@ -84,7 +63,8 @@ class EvaluationStoreMixin:
                 db.execute('DELETE FROM sessions WHERE id=?', (instance_id,))
                 db.execute('UPDATE instance_requests SET payload=? WHERE session_id=?',
                            ('{"evaluation_discarded":true}', instance_id))
-        self._remove_evaluation_home(instance_id)
+        remove_session_home(self.root, instance_id, error_code='evaluation_cleanup_failed',
+                            retry_action='discard')
         with self.connect() as db:
             checkpoint = db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
         if checkpoint is None or checkpoint[0] != 0:

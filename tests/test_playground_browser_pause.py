@@ -87,13 +87,14 @@ def test_seven_usage_windows_fit_and_close_on_mobile(local_playground):
             page.get_by_test_id('nav-accounts').click()
             page.locator('#refresh-button').click()
             row = page.get_by_test_id('account-row').filter(has_text='OpenAI Personal')
-            row.get_by_text('View 7 windows').wait_for()
+            row.get_by_text('View 3 windows').wait_for()
             row.get_by_test_id('account-usage-open').click()
             dialog = page.get_by_test_id('account-usage-dialog')
-            assert dialog.get_by_test_id('account-usage-window').count() == 7
+            assert dialog.get_by_test_id('account-usage-window').count() == 3
             dialog.get_by_text('fixture-pool-1 is a provider-reported quota group', exact=False).wait_for()
-            dialog.get_by_text('Older observations · 4').wait_for()
-            dialog.locator('.usage-older-section summary').click()
+            assert dialog.get_by_text('Outdated readings', exact=False).count() == 0
+            assert dialog.locator('.usage-older-section').count() == 0
+            assert dialog.get_by_text('40% used').count() == 0
             for width, height in ((1440, 1000), (390, 844), (320, 700)):
                 page.set_viewport_size({'width': width, 'height': height})
                 _assert_layout_fits(page)

@@ -1,6 +1,6 @@
 # Implementation inventory
 
-Reviewed 2026-09-24 against the AgentBridge and GrantBridge working trees.
+Reviewed 2026-09-25 against the AgentBridge and GrantBridge working trees.
 The v2 execution and onboarding contract has one route: Codex through a
 local CLIProxyAPI sidecar. Older direct adapters and their account records are
 historical evidence and read-only data, not a second usable workflow.
@@ -17,6 +17,7 @@ historical evidence and read-only data, not a second usable workflow.
 | Proxy account routes | Codex Responses endpoint on loopback, key references, unique sidecar URL, identity binding and clean inventory check | One file-backed account per sidecar; config-key-only routes ineligible |
 | Model routing | Exact model support, fresh proxy observation, quota-aware selector with unknown fallback and persisted route decisions | Fixtures; provider/model acceptance and quota completeness pending |
 | Instances and turns | Automatic account selection or pinned proxy route; atomic model/provider reconfiguration between turns; fixed route for a turn; portable context on a later account change | Reconfiguration and cross-account continuation have fixture evidence only |
+| Instance deletion | `instances.delete` purges an ordinary local conversation, exported context archives and private Codex runtime data after its work ends, keeping a minimal replay fence | Deterministic local fixtures; no claim about upstream provider retention |
 | Account and model RPC | Safe account projection; exact configured IDs and separate observed accounts | Local catalogue presence is not provider entitlement |
 | Usage | Source and timestamp retained; missing or stale quota remains unknown | Upstream quota varies by provider and needs live acceptance |
 | Stop and recovery | Explicit cancellation; lost workers classified without silent replay | Unknown effects stay unknown; no hidden account change |

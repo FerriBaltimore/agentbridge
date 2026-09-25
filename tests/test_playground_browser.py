@@ -268,7 +268,7 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             openai_row = accounts.get_by_test_id('account-row').filter(has_text='OpenAI Personal')
             openai_row.get_by_text('OpenAI Personal').wait_for()
             accounts.get_by_text('Claude Research').wait_for()
-            accounts.get_by_text('Unknown usage').wait_for()
+            accounts.get_by_text('Current usage unavailable').wait_for()
             openai_row.get_by_text('active', exact=True).wait_for()
             page.locator('#accounts-summary').get_by_text(
                 '2 with an active or usable observation').wait_for()

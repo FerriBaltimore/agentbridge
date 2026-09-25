@@ -3,8 +3,20 @@ import { appendTimeline } from './chat-timeline.js';
 
 const emptyConversation = byId('chat-messages')?.firstElementChild?.cloneNode(true);
 
-export function renderConversations(instances, selectedId, activeTurn, onSelect) {
-  const rows = Array.isArray(instances) ? [...instances] : [];
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#icon-${name}`);
+  svg.setAttribute('aria-hidden', 'true');
+  svg.append(use);
+  return svg;
+}
+
+export function renderConversations(instances, selectedId, activeTurn, onSelect, onDelete,
+  busy, pendingRows, onRetry) {
+  const pendingIds = new Set(pendingRows.map((row) => row.id));
+  const rows = Array.isArray(instances) ? instances.filter((item) =>
+    !pendingIds.has(item.instance_id || item.id)) : [];
   const time = (instance) => {
     const value = instance.updated_at || instance.updated || instance.created_at || instance.created;
     if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
@@ -13,12 +25,13 @@ export function renderConversations(instances, selectedId, activeTurn, onSelect)
   rows.sort((a, b) => time(b) - time(a));
   byId('conversation-count').textContent = String(rows.length);
   const list = clear(byId('conversation-list'));
-  if (!rows.length) {
+  if (!rows.length && !pendingRows.length) {
     list.append(node('p', 'conversation-empty', 'Your conversations will appear here.'));
     return;
   }
   for (const instance of rows) {
     const id = instance.instance_id || instance.id;
+    const row = node('div', 'conversation-row');
     const button = node('button', `conversation-item${id === selectedId ? ' is-selected' : ''}`);
     button.type = 'button';
     button.disabled = !!activeTurn && id !== selectedId;
@@ -29,7 +42,31 @@ export function renderConversations(instances, selectedId, activeTurn, onSelect)
     button.append(node('strong', '', instance.model || 'Untitled conversation'),
       node('small', '', `${route} · ${formatClock(instance.updated_at || instance.updated || instance.created_at || instance.created)}`));
     button.addEventListener('click', () => onSelect(id));
-    list.append(button);
+    const remove = node('button', 'conversation-delete');
+    remove.type = 'button';
+    remove.disabled = !!activeTurn || !!busy;
+    remove.dataset.testid = 'delete-conversation';
+    remove.setAttribute('aria-label', `Delete conversation ${instance.model || id}`);
+    remove.title = 'Delete conversation';
+    remove.append(icon('trash'));
+    remove.addEventListener('click', () => onDelete(id));
+    row.append(button, remove);
+    list.append(row);
+  }
+  for (const pending of pendingRows) {
+    const row = node('div', 'conversation-pending');
+    row.dataset.testid = 'pending-conversation-delete';
+    row.append(node('strong', '', pending.label), node('small', '', 'Cleanup needs retry'));
+    const retry = node('button', 'conversation-delete conversation-retry');
+    retry.type = 'button';
+    retry.disabled = !!activeTurn || !!busy;
+    retry.dataset.testid = 'retry-conversation-delete';
+    retry.setAttribute('aria-label', `Retry cleanup for ${pending.label}`);
+    retry.title = 'Retry cleanup';
+    retry.append(icon('refresh'));
+    retry.addEventListener('click', () => onRetry(pending.id));
+    row.append(retry);
+    list.append(row);
   }
 }
 

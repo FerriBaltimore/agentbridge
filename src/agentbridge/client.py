@@ -30,9 +30,10 @@ from .state_path import default_root
 from .workspace_policy import validate_execution_workspace, validate_workspace
 from .account_retirement import AccountRetirementMixin
 from .account_pause import AccountPauseMixin
+from .instance_deletion import InstanceDeletionMixin
 
 
-class Bridge(EventStreamMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
+class Bridge(EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
     def __init__(self, root=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')

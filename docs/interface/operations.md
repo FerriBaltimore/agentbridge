@@ -148,6 +148,7 @@ provider observation.
                      permission_mode?, sandbox_mode?, allowed_tools?,
                      expected_version?, metadata?)
     instances.archive(instance_id, expected_version?)
+    instances.delete(instance_id, expected_version?)
     instances.discard_evaluation(instance_id, account_ref?)
 
 Without `account_ref`, AgentBridge chooses an eligible proxy account for the
@@ -176,6 +177,18 @@ They check that a non-retired, login-bound proxy account declares the chosen
 model and provider; each later turn still requires fresh local proxy evidence.
 Use `expected_version` to reject a competing change. Effort and context window
 remain per-turn `messages.create` controls.
+
+`instances.delete` permanently removes an ordinary conversation and its local
+turns, messages, events, exported context archives and private Codex runtime
+home. It requires that no
+turn or owned process is running. A minimal deletion receipt remains so an old
+creation key cannot recreate the conversation; the same instance ID can be
+retried safely. `expected_version` can reject a competing change before the
+first deletion. This operation does not remove upstream provider records or
+account credentials. A complete cleanup returns `{instance_id, deleted: true,
+pending: false}`. A blocked database checkpoint returns `deleted: false,
+pending: true`; retry with the same ID to finish cleanup. Evaluation instances
+use `instances.discard_evaluation`.
 
 `evaluation: true` marks a fresh, disposable instance. Such an instance accepts
 one turn through `messages.create` with a validated context package whose
@@ -247,5 +260,4 @@ value is marked unsupported or stale, never invented.
 
 A second active turn for an instance is rejected unless the capability
 explicitly allows it. Updates use `expected_version`. Archived instances
-remain readable until the host's retention policy removes them; archive does
-not delete data.
+remain readable until explicitly deleted; archive does not delete data.

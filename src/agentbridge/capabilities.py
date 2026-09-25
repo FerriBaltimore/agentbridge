@@ -10,7 +10,8 @@ OPERATIONS = (
     "accounts.login.complete", "accounts.login.cancel", "accounts.login.callback",
     "models.list", "usage.get", "usage.history", "accounts.quota.reset",
     "instances.create", "instances.get",
-    "instances.list", "instances.update", "instances.archive", "instances.discard_evaluation",
+    "instances.list", "instances.update", "instances.archive", "instances.delete",
+    "instances.discard_evaluation",
     "instances.events", "messages.create",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
     "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
@@ -52,6 +53,9 @@ def proxy_payload(*, include_parameters=True):
         elif operation == 'instances.discard_evaluation':
             item['limitations'] = ['explicit_evaluation_instances_only',
                                    'terminal_processes_required', 'live_provider_acceptance_pending']
+        elif operation == 'instances.delete':
+            item['limitations'] = ['local_evidence_only', 'terminal_processes_required',
+                                   'evaluation_instances_use_discard_evaluation']
         operations[operation] = item
     value = {'contract_version': 'v2',
              'declaration_scope': 'adapter_implementation',

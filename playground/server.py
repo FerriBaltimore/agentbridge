@@ -223,6 +223,8 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
                                                'workspace_path', 'idempotency_key'))
             values.setdefault('workspace_path', self.server.workspace_path)
             return bridge.instance_create(**values)
+        if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'DELETE':
+            return bridge.instance_delete(parts[2])
         if len(parts) == 3 and parts[:2] == ['api', 'instances'] and method == 'POST':
             values = _fields(body, ('expected_version',), ('model', 'provider'))
             return bridge.instance_update(parts[2], **values)

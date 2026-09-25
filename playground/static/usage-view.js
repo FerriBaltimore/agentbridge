@@ -36,13 +36,13 @@ export function usageWindows(snapshot) {
       display_label: windowLabel(row, index),
       used_percent: observedPercent(row.used_percent),
       remaining_percent: percent(row.remaining_percent),
-      stale: row.stale === true || (expiry !== null && expiry <= now)
-        || (row.stale !== false && snapshot?.stale !== false),
+      stale: row.stale !== false || snapshot?.stale === true
+        || (expiry !== null && expiry <= now),
       observed_at: timeValue(row.observed_at) === null ? null : row.observed_at,
     };
   });
-  return windows.sort((left, right) => Number(left.stale) - Number(right.stale)
-    || Number(right.scope === 'account') - Number(left.scope === 'account')
+  return windows.filter((row) => !row.stale).sort((left, right) =>
+    Number(right.scope === 'account') - Number(left.scope === 'account')
     || (left.window_seconds ?? Infinity) - (right.window_seconds ?? Infinity)
     || left.display_label.localeCompare(right.display_label));
 }
@@ -62,10 +62,9 @@ export function nextUsageExpiry(snapshots) {
 }
 
 export function usageValue(row) {
-  if (row.used_percent === null) return 'Unknown usage';
+  if (row.stale || row.used_percent === null) return 'Unknown usage';
   const shown = formatPercent(row.used_percent);
-  const value = `${shown}% used`;
-  return row.stale ? `${value} · stale` : value;
+  return `${shown}% used`;
 }
 
 function formatPercent(value) {
@@ -96,38 +95,52 @@ export function usageWindowRow(row, { compact = false } = {}) {
     ? ` · ${durationLabel(row.window_seconds)}` : '';
   const name = node('strong', 'account-usage-name', `${row.display_label}${compactDuration}`);
   name.title = `${row.display_label}${compactDuration}`;
-  const value = node('span', row.used_percent === null ? 'usage-unknown' : row.stale ? 'usage-stale' : 'usage-known', usageValue(row));
-  head.append(name, value);
+  const showPercent = !row.stale && row.used_percent !== null;
+  const value = node(compact ? 'span' : 'strong', showPercent
+    ? 'account-usage-value usage-known' : 'account-usage-value usage-unknown', usageValue(row));
+  if (compact) {
+    head.append(name, value);
+  } else {
+    const label = node('div', 'account-usage-label');
+    label.append(name);
+    const redundantAccountScope = row.scope === 'account'
+      && /^account quota\b/i.test(row.display_label);
+    if (row.scope && row.scope !== 'unknown' && !redundantAccountScope) {
+      label.append(node('span', 'account-usage-context', String(row.scope).replaceAll('_', ' ')));
+    }
+    head.append(label, value);
+  }
   wrapper.append(head);
-  const track = node('div', row.used_percent === null ? 'usage-track is-unknown'
-    : row.stale ? 'usage-track is-stale' : 'usage-track');
+  const track = node('div', showPercent ? 'usage-track' : 'usage-track is-unknown');
   track.setAttribute('aria-hidden', 'true');
-  if (row.used_percent !== null) {
+  if (showPercent) {
     const fill = node('span', row.used_percent >= 80 ? 'usage-fill is-high' : 'usage-fill');
     fill.style.width = `${Math.min(100, row.used_percent)}%`;
     track.append(fill);
   }
   wrapper.append(track);
   if (!compact) {
-    const details = usageDetails(row);
+    const details = [];
     if (typeof row.window_seconds === 'number' && Number.isFinite(row.window_seconds)
         && row.window_seconds > 0) {
-      details.unshift(`Window ${durationLabel(row.window_seconds)}`);
+      details.push(`${durationLabel(row.window_seconds)} window`);
     }
-    if (row.used_percent !== null && row.remaining_percent !== null) {
-      details.unshift(`${formatPercent(row.remaining_percent)}% remaining`);
+    if (showPercent && row.remaining_percent !== null) {
+      details.push(`${formatPercent(row.remaining_percent)}% remaining`);
     }
-    if (row.scope && row.scope !== 'unknown') details.unshift(`Scope ${String(row.scope).replaceAll('_', ' ')}`);
-    if (row.model_id) details.unshift(`Model ${row.model_id}`);
-    if (row.model_family) details.unshift(`Model family ${row.model_family}`);
-    if (details.length) wrapper.append(node('small', 'account-usage-details', details.join(' · ')));
+    details.push(...usageDetails(row));
+    if (details.length) {
+      const meta = node('div', 'account-usage-meta');
+      for (const item of details) meta.append(node('span', '', item));
+      wrapper.append(meta);
+    }
   }
   return wrapper;
 }
 
 export function usageUnavailable(snapshot) {
-  const code = snapshot?.refresh_reason || snapshot?.reason;
-  const reason = typeof code === 'string' && code
-    ? ` (${code.replaceAll('_', ' ')})` : '';
-  return `Usage has not been observed${reason}.`;
+  const saved = Array.isArray(snapshot?.quota_windows) && snapshot.quota_windows.length > 0;
+  return saved
+    ? 'The saved quota reading is not current. Refresh data to check again.'
+    : 'No current quota reading is available. Refresh data to try again.';
 }

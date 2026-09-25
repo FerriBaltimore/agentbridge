@@ -92,6 +92,9 @@ AgentBridge records requests, normalized events, usage evidence and unknown
 outcomes in SQLite. Stop is explicit cancellation. Recovery never silently
 replays work or changes accounts. Credentials, raw provider errors and private
 reasoning are not persisted. The package is independent of Fullbrain.
+`bridge.instance_delete(instance_id)` removes an ordinary conversation's local
+history, exported context archives and private runtime data after its turn and
+owned processes have ended.
 
 ## Local playground
 
@@ -113,6 +116,7 @@ resumed and removed from AgentBridge. Removal retires the local route and preser
 history; it does not revoke or delete the upstream CLIProxyAPI credential.
 Model, provider, reasoning and context controls appear when the local proxy
 reports them. Unknown usage and unavailable controls stay visible as unknown.
+Chat lets you delete a conversation from its list after confirmation.
 
 ## Interface and development
 

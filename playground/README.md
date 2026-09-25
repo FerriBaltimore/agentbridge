@@ -32,8 +32,11 @@ default. AgentBridge does not silently import or discard the old accounts.
 
 - Add a provider account through the GrantBridge browser flow, then inspect
   status, exact observed models and usage. Missing usage stays unknown.
-- Choose a provider and model in Chat. Automatic routing balances eligible
-  accounts within the selected provider; an account can also be pinned.
+- In a new Chat conversation, choose a provider, then Automatic or a named
+  observed account, then a model. Automatic routing balances eligible accounts
+  within the selected provider; a named choice pins that account. Start a new
+  conversation to choose a specific account when the current one uses
+  automatic routing.
 - Change the provider and model between turns within the same conversation.
   A pinned account can be switched to automatic routing; its next turn uses
   portable context if the account changes.
@@ -49,6 +52,8 @@ default. AgentBridge does not silently import or discard the old accounts.
 - The permission selector follows SDK capabilities. Choose "Ask before actions"
   to test an interactive provider request, then allow or deny it from Activity.
 - Send a message, inspect recorded events, stop a turn, and review its output.
+- Delete a conversation from the Chat list after confirming. Its local history
+  and private runtime data are removed once its turn and owned processes end.
 - Remove an account to retire its local route. AgentBridge preserves historical
   conversations; this action does not revoke the upstream OAuth credential.
 

@@ -11,7 +11,7 @@ work are in [implementation-status.md](implementation-status.md).
 - Provider discovery: proxy provider, versions, capabilities and parameters.
 - Accounts: one asynchronous proxy login, status, identity and cancellation.
 - Models: live catalog, cache, static fallback, deprecation and retirement.
-- Instances: create, inspect, list, update, archive and transfer.
+- Instances: create, inspect, list, update, archive, delete and transfer.
 - Messages: text, multimodal blocks, attachments, transcript pagination and
   idempotent admission.
 - Turns: asynchronous start, status, event following, stop, resume and recovery.

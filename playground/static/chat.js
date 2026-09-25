@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { setupChatCatalog } from './chat-catalog.js';
+import { setupChatDeletion } from './chat-deletion.js';
 import { createChatStream } from './chat-stream.js';
 import { renderChatHeader, renderConversations, renderEvents, renderMessages } from './chat-view.js';
 import { byId, describeError, toast } from './ui.js';
@@ -14,6 +15,12 @@ function lastViewedInstance() {
 
 function rememberInstance(id) {
   try { localStorage.setItem(LAST_INSTANCE_KEY, id); } catch { /* Storage is optional. */ }
+}
+
+function forgetInstance(id) {
+  try {
+    if (localStorage.getItem(LAST_INSTANCE_KEY) === id) localStorage.removeItem(LAST_INSTANCE_KEY);
+  } catch { /* Storage is optional. */ }
 }
 
 function instanceTime(instance) {
@@ -89,6 +96,27 @@ export function setupChat({ onDataChanged }) {
       timer = setTimeout(pollTurn, 0);
     }
   });
+  const deletion = setupChatDeletion({
+    getInstance: (id) => instances.find((item) => instanceId(item) === id),
+    canDelete: () => !activeTurn && !busy,
+    setBusy(value) { busy = value; render(); },
+    onPending(id) {
+      forgetInstance(id);
+      if (instanceId(current) === id) resetConversation();
+      else render();
+    },
+    async onDeleted(id) {
+      instances = instances.filter((item) => instanceId(item) !== id);
+      forgetInstance(id);
+      if (instanceId(current) === id) resetConversation();
+      else render();
+      toast('Conversation deleted.');
+      try { await onDataChanged(); }
+      catch (error) {
+        toast(`Conversation deleted, but the view could not refresh: ${describeError(error)}`, true);
+      }
+    },
+  });
 
   function stopPolling() {
     if (timer) clearTimeout(timer);
@@ -105,7 +133,8 @@ export function setupChat({ onDataChanged }) {
   }
 
   function render() {
-    renderConversations(instances, instanceId(current), activeTurn, selectConversation);
+    renderConversations(instances, instanceId(current), activeTurn,
+      selectConversation, deletion.open, busy, deletion.pendingRows(), deletion.retry);
     renderMessages(messages, events, activeTurn, answerPermission);
     renderEvents(events, current, answerPermission);
     updateControls();
@@ -166,7 +195,7 @@ export function setupChat({ onDataChanged }) {
   }
 
   async function selectConversation(id) {
-    if (activeTurn || busy || id === instanceId(current)) return;
+    if (activeTurn || busy || deletion.hasPending(id) || id === instanceId(current)) return;
     busy = true;
     stream.close();
     updateControls();
@@ -213,8 +242,7 @@ export function setupChat({ onDataChanged }) {
     }
   }
 
-  function newConversation() {
-    if (activeTurn || busy) return;
+  function resetConversation() {
     restorePending = false;
     stream.close();
     stopPolling();
@@ -226,6 +254,11 @@ export function setupChat({ onDataChanged }) {
     catalog.reset();
     render();
     input.focus();
+  }
+
+  function newConversation() {
+    if (activeTurn || busy) return;
+    resetConversation();
   }
 
   async function send(event) {
@@ -345,11 +378,12 @@ export function setupChat({ onDataChanged }) {
     updateData({ models, accounts, capabilities, workspacePath, instanceRows }) {
       instances = Array.isArray(instanceRows) ? instanceRows : [];
       catalog.update({ models, accountRows: accounts, capabilityData: capabilities, workspacePath });
-      if (restorePending && !current && !busy && instances.length) {
+      const available = instances.filter((item) => !deletion.hasPending(instanceId(item)));
+      if (restorePending && !current && !busy && available.length) {
         restorePending = false;
         const preferred = lastViewedInstance();
-        const latest = [...instances].sort((a, b) => instanceTime(b) - instanceTime(a))[0];
-        const chosen = instances.find((instance) => instanceId(instance) === preferred) || latest;
+        const latest = [...available].sort((a, b) => instanceTime(b) - instanceTime(a))[0];
+        const chosen = available.find((instance) => instanceId(instance) === preferred) || latest;
         void selectConversation(instanceId(chosen));
       }
       render();

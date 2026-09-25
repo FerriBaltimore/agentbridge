@@ -56,6 +56,12 @@ def _route_context(context, omissions, *, required):
         raise BridgeError("invalid_request", "Portable context is not required for this turn.")
 
 
+def _reject_deleted_instance(db, session_id):
+    if db.execute('SELECT 1 FROM deleted_instances WHERE session_id=?',
+                  (session_id,)).fetchone():
+        raise BridgeError('instance_deleted', 'A deleted instance cannot be recreated.')
+
+
 def _session_payload(account_id, cwd, model, native_id, parent_id, context,
                      routing_mode, routing_provider=None, evaluation=False,
                      excluded_account_refs=()):
@@ -144,6 +150,7 @@ class RoutingStoreMixin:
                 old = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                                  (request_key,)).fetchone()
                 if old:
+                    _reject_deleted_instance(db, old['session_id'])
                     discarded = db.execute("SELECT 1 FROM evaluation_instances WHERE session_id=? "
                         "AND status IN ('discarding','discarded')", (old['session_id'],)).fetchone()
                     if discarded:
@@ -152,6 +159,7 @@ class RoutingStoreMixin:
                     if old["payload"] != encoded:
                         raise BridgeError("idempotency_conflict", "Request key already belongs to different input.")
                     return old["session_id"], False
+            _reject_deleted_instance(db, id)
             _verified_proxy_config(db, account_id, model, provider=routing_provider)
             db.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)",
                        (id, account_id, cwd, model, native_id, parent_id, context, time.time()))
@@ -179,6 +187,8 @@ class RoutingStoreMixin:
         with self.connect() as db:
             row = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                              (request_key,)).fetchone()
+            if row:
+                _reject_deleted_instance(db, row['session_id'])
             discarded = (db.execute("SELECT 1 FROM evaluation_instances WHERE session_id=? "
                 "AND status IN ('discarding','discarded')", (row['session_id'],)).fetchone()
                 if row else None)
@@ -199,6 +209,8 @@ class RoutingStoreMixin:
         with self.connect() as db:
             row = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                              (request_key,)).fetchone()
+            if row:
+                _reject_deleted_instance(db, row['session_id'])
             discarded = (db.execute("SELECT 1 FROM evaluation_instances WHERE session_id=? "
                 "AND status IN ('discarding','discarded')", (row['session_id'],)).fetchone()
                 if row else None)

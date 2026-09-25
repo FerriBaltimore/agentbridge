@@ -23,6 +23,10 @@ function option(value, label) {
   return item;
 }
 
+function providerName(value) {
+  return { codex: 'Codex', claude: 'Claude', grok: 'Grok' }[value] || value;
+}
+
 function commonValues(rows, key) {
   if (!rows.length) return [];
   const lists = rows.map((row) => Array.isArray(row[key]) ? row[key].map(String) : []);
@@ -91,21 +95,21 @@ export function setupChatCatalog(onChange) {
   let busy = false;
   let availableWindows = [];
 
-  function pinnedProvider() {
-    return accounts.find((item) => item.account_ref === lockedInstance?.account_ref)?.provider || '';
+  function hasObservedModel(reference) {
+    return listModels(catalog).some((item) => observed(item)
+      && item.observed_account_refs.includes(reference));
   }
 
   function populateProviders() {
     const previous = provider.value;
-    const providers = new Set();
-    for (const item of accounts) {
-      if (item.provider && listModels(catalog).some((model) =>
-        eligibleAccounts(model, item.provider, accounts).some((row) => row.account_ref === item.account_ref))) {
-        providers.add(item.provider);
-      }
-    }
+    const providers = new Set(accounts.map((item) => item.provider).filter(Boolean));
     clear(provider).append(option('', 'All providers'));
-    for (const value of [...providers].sort()) provider.append(option(value, value));
+    for (const value of [...providers].sort()) {
+      const available = accounts.some((item) => item.provider === value
+        && hasObservedModel(item.account_ref));
+      provider.append(option(value, available
+        ? providerName(value) : `${providerName(value)} · unavailable`));
+    }
     if (previous && !providers.has(previous)) provider.append(option(previous, `${previous} · unavailable`));
     provider.value = previous;
   }
@@ -113,7 +117,8 @@ export function setupChatCatalog(onChange) {
   function populateModels() {
     const previous = model.value;
     const available = listModels(catalog).filter((item) =>
-      eligibleAccounts(item, provider.value, accounts).length > 0);
+      eligibleAccounts(item, provider.value, accounts).some((row) =>
+        !account.value || row.account_ref === account.value));
     clear(model).append(option('', available.length ? 'Select a model' : 'No observed models'));
     for (const item of available) model.append(option(item.id, item.id));
     if (previous && !available.some((item) => item.id === previous)
@@ -125,25 +130,38 @@ export function setupChatCatalog(onChange) {
 
   function populateAccounts() {
     const previous = account.value;
-    const selectedModel = listModels(catalog).find((item) => item.id === model.value);
-    const eligible = eligibleAccounts(selectedModel, provider.value, accounts);
+    const matching = accounts.filter((item) => !provider.value || item.provider === provider.value);
     clear(account).append(option('', provider.value
-      ? `Automatic · ${provider.value} accounts` : 'Automatic · all providers'));
+      ? `Automatic · ${providerName(provider.value)} accounts` : 'Automatic · all providers'));
     if (lockedInstance?.routing_mode === 'automatic') {
       account.value = '';
       return;
     }
     if (lockedInstance?.routing_mode === 'pinned') {
       const original = lockedInstance.account_ref;
-      const label = eligible.some((item) => item.account_ref === original)
+      const originalRow = matching.find((item) => item.account_ref === original);
+      const available = originalRow && hasObservedModel(original);
+      const label = available
         ? `Pinned · ${original}` : `Pinned · ${original} · unavailable`;
-      account.append(option(original, label));
-      account.value = previous === original ? original : '';
+      const pinned = option(original, label);
+      pinned.disabled = !available;
+      account.append(pinned);
+      account.value = previous === original && originalRow ? original : '';
       return;
     }
-    for (const item of eligible) account.append(option(item.account_ref,
-      `${item.name || item.account_ref} · ${item.provider || 'unknown provider'}`));
-    account.value = eligible.some((item) => item.account_ref === previous) ? previous : '';
+    for (const item of matching) {
+      const available = hasObservedModel(item.account_ref);
+      const label = `${item.name || item.account_ref} · ${providerName(item.provider || 'unknown provider')}`;
+      const choice = option(item.account_ref, available ? label : `${label} · unavailable`);
+      choice.disabled = !available;
+      account.append(choice);
+    }
+    if (previous && !matching.some((item) => item.account_ref === previous)) {
+      const missing = option(previous, `${previous} · unavailable`);
+      missing.disabled = true;
+      account.append(missing);
+    }
+    account.value = previous;
   }
 
   function populateParameters() {
@@ -212,14 +230,25 @@ export function setupChatCatalog(onChange) {
     for (const field of [provider, model, effort, context, permission]) field.disabled = busy;
     account.disabled = busy || lockedInstance?.routing_mode === 'automatic';
     account.title = lockedInstance?.routing_mode === 'automatic'
-      ? 'Create a new conversation to pin a specific account.' : '';
+      ? 'Start a new conversation to choose a specific account.' : '';
+    const accountHelp = byId('chat-account-help');
+    if (lockedInstance?.routing_mode === 'automatic') {
+      accountHelp.textContent = 'Start a new conversation to choose a specific account.';
+    } else if (lockedInstance?.routing_mode === 'pinned') {
+      accountHelp.textContent = 'Choose Automatic to unpin, or start a new conversation to choose another account.';
+    } else if (account.value && !hasObservedModel(account.value)) {
+      accountHelp.textContent = 'This account has no observed models. Choose another account or Automatic.';
+    } else {
+      accountHelp.textContent = '';
+    }
+    accountHelp.hidden = !accountHelp.textContent;
     workspace.disabled = busy || !!lockedInstance;
     workspace.title = lockedInstance ? 'Workspace is fixed for this conversation.' : '';
   }
 
   function sync() {
-    populateModels();
     populateAccounts();
+    populateModels();
     populateParameters();
     updateSummary();
     applyDisabled();
@@ -227,13 +256,14 @@ export function setupChatCatalog(onChange) {
   }
 
   provider.addEventListener('change', () => {
-    if (lockedInstance?.routing_mode === 'pinned' && provider.value !== pinnedProvider()) {
+    if (account.value && (!provider.value || accounts.find((item) =>
+      item.account_ref === account.value)?.provider !== provider.value)) {
       account.value = '';
     }
     sync();
   });
   model.addEventListener('change', sync);
-  account.addEventListener('change', () => { populateParameters(); updateSummary(); onChange?.(); });
+  account.addEventListener('change', sync);
   context.addEventListener('change', () => onChange?.());
 
   return {
@@ -277,19 +307,20 @@ export function setupChatCatalog(onChange) {
       lockedInstance = instance || null;
       if (!instance) { sync(); return; }
       const routeProvider = instance.routing_mode === 'pinned'
-        ? pinnedProvider() : instance.routing_provider || '';
+        ? accounts.find((item) => item.account_ref === instance.account_ref)?.provider || ''
+        : instance.routing_provider || '';
       populateProviders();
       if (routeProvider && ![...provider.options].some((item) => item.value === routeProvider)) {
         provider.append(option(routeProvider, `${routeProvider} · unavailable`));
       }
       provider.value = routeProvider;
+      populateAccounts();
+      account.value = instance.routing_mode === 'pinned' ? instance.account_ref || '' : '';
       populateModels();
       if (instance.model && ![...model.options].some((item) => item.value === instance.model)) {
         model.append(option(instance.model, `${instance.model} · unavailable`));
       }
       model.value = instance.model || '';
-      populateAccounts();
-      account.value = instance.routing_mode === 'pinned' ? instance.account_ref || '' : '';
       workspace.value = instance.workspace_path || instance.cwd || workspace.value;
       populateParameters();
       updateSummary();

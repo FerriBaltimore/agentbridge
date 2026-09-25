@@ -86,6 +86,7 @@ export const api = {
   pauseAccount: (account) => request(`/api/accounts/${ref(account)}/pause`, { method: 'POST', body: {} }),
   resumeAccount: (account) => request(`/api/accounts/${ref(account)}/resume`, { method: 'POST', body: {} }),
   createInstance: (values) => request('/api/instances', { method: 'POST', body: values }),
+  deleteInstance: (id) => request(`/api/instances/${ref(id)}`, { method: 'DELETE' }),
   updateInstance: (id, values) => request(`/api/instances/${ref(id)}`,
     { method: 'POST', body: values }),
   sendMessage: (id, values) => request(`/api/instances/${ref(id)}/messages`, { method: 'POST', body: values }),

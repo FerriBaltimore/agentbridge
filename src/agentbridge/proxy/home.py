@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import shutil
 
 from ..errors import BridgeError
 from ..models import identifier
@@ -33,6 +34,31 @@ def session_home(store_root, session_id: str) -> str:
     except (OSError, RuntimeError):
         raise BridgeError("unsafe_store", "The Codex session home could not be secured.") from None
     return str(root / "codex-runtime" / session_id)
+
+
+def remove_session_home(store_root, session_id, *, error_code='instance_cleanup_failed',
+                        retry_action='deletion'):
+    """Remove only one private Codex session home, without following symlinks."""
+    identifier(session_id)
+    runtime = Path(store_root) / 'codex-runtime'
+    if runtime.is_symlink():
+        raise BridgeError('unsafe_store', 'The Codex runtime directory is unsafe.')
+    if not runtime.exists():
+        return
+    if not runtime.is_dir() or runtime.resolve() != runtime:
+        raise BridgeError('unsafe_store', 'The Codex runtime directory is unsafe.')
+    home = runtime / session_id
+    if home.is_symlink():
+        raise BridgeError('unsafe_store', 'The instance home is unsafe.')
+    if not home.exists():
+        return
+    if not home.is_dir() or not shutil.rmtree.avoids_symlink_attacks:
+        raise BridgeError('unsafe_store', 'The instance home is unsafe.')
+    try:
+        shutil.rmtree(home)
+    except OSError:
+        raise BridgeError(error_code,
+                          f'The instance home could not be removed; retry {retry_action}.') from None
 
 
 def _prepare_with_descriptors(root: Path, session_id: str):
