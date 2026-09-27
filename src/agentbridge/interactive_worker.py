@@ -30,8 +30,12 @@ def main():
         broker.delivered(payload['turn_id'], permission_id, decision)
     try:
         payload = json.load(sys.stdin)
+        # Every proxied account, whatever its upstream provider, runs the Codex
+        # CLI transport; the guard rejects any other engine before a launch.
         if payload.get('engine') != 'codex':
-            raise BridgeError('invalid_proxy_account', 'Interactive execution requires Codex.')
+            raise BridgeError('invalid_proxy_account',
+                              'Interactive execution requires the Codex CLI transport.',
+                              phase='launch', outcome='not_started')
         broker = Permissions(Store(payload['root']))
         redactor = Redactor(os.environ.get(key, '') for key in payload['secret_names'])
         package = payload.get('context_package')

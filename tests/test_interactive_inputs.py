@@ -26,15 +26,23 @@ FIXTURE = Path(__file__).parent / 'fixtures' / 'test_duplex_provider.py'
 
 
 @contextmanager
-def management_server():
+def management_server(provider='codex'):
+    """One dedicated sidecar with one upstream OAuth credential of `provider`."""
     class Handler(BaseHTTPRequestHandler):
         def handle_get(self):
             if self.path == '/v0/management/auth-files':
-                body = {'files': [{'name': 'fixture.json', 'provider': 'codex',
+                entry = {'name': 'fixture.json', 'provider': provider,
                     'auth_index': 'fixture-test', 'account_type': 'oauth',
                     'id_token': {'chatgpt_account_id': 'fixture-test'}, 'source': 'file',
                     'runtime_only': False, 'status': 'active', 'disabled': False,
-                    'unavailable': False, 'cooldowns': []}]}
+                    'unavailable': False, 'cooldowns': []}
+                if provider != 'codex':
+                    # Non-Codex OAuth identities bind through an observed email.
+                    entry['email'] = f'fixture@{provider}.invalid'
+                body = {'files': [entry]}
+            elif self.path == '/v1/models?client_version=pi':
+                body = {'models': [{'slug': 'fixture-model', 'context_window': 131072,
+                                    'max_context_window': 262144}]}
             elif self.path == '/v0/management/config':
                 body = {key: [] for key in ('gemini-api-key', 'interactions-api-key',
                     'claude-api-key', 'codex-api-key', 'xai-api-key', 'meta-api-key',
@@ -66,15 +74,17 @@ def management_server():
 
 
 @pytest.fixture
-def setup_proxy(tmp_path, monkeypatch):
+def setup_proxy(tmp_path, monkeypatch, request):
+    """Codex-transport bridge; indirect parametrization picks the upstream provider."""
+    provider = getattr(request, 'param', 'codex')
     monkeypatch.setenv('FIXTURE_PROXY_KEY', 'fixture-client-key')
     monkeypatch.setenv('FIXTURE_MANAGEMENT_KEY', 'fixture-management-key')
-    with management_server() as port:
+    with management_server(provider) as port:
         bridge = Bridge(tmp_path.parent / f'{tmp_path.name}-state')
 
         def create(*, native_args=(), evaluation=False, workspace_path=None,
                    native_command=None):
-            account = replace(proxy_account('test', port, provider='codex'),
+            account = replace(proxy_account('test', port, provider=provider),
                               command=native_command or
                               ('/usr/bin/python3', '-c', FIXTURE.read_text(), *native_args))
             account = seed_authenticated_proxy_account(bridge.store, account,
@@ -181,7 +191,9 @@ def test_context_package_and_mcp_reach_codex_without_persisting_capability(setup
     assert json.loads(run.text) == {'developer': True, 'evidence': True,
                                    'skill': True, 'mcp': True, 'shell_disabled': True,
                                    'skills_isolated': True, 'project_docs_disabled': True,
-                                   'web_disabled': True, 'ephemeral': False}
+                                   'web_disabled': True, 'ephemeral': False,
+                                   'model': 'fixture-model', 'effort': None, 'route': True,
+                                   'context_window': None}
     with pytest.raises(BridgeError) as error:
         run.resume()
     assert error.value.code == 'context_required'

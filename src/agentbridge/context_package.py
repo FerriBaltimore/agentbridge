@@ -10,8 +10,11 @@ from tempfile import TemporaryDirectory
 from .errors import BridgeError
 
 
-MAX_PACKAGE_BYTES = 524_288
-MAX_INSTRUCTION_BYTES = 262_144
+# Byte counts are UTF-8 sizes of canonical JSON (package) or asset content.
+# A host may publish a 1 MiB instruction catalogue; the package bound leaves
+# room for the JSON envelope, evidence, exclusions and tool records.
+MAX_PACKAGE_BYTES = 1_572_864
+MAX_INSTRUCTION_BYTES = 1_048_576
 MAX_EVIDENCE_BYTES = 65_536
 
 

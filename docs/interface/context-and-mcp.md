@@ -24,8 +24,10 @@ tools requires an `mcp` descriptor.
 The `selection_hash` is SHA-256 over canonical JSON with sorted keys, compact
 separators and UTF-8 encoding. Its input has `context_refs` in evidence order,
 instructions with asset `path` and `digest` only, `exclusions`, and `tools`
-for version 2. The package is limited to 512 KiB, instruction content to
-256 KiB and evidence text to 64 KiB, with further item-count bounds.
+for version 2. The canonical package is limited to 1.5 MiB (1,572,864 bytes),
+instruction asset content to 1 MiB (1,048,576 bytes) and evidence text to
+64 KiB, all counted as UTF-8 bytes, with further item-count bounds. A host can
+therefore deliver a full 1 MiB instruction catalogue selection in one turn.
 Inputs-only modes reject both selected tools and an MCP descriptor.
 
 AgentBridge sends rules as Codex developer instructions, selected skills as
@@ -52,6 +54,33 @@ pipes and is not stored in the AgentBridge database. A SHA-256 digest is saved
 with the turn for idempotency; changing context while reusing an idempotency
 key produces `idempotency_conflict`. A stopped or interrupted turn with pinned
 context must be continued through a new `messages.create` with fresh context.
+
+## Delivery by upstream provider
+
+Codex is the only execution engine (see [model routing](v2-model-routing.md)).
+An account's `provider` names the upstream OAuth credential behind its
+dedicated CLIProxyAPI sidecar; it does not select a second engine. The context
+package therefore takes one path for every provider: a turn with selected
+context or an MCP descriptor runs the Codex app-server through the sidecar's
+Responses endpoint, with rules as developer instructions, skills as native
+skill inputs, evidence as labelled untrusted input and the same model, effort
+and `context_window` overrides. There is no Claude Code or Grok CLI path, no
+`--append-system-prompt` file and no `.claude` directory; nothing from the
+package is written outside the private per-instance Codex home.
+
+| Upstream provider | Rules and skills | Implementation and fixtures | Live acceptance |
+| --- | --- | --- | --- |
+| `codex` | Developer instructions and native skill inputs | Deterministic app-server fixture: `tests/test_interactive_inputs.py` | Pending |
+| `claude` | Same Codex app-server path through the sidecar | `tests/test_context_upstream_providers.py` with a `claude` sidecar credential | Pending: the sidecar must translate developer instructions, skill inputs and effort to the Anthropic API |
+| `grok` | Same Codex app-server path through the sidecar | `tests/test_context_upstream_providers.py` with a `grok` sidecar credential | Pending: the sidecar must translate developer instructions, skill inputs and effort to the xAI API |
+
+The fixtures prove what AgentBridge hands to the Codex app-server and that the
+route, model, effort and context-window overrides apply for each provider.
+They do not prove that CLIProxyAPI or the upstream model honours developer
+instructions, skill files or reasoning effort; each provider and model needs
+its own live acceptance record before that capability is claimed. An account
+that is not bound to a local proxy fails with `invalid_proxy_account` before
+any native process starts, whichever engine or provider it names.
 
 ## MCP descriptor
 

@@ -55,6 +55,14 @@ def main():
                 'project_docs_disabled': config.get('project_doc_max_bytes') == 0,
                 'web_disabled': config.get('web_search') == 'disabled',
                 'ephemeral': start['params'].get('ephemeral') is True,
+                # Route facts: the model and effort requested natively and the
+                # proxy/context overrides received on this app-server argv.
+                'model': start['params'].get('model'),
+                'effort': turn['params'].get('effort'),
+                'route': any(arg.startswith('model_providers.agentbridge_local_proxy.base_url=')
+                             for arg in sys.argv),
+                'context_window': next((arg for arg in sys.argv
+                                        if arg.startswith('model_context_window=')), None),
             })
         send({'method': 'item/completed', 'params': {'threadId': 'native-fixture',
               'item': {'id': 'message-1', 'type': 'agentMessage', 'text': result}}})
