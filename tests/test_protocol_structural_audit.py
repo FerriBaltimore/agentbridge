@@ -230,3 +230,41 @@ def test_claude_malformed_permission_never_reaches_approval(native_request):
         claude_execute(channel, {'prompt': 'fixture', 'options': {'timeout': 1}},
                        lambda event: None, lambda *args: approvals.append(args))
     assert error.value.code == 'provider_protocol_error' and approvals == []
+
+
+def test_codex_known_runtime_notices_preserve_warnings_without_inventing_gaps_or_text():
+    parsed, events = parser('codex')
+    native = control(parsed)
+    notifications = [
+        ('configWarning', {'summary': 'private configuration path', 'details': 'private-body'}),
+        ('warning', {'message': 'private-body'}),
+        ('deprecationNotice', {'summary': 'private-body', 'details': 'private-path'}),
+        ('thread/goal/cleared', {'threadId': 'thread'}),
+        ('remoteControl/status/changed', {'status': 'disabled', 'installationId': 'private-id'}),
+        ('mcpServer/startupStatus/updated', {'name': 'selected', 'status': 'failed',
+                                          'error': 'private-body'}),
+    ]
+    for method, params in notifications:
+        native.event({'method': method, 'params': params})
+    native.event({'method': 'item/completed', 'params': {'threadId': 'thread',
+        'item': {'type': 'userMessage', 'id': 'input', 'content': ['private-body']}}})
+    assert all(kind == 'provider_notice' for kind, _ in events)
+    assert [data['status'] for _, data in events] == [
+        'warning', 'warning', 'warning', 'cleared', 'disabled', 'failed', 'observed']
+    assert parsed.terminal is None and 'private' not in json.dumps(events)
+    with pytest.raises(BridgeError) as error:
+        native.event({'method': 'mcpServer/startupStatus/updated',
+                      'params': {'status': 'future_success'}})
+    assert error.value.code == 'provider_protocol_error'
+
+
+def test_codex_selected_mcp_startup_failure_cannot_silently_drop_admitted_tools():
+    native = control(parser('codex')[0])
+    native.payload['mcp_enabled'] = True
+    native.turn_id = None
+    with pytest.raises(BridgeError) as error:
+        native.event({'method': 'mcpServer/startupStatus/updated', 'params': {
+            'name': 'agentbridge_execution', 'status': 'failed', 'error': 'private-body'}})
+    assert error.value.code == 'provider_unavailable'
+    assert error.value.phase == 'launch' and error.value.outcome == 'not_started'
+    assert 'private-body' not in str(error.value)

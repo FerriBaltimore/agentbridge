@@ -153,14 +153,18 @@ def restrict(*, cwd, home, temporary, executable, inputs_only=True,
 
 
 def wrap(command, *, inputs_only=False, workspace_write=False, mcp_enabled=False,
-         full_access=False, selected_context=False):
+         full_access=False, selected_context=False, host_isolated=False):
     """Run Codex through this policy before either native transport starts."""
-    if full_access and (inputs_only or mcp_enabled or selected_context):
+    if host_isolated and (not full_access or inputs_only):
+        raise BridgeError('invalid_execution_policy', 'Invalid host-isolated access policy.')
+    if full_access and not host_isolated and (inputs_only or mcp_enabled or selected_context):
         raise BridgeError('invalid_execution_policy',
                           'Full access cannot disable selected input isolation.')
     flags = ['--inputs-only' if inputs_only else '--normal']
     if full_access:
         flags.append('--full-access')
+    if host_isolated:
+        flags.append('--host-isolated')
     if workspace_write:
         flags.append('--write-workspace')
     if mcp_enabled:
@@ -176,7 +180,7 @@ def main():
     if not arguments:
         raise SystemExit(2)
     inputs_only = True
-    workspace_write = mcp_enabled = full_access = False
+    workspace_write = mcp_enabled = full_access = host_isolated = False
     native_shell = True
     if arguments[0] in {'--inputs-only', '--normal'}:
         inputs_only = arguments.pop(0) == '--inputs-only'
@@ -186,6 +190,8 @@ def main():
                 workspace_write = True
             elif flag == '--mcp':
                 mcp_enabled = True
+            elif flag == '--host-isolated':
+                host_isolated = True
             elif flag == '--full-access':
                 full_access = True
             elif flag == '--no-native-shell':
@@ -200,10 +206,13 @@ def main():
         raise SystemExit(1)
     executable = str(Path(selected).resolve(strict=True))
     try:
-        if not inputs_only and not full_access and native_shell:
+        if host_isolated and (inputs_only or not full_access):
+            raise ValueError('Invalid host-isolated access policy')
+        if host_isolated or (not inputs_only and not full_access and native_shell):
             from .native_namespace import reexec
             reexec(command, home=os.environ['CODEX_HOME'], temporary=os.environ['TMPDIR'],
-                   workspace_write=workspace_write, mcp_enabled=mcp_enabled)
+                   workspace_write=workspace_write or host_isolated, mcp_enabled=mcp_enabled,
+                   host_isolated=host_isolated)
             raise RuntimeError('The native namespace launcher returned without execution')
         if full_access:
             if inputs_only or mcp_enabled:

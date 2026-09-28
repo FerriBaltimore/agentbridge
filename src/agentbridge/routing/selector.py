@@ -66,7 +66,6 @@ class RouteCandidate:
     health: str = "unknown"
     cooldown_until: float | None = None
     in_flight: int = 0
-    max_in_flight: int = 1
     assigned_turns: int = 0
 
     def __post_init__(self):
@@ -87,9 +86,8 @@ class RouteCandidate:
             raise BridgeError("invalid_request", "health must be healthy, unknown or unhealthy.")
         if self.cooldown_until is not None:
             object.__setattr__(self, "cooldown_until", _nonnegative(self.cooldown_until, "cooldown_until"))
-        if (type(self.in_flight) is not int or self.in_flight < 0
-                or type(self.max_in_flight) is not int or self.max_in_flight < 1):
-            raise BridgeError("invalid_request", "In-flight counts must be nonnegative with positive capacity.")
+        if type(self.in_flight) is not int or self.in_flight < 0:
+            raise BridgeError("invalid_request", "in_flight must be a nonnegative observed count.")
         if type(self.assigned_turns) is not int or self.assigned_turns < 0:
             raise BridgeError("invalid_request", "assigned_turns must be a nonnegative observed count.")
 
@@ -154,8 +152,9 @@ def select_route(model, candidates, *, now=None, quota_ttl=60, affinity_account_
     """Keep an eligible affinity account, else choose the least-used candidate.
 
     Known, fresh quota beats unknown quota. Unknown remains eligible as a
-    fallback and is never interpreted as zero usage. Assigned turn count is a
-    fairness tie-breaker, not evidence of remaining provider quota. Selection
+    fallback and is never interpreted as zero usage. In-flight and assigned turn
+    counts are fairness tie-breakers, not evidence of remaining provider quota:
+    one account may execute turns from several conversations at once. Selection
     itself does not reserve capacity; callers must persist and reserve atomically.
     """
     model_id(model)
@@ -188,16 +187,12 @@ def select_route(model, candidates, *, now=None, quota_ttl=60, affinity_account_
                 raise BridgeError("rate_limited", "The affinity account is temporarily rate limited.",
                                   retryable=True,
                                   retry_after_ms=math.ceil((affinity.cooldown_until - now) * 1000))
-            if affinity.in_flight >= affinity.max_in_flight:
-                raise BridgeError("account_busy", "The affinity account has an active turn.",
-                                  retryable=True)
             return RouteDecision(affinity.account_id, model, affinity_quota, affinity_used,
                                  affinity.health, affinity.in_flight, "affinity")
     break_evidence = (_exhaustion_evidence(affinity, model, now, quota_ttl)
                       if affinity is not None else None)
     eligible = []
-    excluded = {"unhealthy": 0, "cooldown": 0, "busy": 0,
-                "quota_exhausted": 0, "quota_unknown": 0}
+    excluded = {"unhealthy": 0, "cooldown": 0, "quota_exhausted": 0, "quota_unknown": 0}
     for row in supported:
         if row.health == "unhealthy":
             excluded["unhealthy"] += 1
@@ -212,18 +207,14 @@ def select_route(model, candidates, *, now=None, quota_ttl=60, affinity_account_
         if row.cooldown_until is not None and row.cooldown_until > now:
             excluded["cooldown"] += 1
             continue
-        if row.in_flight >= row.max_in_flight:
-            excluded["busy"] += 1
-            continue
         key = (row.health != "healthy", quota_state != "known",
                used if used is not None else 101,
-               row.in_flight / row.max_in_flight, row.assigned_turns,
-               row.account_id)
+               row.in_flight, row.assigned_turns, row.account_id)
         eligible.append((key, row, quota_state, used))
     if not eligible:
         reason = ("quota_exhausted" if excluded["quota_exhausted"] == len(supported) else
                   "quota_unknown" if excluded["quota_unknown"] + excluded["quota_exhausted"] == len(supported) else
-                  "account_busy" if excluded["busy"] == len(supported) else "provider_unavailable")
+                  "provider_unavailable")
         raise BridgeError(reason, "No account is currently available for this model.",
                           details={"excluded": excluded})
     _, selected, quota_state, used = min(eligible, key=lambda item: item[0])

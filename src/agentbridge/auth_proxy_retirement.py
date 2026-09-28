@@ -4,7 +4,7 @@ from .errors import BridgeError
 
 
 _CONFIRMED_STOP = {'retired': True, 'upstream_credential_removed': False}
-_SAFE_TERMINAL = frozenset({'failed', 'expired', 'cancelled'})
+_SAFE_TERMINAL = frozenset({'failed', 'expired', 'cancelled', 'abandoned'})
 
 
 def retire_managed_proxy(managed_proxy, account_id, *, attempt=None, prior_error_code=None):
@@ -27,11 +27,13 @@ def retire_managed_proxy(managed_proxy, account_id, *, attempt=None, prior_error
 
 
 def retire_terminal_proxy(row, store, accounts, managed_proxy):
-    """Stop only an unbound proxy after a confirmed terminal auth result."""
+    """Stop an unbound proxy after remote completion or explicit local abandonment."""
     if row['status'] not in _SAFE_TERMINAL or managed_proxy is None:
         return
-    if any(account.id == row['account_id'] for account in accounts.list()):
-        return
     config = store.auth_proxy_route(row['id'])['config']
+    if any(account.id == row['account_id']
+           or account.proxy_base_url == config.get('proxy_base_url')
+           for account in accounts.list()):
+        return
     if managed_proxy.is_managed(config, row['account_id']):
         retire_managed_proxy(managed_proxy, row['account_id'], attempt=row)

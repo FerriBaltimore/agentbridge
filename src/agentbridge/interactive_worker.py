@@ -53,7 +53,8 @@ def main():
             payload['codex_config'] = codex_config(
                 mcp_enabled=payload.get('mcp_enabled') is True,
                 execution_mode=package.get('execution_mode', 'normal') if package else 'normal',
-                selected_context=package is not None)
+                selected_context=package is not None,
+                host_isolated=payload['options'].get('host_isolated', False))
             temporary = TemporaryDirectory(prefix='agentbridge-native-')
             with temporary as temp_dir:
                 native_env = os.environ.copy()
@@ -64,6 +65,7 @@ def main():
                                      workspace_write=payload['options']['sandbox'] == 'workspace-write',
                                      full_access=payload['options']['sandbox'] == 'danger-full-access',
                                      selected_context=package is not None,
+                                     host_isolated=payload['options'].get('host_isolated', False),
                                      mcp_enabled=payload.get('mcp_enabled') is True) as channel:
                     steering = Steering(broker.store, payload['turn_id'])
                     CodexControl(channel, payload, emit, approve, steering).execute()

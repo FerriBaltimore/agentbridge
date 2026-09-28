@@ -41,7 +41,7 @@ def response_events(answer, index):
 
 
 @contextmanager
-def responses_server(account_id, provider, models, *, tool_command=None):
+def responses_server(account_id, provider, models, *, tool_command=None, select_events=None):
     """Keep request evidence in memory and expose only synthetic public text."""
     observed = []
     config = {key: [] for key in (
@@ -98,8 +98,10 @@ def responses_server(account_id, provider, models, *, tool_command=None):
                            'tool_names': tool_names, 'tool_outputs': tool_outputs}
             observed.append(observation)
             answer = f'fixture answer {len(prompts)} via {account_id}'
-            events = (tool_events(tool_command, tool_names) if tool_command and not tool_outputs
-                      else response_events(answer, len(observed)))
+            events = select_events(request, observation) if select_events is not None else None
+            if events is None:
+                events = (tool_events(tool_command, tool_names) if tool_command and not tool_outputs
+                          else response_events(answer, len(observed)))
             encoded = ''.join('event: ' + event['type'] + '\ndata: ' + json.dumps(event)
                               + '\n\n' for event in events).encode()
             self.send_response(200)
@@ -134,8 +136,14 @@ def tool_events(command, tool_names):
     else:
         name, arguments = 'shell', {'command': ['/bin/sh', '-c', command], 'timeout_ms': 1000}
     assert name in tool_names, tool_names
-    item = {'id': 'fixture-function-item', 'type': 'function_call', 'call_id': 'fixture-call',
+    yield from function_events(name, arguments)
+
+
+def function_events(name, arguments, call_id='fixture-call', namespace=None):
+    item = {'id': call_id + '-item', 'type': 'function_call', 'call_id': call_id,
             'name': name, 'arguments': json.dumps(arguments), 'status': 'completed'}
+    if namespace is not None:
+        item['namespace'] = namespace
     response = {'id': 'fixture-tool-response', 'object': 'response', 'created_at': 1,
                 'status': 'in_progress', 'output': []}
     yield {'type': 'response.created', 'response': response}

@@ -13,7 +13,8 @@ that preference across process restarts and completed or failed turns.
 | Current usage is missing or unknown | Keep the current eligible account; do not claim zero usage |
 | Fresh applicable quota window is exhausted | Select another eligible account and save the new affinity |
 | Old account regains quota | Keep the new account |
-| Current account is busy or temporarily rate limited | Return a retryable error without changing affinity |
+| Current account is temporarily rate limited | Return a retryable error without changing affinity |
+| Current account has turns in flight for other conversations | Keep it; in-flight counts only break ties at initial selection |
 | Identity verification fails | Block execution without treating the failure as exhausted quota |
 | Account paused, retired, excluded, or incompatible with an explicit model/provider change | Select an eligible replacement |
 | Pinned mode | Use the selected account; no automatic replacement |

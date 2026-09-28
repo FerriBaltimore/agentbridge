@@ -20,6 +20,9 @@ def main():
             continue
         if method == 'initialize':
             send({'id': request['id'], 'result': {}})
+        elif method == 'skills/list':
+            send({'id': request['id'], 'result': {'data': [
+                {'cwd': os.getcwd(), 'skills': [], 'errors': []}]}})
         elif method in ('thread/start', 'thread/resume'):
             if method == 'thread/start':
                 assert not history_path.exists(), 'A queued turn replaced its Codex session.'

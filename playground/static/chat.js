@@ -43,7 +43,7 @@ export function setupChat({ onDataChanged }) {
   let restorePending = true;
   const queue = setupChatQueue({
     getState: () => ({ id: instanceId(current), activeTurn, busy }),
-    refresh: async () => { await refreshConversation(); await refreshCurrentState(); render(); },
+    refresh: async () => { await refreshCurrentState(); await refreshConversation(); render(); },
     changed: updateControls,
   });
   const stream = createChatStream((event) => {
@@ -150,8 +150,10 @@ export function setupChat({ onDataChanged }) {
     const id = instanceId(current);
     const previous = current.last_turn;
     try {
-      await refreshConversation();
+      // Discover a newly active turn before the fetch advances the cursor, so its
+      // live stream starts at the last reconciled sequence; both paths dedupe by seq.
       await refreshCurrentState();
+      await refreshConversation();
       if (instanceId(current) !== id) return;
       render();
       const turn = current.last_turn;

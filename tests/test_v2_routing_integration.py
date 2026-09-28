@@ -155,13 +155,15 @@ def test_model_first_routing_switches_account_and_preserves_context(tmp_path, mo
             return original_admit(*args, **kwargs)
 
         bridge.store.admit = admit_with_competing_turn
-        with pytest.raises(BridgeError) as busy:
-            bridge.message_create(instance["id"], "fourth")
+        fourth = bridge.message_create(instance["id"], "fourth")
         bridge.store.admit = original_admit
-        assert busy.value.code == "account_busy"
         assert contested["occurred"] is True
+        assert fourth["account_ref"] == "Alpha"
+        assert bridge.store.get("runs", "blocking-turn")["state"] == "starting"
+        assert bridge.run(fourth["turn_id"]).wait(10)["state"] == "completed"
+        assert json.loads(bridge.run(fourth["turn_id"]).text)["account"] == "alpha"
         assert bridge.store.routing(instance["id"])["affinity_account_id"] == "alpha"
-        assert bridge.store.session_run_count(instance["id"]) == 4
+        assert bridge.store.session_run_count(instance["id"]) == 5
         bridge.store.finish("blocking-turn", "cancelled")
 
         pinned = bridge.instance_create(model="lab-model", account_ref="Alpha",

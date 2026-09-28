@@ -20,7 +20,7 @@ from agentbridge.proxy.management import ManagementClient
 from agentbridge.proxy.route import ProxyRoute
 from agentbridge.native_sandbox import wrap
 from agentbridge.proxy.supervisor import (
-    Supervisor, _account_dir, _pid_start, _write_record)
+    Supervisor, _account_dir, _pid_start, _proxy_config, _write_record)
 
 
 @pytest.fixture
@@ -356,3 +356,12 @@ def test_proxy_binary_does_not_resolve_a_workspace_entry_from_path(tmp_path, mon
     assert error.value.code == 'proxy_binary_unavailable'
     monkeypatch.setenv('AGENTBRIDGE_CLIPROXY_BIN', str(fake))
     assert _binary() == fake
+
+
+def test_sidecar_config_routes_upstream_traffic_through_the_host_proxy(tmp_path):
+    direct = _proxy_config(18080, tmp_path, 'client', 'management', environment={})
+    assert 'proxy-url' not in direct
+    proxied = _proxy_config(18080, tmp_path, 'client', 'management', environment={
+        'HTTPS_PROXY': 'http://127.0.0.1:18080', 'NO_PROXY': '127.0.0.1,localhost'})
+    assert proxied['proxy-url'] == 'http://127.0.0.1:18080'
+    assert {key: value for key, value in proxied.items() if key != 'proxy-url'} == direct

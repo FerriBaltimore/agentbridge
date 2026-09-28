@@ -21,6 +21,7 @@ ARCHIVES = {
     "cli_proxy_api": "cli_proxy_api.tar.gz",
     "codex": "codex.tar.gz",
     "node": "node.tar.xz",
+    "native_bwrap": "native_bwrap.tar.gz",
 }
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 
@@ -84,6 +85,8 @@ def _validate_archive(component, path, entry, arch):
 
     with tempfile.TemporaryDirectory(prefix="agentbridge-inspect-") as temporary:
         binary = _extract_archive(component, path, Path(temporary), entry["version"], arch)
+        if component == "native_bwrap" and _digest(binary) != entry["assets"][arch]["binary_sha256"]:
+            raise ValueError("The native bubblewrap binary differs from its pinned SHA-256.")
         with binary.open("rb") as source:
             header = source.read(20)
         machine = 183 if arch == "linux_aarch64" else 62
@@ -96,7 +99,7 @@ def _copy_license_from_archive(component, path, entry, arch, destination):
     import tarfile
 
     with tarfile.open(path, "r:*") as archive:
-        expected = "LICENSE" if component == "cli_proxy_api" else (
+        expected = "LICENSE" if component in {"cli_proxy_api", "native_bwrap"} else (
             f"node-{entry['version']}-linux-{'arm64' if arch == 'linux_aarch64' else 'x64'}/LICENSE")
         member = archive.getmember(expected)
         if not member.isfile() or member.size > 4 * 1024 * 1024:
@@ -121,15 +124,30 @@ def prepare_bundle():
         licenses.mkdir(exist_ok=True)
         for component, filename in ARCHIVES.items():
             entry = lock[component]
-            url, digest = _asset(entry, arch)
             target = assets / filename
-            cached = target if target.is_file() and _digest(target) == digest else CACHE / arch / filename
-            if cached != target:
-                _download(url, cached, digest)
+            if component == "native_bwrap":
+                asset = entry.get("assets", {}).get(arch)
+                if asset is None:
+                    target.unlink(missing_ok=True)
+                    continue
+                digest = asset["sha256"]
+                cached = target if target.is_file() and _digest(target) == digest else CACHE / arch / filename
+                if not cached.is_file() or _digest(cached) != digest:
+                    raise ValueError("Build the pinned local native bubblewrap asset with "
+                                     "tools/native_bwrap_build.sh before packaging.")
+            else:
+                url, digest = _asset(entry, arch)
+                cached = target if target.is_file() and _digest(target) == digest else CACHE / arch / filename
+                if cached != target:
+                    _download(url, cached, digest)
             _validate_archive(component, cached, entry, arch)
             if cached != target:
                 shutil.copyfile(cached, target)
-            if component in {"cli_proxy_api", "node"}:
+            if component == "native_bwrap":
+                saved = CACHE / arch / filename
+                saved.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(target, saved)
+            if component in {"cli_proxy_api", "node", "native_bwrap"}:
                 _copy_license_from_archive(component, cached, entry, arch,
                                            licenses / f"{component}-license.txt")
         codex = lock["codex"]

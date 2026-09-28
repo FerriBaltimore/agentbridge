@@ -44,7 +44,8 @@ optional parent, with an immutable native Codex session after its initial
 binding. The model and upstream route may change between turns. A `Run` is an
 admitted turn with a distinct `message_id`.
 Request keys make admission idempotent across restarts. The SQLite store allows
-only one active run per session or account.
+only one active run per session; several sessions may run concurrently on one
+account, subject to that provider's own rate limits.
 
 Events have a monotonic store sequence, run and session ID, kind, timestamp
 and JSON data. A `tool_result` with `outcome: unknown` means that AgentBridge

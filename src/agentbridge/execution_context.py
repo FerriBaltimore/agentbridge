@@ -58,6 +58,10 @@ def prepare(context_package, mcp):
     return execution, package_digest, binding_digest
 
 
+def mcp_endpoint_digest(mcp):
+    return digest({key: mcp[key] for key in ('version', 'socket_path')}) if mcp else None
+
+
 def verify(options, execution):
     validate_access(options)
     if not isinstance(execution, dict) or set(execution) != {'context_package', 'mcp'}:
@@ -67,12 +71,23 @@ def verify(options, execution):
     if (options.context_package_digest != package_digest
             or options.mcp_binding_digest != binding_digest):
         raise BridgeError('context_mismatch', 'Execution context does not match the admitted turn.')
+    if (options.mcp_endpoint_digest is not None
+            and options.mcp_endpoint_digest != mcp_endpoint_digest(prepared['mcp'])):
+        raise BridgeError('context_mismatch', 'MCP endpoint differs from its admitted boundary.')
+    package = prepared['context_package']
+    if (options.host_isolated and package is not None
+            and package.get('execution_mode', 'normal') != 'normal'):
+        raise BridgeError('invalid_execution_policy',
+                          'Inputs-only execution cannot enable native workspace tools.')
     return prepared
 
 
 def validate_access(options):
     """Selected host inputs keep their isolation boundary in every transport."""
-    if (options.sandbox == 'danger-full-access'
+    if options.host_isolated and options.sandbox != 'danger-full-access':
+        raise BridgeError('invalid_execution_policy',
+                          'Host-isolated native tools require explicit full access.')
+    if (options.sandbox == 'danger-full-access' and not options.host_isolated
             and (options.context_package_digest or options.mcp_binding_digest)):
         raise BridgeError('invalid_execution_policy',
                           'Full access cannot be combined with selected context or MCP isolation. '
@@ -87,7 +102,8 @@ def mcp_environment(descriptor):
             MCP_CAPABILITY_ENV: descriptor['capability']}
 
 
-def codex_config(*, mcp_enabled=False, execution_mode='normal', selected_context=False):
+def codex_config(*, mcp_enabled=False, execution_mode='normal', selected_context=False,
+                 host_isolated=False):
     config = {}
     if selected_context:
         config['project_doc_max_bytes'] = 0
@@ -104,6 +120,6 @@ def codex_config(*, mcp_enabled=False, execution_mode='normal', selected_context
     if selected_context:
         config['features'] = {'apps': False, 'multi_agent': False,
                               'skill_mcp_dependency_install': False}
-    if mcp_enabled or selected_context or execution_mode != 'normal':
+    if (not host_isolated and (mcp_enabled or selected_context)) or execution_mode != 'normal':
         config.setdefault('features', {}).update({'shell_tool': False, 'unified_exec': False})
     return config

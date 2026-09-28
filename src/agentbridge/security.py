@@ -20,5 +20,8 @@ class Redactor:
 
 def base_environment():
     # Avoid inheriting unrelated provider credentials, injected MCPs and active chat state.
-    keys=('PATH','HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR','SYSTEMROOT','WINDIR','SSL_CERT_FILE','SSL_CERT_DIR')
+    # Host proxy settings stay: sandboxed hosts only reach providers through them, and the
+    # per-run worker is what launches the managed proxy supervisor and sidecar.
+    keys=('PATH','HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR','SYSTEMROOT','WINDIR','SSL_CERT_FILE','SSL_CERT_DIR',
+          'HTTP_PROXY','HTTPS_PROXY','NO_PROXY','ALL_PROXY','http_proxy','https_proxy','no_proxy','all_proxy')
     return {k:os.environ[k] for k in keys if k in os.environ}

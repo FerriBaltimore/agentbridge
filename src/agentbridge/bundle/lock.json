@@ -45,6 +45,22 @@
     },
     "source_sha256": "607a5541f8f08bf4abf021eea891c84e2f830711551ba2f6146209f211f1dfd1"
   },
+  "native_bwrap": {
+    "assets": {
+      "linux_x86_64": {
+        "binary_sha256": "d457f398b752340e657b259db6131fa8592df87d1bb73329b8d9466cbacd2857",
+        "sha256": "f1ab7177ad4c8805c3eb4722c074225e158c47e64efa1c168130ea27342650a9"
+      }
+    },
+    "source": {
+      "commit": "124c4cdf4321f63ef17a1cb0ce8f9dd45bd7adbe",
+      "patch": "tools/native_bwrap.patch",
+      "patch_sha256": "cc618a8e94a458b3d63d7bc6ebca0f760a950b19ad7dfbdd14a2160c1f14a696",
+      "recipe": "tools/native_bwrap_build.sh",
+      "repository": "https://github.com/containers/bubblewrap.git"
+    },
+    "version": "0.11.1.roproc1"
+  },
   "node": {
     "assets": {
       "linux_aarch64": {

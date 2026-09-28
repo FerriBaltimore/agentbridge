@@ -1,0 +1,34 @@
+{
+  "objective": "Fresh read-only inner procfs in private PID namespace; no ancestor proc bind",
+  "upstream": {
+    "url": "https://github.com/containers/bubblewrap.git",
+    "tag": "v0.11.1",
+    "commit": "124c4cdf4321f63ef17a1cb0ce8f9dd45bd7adbe"
+  },
+  "patch_sha256": "cc618a8e94a458b3d63d7bc6ebca0f760a950b19ad7dfbdd14a2160c1f14a696",
+  "meson": "1.9.2",
+  "toolchain": [
+    "binutils 2.46-3ubuntu2",
+    "gcc-15 15.2.0-16ubuntu1",
+    "libc6 2.43-2ubuntu2.4",
+    "libc6-dev 2.43-2ubuntu2.4",
+    "ninja-build 1.13.2-1",
+    "pkgconf 2.5.1-4"
+  ],
+  "baseline_dynamic_sha256": "19653a294938fdd9ab3b23cb17836cde7918675b3f615255066a9639f503299f",
+  "candidate_dynamic_sha256": "ae83f764a74dbe24d5d85e9e92ffe1215b2771e6dfc14cbd36eb5f84e0eacd60",
+  "candidate_static_sha256": "d457f398b752340e657b259db6131fa8592df87d1bb73329b8d9466cbacd2857",
+  "static_rebuild_sha256": "d457f398b752340e657b259db6131fa8592df87d1bb73329b8d9466cbacd2857",
+  "dependencies": {
+    "libcap2_1%3a2.75-10ubuntu2_amd64.deb": "150603a0792b1d22aa0bde0a26c27b413018c799284003e4b43cba587a5b3a18",
+    "libcap-dev_1%3a2.75-10ubuntu2_amd64.deb": "74fa71aa089d90d720722f6278314b90b72fa2e1631aea5dc32b770d0324ce86"
+  },
+  "build_result": "Three static builds byte-identical, including fresh-checkout recipe",
+  "fresh_checkout_rebuild_sha256": "d457f398b752340e657b259db6131fa8592df87d1bb73329b8d9466cbacd2857",
+  "archive_sha256": "f1ab7177ad4c8805c3eb4722c074225e158c47e64efa1c168130ea27342650a9",
+  "license_sha256": "8bf8c3fa4f3fb144d66419e3aa9bd6d8ddceda0eff2351a438b6be6a6d484766",
+  "dependency_sources": {
+    "libcap": "https://launchpad.net/ubuntu/+source/libcap2/1:2.75-10ubuntu2",
+    "glibc": "https://launchpad.net/ubuntu/+source/glibc/2.43-2ubuntu2.4"
+  }
+}

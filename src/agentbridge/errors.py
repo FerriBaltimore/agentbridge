@@ -77,7 +77,7 @@ class BridgeError(Exception):
             category = 'capability'
         elif self.code.startswith("provider_") or self.code in {"grantbridge_failed", "grantbridge_timeout"}:
             category = "provider"
-        elif self.code in {"busy", "instance_busy", "account_busy"}:
+        elif self.code in {"busy", "instance_busy"}:
             category = "conflict"
         elif self.code in {"cancelled", "interrupted"}:
             category = "cancel"

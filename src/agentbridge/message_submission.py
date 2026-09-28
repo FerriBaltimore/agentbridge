@@ -1,7 +1,7 @@
 """Public conversation input validation and private execution submission."""
 
 from .errors import BridgeError, UnsupportedError
-from .execution_context import prepare
+from .execution_context import prepare, mcp_endpoint_digest
 from .execution_policy import previous_message_policy
 from .models import RunOptions
 
@@ -15,7 +15,8 @@ class MessageSubmissionMixin:
                        max_turns=None, max_budget=None, timeout_ms=None, attachments=None,
                        provider_options=None, metadata=None, idempotency_key=None,
                        context_package=None, mcp=None, excluded_account_refs=(),
-                       delivery='reject', position=None, expected_version=None, expected_turn_id=None):
+                       delivery='reject', position=None, expected_version=None, expected_turn_id=None,
+                       host_isolated=False):
         if delivery not in ('reject', 'queue', 'steer', 'interrupt'):
             raise BridgeError('invalid_delivery', 'Choose reject, queue, steer or interrupt delivery.')
         if delivery == 'reject' and any(value is not None for value in (
@@ -36,6 +37,7 @@ class MessageSubmissionMixin:
             context_window=context_window, effort=effort, max_turns=max_turns,
             max_budget_usd=max_budget, collect_usage=True, attachments=attachments,
             context_package_digest=package_digest, mcp_binding_digest=binding_digest,
+            host_isolated=host_isolated, mcp_endpoint_digest=mcp_endpoint_digest(mcp),
         )
         if delivery != 'reject':
             return self._queue_submit(

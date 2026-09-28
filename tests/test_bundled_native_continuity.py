@@ -2,6 +2,7 @@
 
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -21,9 +22,40 @@ from fixtures.test_proxy_account_fixture import seed_authenticated_proxy_account
 from fixtures.test_responses_server import responses_server
 
 
+_USER_NAMESPACE_PROBE = '''
+import os
+uid, gid = os.getuid(), os.getgid()
+os.unshare(os.CLONE_NEWUSER)
+for name, value in (('setgroups', 'deny'), ('uid_map', f'{uid} {uid} 1'), ('gid_map', f'{gid} {gid} 1')):
+    with open('/proc/self/' + name, 'w') as stream:
+        stream.write(value)
+'''
+
+
+def unprivileged_user_namespace_permitted():
+    """Probe the host policy every restricted native launch depends on.
+
+    The bundled bubblewrap runs unconfined and maps its own identity in a fresh
+    user namespace. Hosts enforcing AppArmor's unprivileged user namespace
+    restriction confine that process as ``unprivileged_userns`` and deny the
+    mapping, so the SDK fails closed by design. A caller already running inside
+    a profile which grants ``userns`` passes the permission on to these tests.
+    """
+    if not hasattr(os, 'unshare'):
+        return True
+    try:
+        return subprocess.run([sys.executable, '-I', '-c', _USER_NAMESPACE_PROBE],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    not (PACKAGE_ROOT / 'assets/codex.tar.gz').is_file() or not available(),
-    reason='The bundled Codex archive and Linux native isolation are required.',
+    not (PACKAGE_ROOT / 'assets/codex.tar.gz').is_file() or not available()
+    or not unprivileged_user_namespace_permitted(),
+    reason='The bundled Codex archive, Landlock ABI 5 and a host which lets an unconfined '
+           'process create user namespaces are required; see native-codex-acceptance.md.',
 )
 
 

@@ -23,11 +23,13 @@ ARCHIVES = {
     "cli_proxy_api": "cli_proxy_api.tar.gz",
     "codex": "codex.tar.gz",
     "node": "node.tar.xz",
+    "native_bwrap": "native_bwrap.tar.gz",
 }
 EXECUTABLES = {
     "cli_proxy_api": "cli-proxy-api",
     "codex": "bin/codex",
     "node": "bin/node",
+    "native_bwrap": "bin/bwrap",
 }
 MAX_FILES = 2000
 MAX_UNPACKED_BYTES = 1024 * 1024 * 1024
@@ -110,6 +112,8 @@ def _relative(component, name, version, machine):
             return None
         name = name[len(prefix):]
         return name if name in {"bin/node", "LICENSE"} else None
+    if component == "native_bwrap":
+        return name if name in {"bin/bwrap", "LICENSE"} else None
     if component == "cli_proxy_api":
         return name if name in {"cli-proxy-api", "LICENSE"} else None
     if component == "codex":
@@ -150,7 +154,7 @@ def _extract_archive(component, archive_path, stage, version, machine):
                 with source, destination.open("xb") as output:
                     shutil.copyfileobj(source, output, length=1024 * 1024)
                 executable = relative in {"cli-proxy-api", "bin/codex", "bin/node",
-                                           "bin/codex-code-mode-host", "codex-path/rg",
+                                           "bin/bwrap", "bin/codex-code-mode-host", "codex-path/rg",
                                            "codex-resources/bwrap", "codex-resources/zsh/bin/zsh"}
                 destination.chmod(0o500 if executable else 0o400)
     except (OSError, EOFError, tarfile.TarError):

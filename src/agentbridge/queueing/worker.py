@@ -117,7 +117,7 @@ class Dispatcher:
                                message_id=row['id'], execution=execution,
                                excluded_account_refs=json.loads(row['exclusions']))
         except BridgeError as error:
-            if error.code in {'busy', 'account_busy', 'context_stale'}:
+            if error.code in {'busy', 'context_stale'}:
                 self.next_admission = time.monotonic() + .5
             else:
                 self.queue.block(self.instance_id, row['id'], error.code)

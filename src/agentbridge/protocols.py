@@ -108,6 +108,8 @@ class Parser:
         t=ev.get('type','')
         if t == 'bridge_text_delta':
             self.event('text_delta', {'text': ev.get('text', '')})
+        elif t == 'bridge_notice':
+            self.event('provider_notice', {'kind': ev['kind'], 'status': ev['status']})
         elif t == 'bridge_usage':
             self.event('usage', {'source': 'codex_app_server', 'scope': ev['scope'], 'tokens': ev.get('tokens'),
                                 'aggregation': ev.get('aggregation'), 'context_window': ev.get('context_window')})
@@ -139,6 +141,8 @@ class Parser:
             done=t=='item.completed'
             if typ=='agent_message' and done:
                 self.event('assistant',{'text':item.get('text','')})
+            elif typ == 'user_message' and done:
+                self.event('provider_notice', {'kind': 'input_observed', 'status': 'observed'})
             elif typ in {'command_execution','file_change','patch_apply','mcp_tool_call','dynamic_tool_call','web_search'}:
                 args={k:item[k] for k in ('command','cwd','changes','path','server','tool','arguments','query') if k in item}
                 result={k:item[k] for k in ('aggregated_output','exit_code','result','error','changes','output','content') if k in item}

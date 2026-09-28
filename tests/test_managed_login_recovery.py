@@ -169,7 +169,7 @@ def test_confirmed_cancel_retries_unverified_stop_without_new_proxy_call(tmp_pat
             assert len(managed.retires) == 2
 
 
-def test_unknown_oauth_outcome_keeps_managed_proxy_running(tmp_path, monkeypatch):
+def test_unknown_oauth_outcome_keeps_proxy_until_explicit_abandonment(tmp_path, monkeypatch):
     responses = proxy_responses()
 
     class UnknownGrantBridge(FakeProxyGrantBridge):
@@ -184,17 +184,21 @@ def test_unknown_oauth_outcome_keeps_managed_proxy_running(tmp_path, monkeypatch
             started = bridge.account_login_start(provider='codex', name='Fixture')
             assert bridge.account_login_status(
                 started['attempt_id'], owner_ref=started['owner_ref'])['status'] == 'interrupted'
+            assert managed.retires == []
             assert bridge.account_login_cancel(
                 started['attempt_id'], owner_ref=started['owner_ref'])['status'] == 'abandoned'
-            assert managed.retires == []
+            assert len(managed.retires) == 1
 
 
-def test_failed_reauthentication_preserves_bound_account_proxy(tmp_path, monkeypatch):
+@pytest.mark.parametrize('status', ['failed', 'interrupted'])
+def test_failed_reauthentication_preserves_bound_account_proxy(tmp_path, monkeypatch, status):
     responses = proxy_responses()
 
     class FailedReauthentication(FakeProxyGrantBridge):
         def proxy_status(self, state, provider, base_url, management_key_env):
-            return {'id': state, 'provider': provider, 'status': 'failed'}
+            if status == 'interrupted':
+                raise BridgeError('authentication_outcome_unknown', 'Synthetic lost response.')
+            return {'id': state, 'provider': provider, 'status': status}
 
     with local_management(responses) as (port, _):
         with Bridge(tmp_path / 'state') as bridge:
@@ -210,11 +214,39 @@ def test_failed_reauthentication_preserves_bound_account_proxy(tmp_path, monkeyp
             use_fake_grantbridge(monkeypatch, FailedReauthentication(responses))
             second = bridge.account_login_start(provider='codex', name='Fixture')
             assert bridge.account_login_status(
-                second['attempt_id'], owner_ref=second['owner_ref'])['status'] == 'failed'
-            assert bridge.account_login_status(
-                second['attempt_id'], owner_ref=second['owner_ref'])['status'] == 'failed'
+                second['attempt_id'], owner_ref=second['owner_ref'])['status'] == status
+            expected = 'abandoned' if status == 'interrupted' else status
+            assert bridge.account_login_cancel(
+                second['attempt_id'], owner_ref=second['owner_ref'])['status'] == expected
             assert bridge.resolve_account('Fixture').id == account['id']
             assert managed.retires == []
+
+
+def test_abandoned_stop_failure_is_retryable_without_losing_unknown_evidence(tmp_path, monkeypatch):
+    responses = proxy_responses()
+    with local_management(responses) as (port, _):
+        with Bridge(tmp_path / 'state') as bridge:
+            managed = FixtureManagedProxy(port, monkeypatch)
+            bridge.authentication.managed_proxy = managed
+            use_fake_grantbridge(monkeypatch, FakeProxyGrantBridge(responses))
+            started = bridge.account_login_start(provider='codex', name='Fixture')
+            bridge.store.update_auth_attempt(started['attempt_id'], started['owner_ref'],
+                status='interrupted', data={'error': {'code': 'authentication_outcome_unknown'}})
+
+            def unverified(account_id):
+                assert bridge.store.latest_auth_attempt(account_id)['status'] == 'abandoned'
+                raise BridgeError('managed_proxy_unavailable', 'Synthetic stop failure.')
+
+            managed.on_retire = unverified
+            with pytest.raises(BridgeError) as error:
+                bridge.account_login_cancel(started['attempt_id'], owner_ref=started['owner_ref'])
+            assert error.value.code == 'managed_proxy_stop_unverified'
+            managed.on_retire = None
+            retried = bridge.account_login_cancel(
+                started['attempt_id'], owner_ref=started['owner_ref'])
+            assert retried['status'] == 'abandoned'
+            assert retried['error'] == {'code': 'authentication_outcome_unknown'}
+            assert managed.retires[0] == managed.retires[1]
 
 
 def test_adapter_loss_after_provision_persists_failure_and_stops_proxy(tmp_path, monkeypatch):

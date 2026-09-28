@@ -64,6 +64,20 @@ The method does not return authorization URLs, credentials or provider error
 bodies. An uncertain start error also carries its attempt ownership references
 in `error.data.details` when the response reaches the host.
 
+Explicitly abandoning an interrupted login stops its exact managed local sidecar
+after persisting `abandoned`. The unknown OAuth outcome and credential directory
+remain intact; this does not claim remote cancellation or credential removal.
+Bound account routes and externally managed proxies are never stopped by this
+cleanup. A failed stop reports `managed_proxy_stop_unverified`; repeat `cancel`
+with the same ownership references to verify shutdown before a fresh login.
+
+`accounts.login.check` publishes the identity observed by the local Management
+API before activation. `status` and repeated `check` repair older verified
+records that omitted identity only after fresh observation matches both stored
+binding fingerprints. They never substitute the requested email or activate an
+account. Changed evidence is rejected without replacing the saved verification
+or removing credentials; `complete` still performs its own fresh binding check.
+
 After binding, `accounts.login.status` and the `attempt` object returned by
 `accounts.login.complete` include the stable, non-secret `account_id` from that
 login attempt. This ID remains tied to the original account if its human name
@@ -221,7 +235,7 @@ recreate or rerun that evaluation. `instances.get` then returns `not_found`.
     messages.create(instance_id, content, attachments?, model?, effort?,
                     context_window?, permission_mode?, sandbox_mode?,
                     allowed_tools?, max_turns?, max_budget?, timeout_ms?,
-                    context_package?, mcp?, provider_options?, metadata?,
+                    context_package?, mcp?, host_isolated?, provider_options?, metadata?,
                     idempotency_key?, delivery?, position?, expected_version?, expected_turn_id?)
     messages.get(message_id)
     messages.list(instance_id, after?, before?, role?, limit?, cursor?)

@@ -12,6 +12,12 @@ New and migrated instances default to `read-only` and `dontAsk`.
 Updates are atomic, support `expected_version`, and require an idle instance
 with no pending queue work. Changing defaults does not rewrite earlier turns.
 
+`instances.update` also accepts `workspace_path` when the host moves an
+admitted workspace. The path must be an existing directory outside private
+state; the instance keeps its native thread and resumes it in the new
+directory on the next turn. `instances.get` reports the current
+`workspace_path`.
+
 `messages.create` inherits omitted settings from the instance. An explicit
 value overrides that setting for the new turn only. Accepted turns and queued
 messages retain their admitted values. Steering with omitted settings inherits
@@ -54,7 +60,7 @@ procfs contains native processes rather than host workers. Codex's nested
 command sandbox remains responsible for network and protected metadata rules.
 Private AgentBridge state must stay outside exposed system runtime directories
 such as `/usr`; admission rejects that placement with `unsafe_store`.
-Selected context disables native shell tools and retains the Landlock boundary,
+By default selected context disables native shell tools and retains the Landlock boundary,
 including on hosts which disable nested user namespaces. An approval
 does not remove that outer boundary. Native Codex controls command network
 access inside restricted modes. Upstream model traffic still uses the local
@@ -73,8 +79,42 @@ Selected `context_package` and private `mcp` inputs use their explicit
 [isolation contract](context-and-mcp.md). Combining them with full access raises
 `invalid_execution_policy` before admission. The SDK never silently grants
 full host access to such a request or silently downgrades the requested mode.
-Use a restricted sandbox for selected inputs. Native tools disabled by that
-contract remain disabled; approval policy does not enable them.
+Use a restricted sandbox for selected inputs, or the explicit host integration
+profile below. Approval policy alone does not enable disabled native tools.
+
+## Explicit host-isolated full access
+
+Since 2.4.0, trusted Linux host integrations can pass `host_isolated: true` on
+`messages.create` with `sandbox_mode: danger-full-access`. This opt-in profile
+preserves selected context and MCP while allowing native shell commands and
+workspace writes. It does not change ordinary full-access semantics above.
+Inputs-only and evaluation modes reject this option.
+
+The SDK projects only the admitted workspace, per-instance Codex home, private
+temporary directory, system dependencies, reviewed native runtime and the exact
+selected MCP Unix socket. Native descendants have their own PID namespace;
+further user namespaces and process-inspection syscalls are denied. The worker's
+other state and sockets are absent. MCP requires a trusted system Python runtime
+visible in the projection. The native process retains the outer network namespace,
+so the host must constrain its network and local proxy access separately.
+The selected operation capability remains available to native code in that turn;
+it must authorize only that operation's admitted tools, never host credentials.
+
+This profile uses the separately locked Linux x86-64 `native_bwrap` launcher.
+Its reviewed `--proc-ro` extension mounts fresh procfs read-only from the start;
+ordinary `--proc` is unchanged. A nested host can expose a pristine read-only
+procfs to its trusted SDK worker, alongside the worker's normal procfs. That helper
+is never mounted into the native projection. Native descendants inherit a seccomp
+filter denying `unshare`, `setns`, `clone(CLONE_NEWUSER)` and process inspection;
+`clone3` returns `ENOSYS` so ordinary process/thread creation falls back safely.
+No host sysctl or security profile is modified. ARM64 host-isolated execution is
+not shipped by this component; ordinary SDK profiles remain available there.
+
+The host must validate nested user/mount/PID namespace support before admitting
+full-access work. Some AppArmor bubblewrap profiles explicitly remove the
+capabilities required for nested UID mapping. Such hosts need an explicitly
+configured service environment; removing filesystem isolation is not a fallback.
+AgentBridge itself fails closed if the native projection cannot start.
 
 ## Evidence
 

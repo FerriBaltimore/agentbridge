@@ -39,7 +39,8 @@ loading its selection. Before starting a Codex thread it requests native
 and explicitly disables every discovered unselected skill. A malformed list,
 wrong workspace or missing selected skill fails before `thread/start`.
 Selected-context configuration also disables project instruction loading,
-web search, apps, subagents and built-in shell execution. The selected workspace
+web search, apps and subagents. Built-in shell execution is disabled unless the
+explicit [host-isolated full-access profile](execution-access.md) is selected. The selected workspace
 is intended to be accessed through separately admitted MCP tools;
 evaluation mode additionally requests an ephemeral thread and refuses native
 resume. A native configuration rejection fails the turn before execution.
@@ -95,7 +96,7 @@ grant and revocation checks. AgentBridge returns a generic error for a failed
 socket call and does not persist the capability or raw facade errors.
 
 Codex is also asked to disable its built-in shell execution tools when MCP is
-configured without a package. The host must still test
+configured without a package, except with explicit `host_isolated: true`. The host must still test
 its actual Codex version and sandbox; this configuration is not a substitute
 for host isolation. Neither the MCP descriptor nor context package authorizes
 an automatic rerun or account switch during a turn.

@@ -1,2 +1,6 @@
 recursive-include src/agentbridge/bundle *.json *.mjs *.txt *.gz *.xz
 recursive-include tools *.py
+include tools/native_bwrap.patch
+include tools/native_bwrap_build.sh
+include tools/native_bwrap_provenance.json
+include tools/native-bwrap.md

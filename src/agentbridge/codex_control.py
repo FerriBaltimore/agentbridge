@@ -4,6 +4,7 @@ from .errors import BridgeError
 from .provider_errors import normalize
 from .session_events import routing
 from .codex_skills import selected_config
+from .codex_notices import notice
 from .native_sessions import validate_native_id
 
 
@@ -53,6 +54,16 @@ class CodexControl:
             return
         if self.turn_id and params.get('turnId') not in (None, self.turn_id):
             return
+        observed = notice(method, params)
+        if observed is not None:
+            if (observed['kind'] == 'mcp_startup' and self.payload.get('mcp_enabled')
+                    and params.get('name') == 'agentbridge_execution'
+                    and observed['status'] in {'failed', 'cancelled'}):
+                raise BridgeError('provider_unavailable', 'The selected MCP server could not start.',
+                                  phase='execution' if self.turn_id else 'launch',
+                                  outcome='unknown' if self.turn_id else 'not_started')
+            self.emit(observed)
+            return
         if method == 'turn/completed':
             turn = params.get('turn', {})
             if not isinstance(turn, dict):
@@ -86,7 +97,8 @@ class CodexControl:
             if not isinstance(item, dict):
                 raise BridgeError('provider_protocol_error', 'Invalid native item.',
                                   phase='execution', outcome='unknown')
-            kinds = {'agentMessage': 'agent_message', 'commandExecution': 'command_execution',
+            kinds = {'agentMessage': 'agent_message', 'userMessage': 'user_message',
+                     'commandExecution': 'command_execution',
                      'fileChange': 'file_change', 'mcpToolCall': 'mcp_tool_call', 'webSearch': 'web_search',
                      'dynamicToolCall': 'dynamic_tool_call', 'collabAgentToolCall': 'collab_agent_tool_call',
                      'contextCompaction': 'context_compaction', 'reasoning': 'reasoning'}

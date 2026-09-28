@@ -79,6 +79,10 @@ settings, fresh context packages and account exclusions are rejected instead
 of changing the running turn. Provider-native protocol fields remain internal.
 New steering messages inherit omitted controls from the active turn; explicitly
 conflicting values are rejected. Promoted queue entries retain their saved controls.
+Selected-context steering requires the exact active context package and the same
+MCP endpoint (version and socket path). A fresh operation capability may differ;
+the active turn keeps its original authorization. Changed context or endpoint is
+rejected with `steering_context_unsupported`, without dropping the queued input.
 An outstanding tool approval can delay delivery until that interaction ends.
 
 ## Observation and recovery
@@ -102,7 +106,9 @@ Ordinary Stop pauses an existing queue. A failed, incomplete or interrupted turn
 also pauses its pending tail. An explicit replacement can proceed after confirmed
 cancellation, but an unknown outcome requires inspection and explicit resume.
 Admission failures retain the head as `blocked`, with a safe error code, and
-pause the queue. Busy accounts are awaited without creating an execution attempt.
+pause the queue. A conversation whose previous turn is still finishing is awaited
+without creating an execution attempt. Other conversations on the same account
+do not delay admission; one account may run several conversations at once.
 
 Client disconnection does not stop the dispatcher. If the dispatcher or host
 is lost, the queue and its order remain in SQLite. `queues.list` reports whether

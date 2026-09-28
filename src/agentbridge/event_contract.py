@@ -24,6 +24,7 @@ EVENT_KINDS = {
     "recovery": "recovery.observed",
     "gap": "recovery.gap",
     "queue_changed": "queue.changed",
+    "provider_notice": "provider.notice",
 }
 
 

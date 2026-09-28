@@ -315,7 +315,7 @@ def test_native_history_and_replay_keep_the_selected_proxy_account(tmp_path):
     assert bridge.store.get("sessions", "instance")["account_id"] == "b"
 
 
-def test_one_account_cannot_admit_two_active_turns_concurrently(tmp_path):
+def test_one_account_admits_concurrent_turns_from_two_sessions(tmp_path):
     store = prepared(tmp_path)
     for session_id in ("one", "two"):
         store.add_session(session_id, "a", str(tmp_path), MODEL, routing_mode="automatic")
@@ -328,8 +328,22 @@ def test_one_account_cannot_admit_two_active_turns_concurrently(tmp_path):
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(submit, (0, 1)))
-    assert sorted("admitted" if isinstance(item, tuple) else item for item in outcomes) == ["admitted", "busy"]
-    assert store.route_load(("a",))["a"] == {"in_flight": 1, "assigned_turns": 1}
+    assert sorted("admitted" if isinstance(item, tuple) else item for item in outcomes) == ["admitted", "admitted"]
+    assert store.route_load(("a",))["a"] == {"in_flight": 2, "assigned_turns": 2}
+    with pytest.raises(BridgeError) as caught:
+        admit(store, "run-2", "one", "a")
+    assert caught.value.code == "busy"
+
+
+def test_existing_store_drops_the_per_account_active_run_index(tmp_path):
+    store = prepared(tmp_path)
+    with store.connect() as db:
+        db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS active_account ON runs(account_id)
+                      WHERE state IN ('starting','running','stopping')""")
+    reopened = Store(store.root)
+    with reopened.connect() as db:
+        names = {row["name"] for row in db.execute("PRAGMA index_list(runs)")}
+    assert "active_session" in names and "active_account" not in names
 
 
 def test_direct_store_registration_is_disabled_without_exposing_url_or_key(tmp_path):

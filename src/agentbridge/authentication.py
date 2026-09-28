@@ -10,6 +10,7 @@ from .auth_entry import entry_failure, entry_params, validate_entry
 from .auth_identity import check_existing, verify_or_fail_new_email
 from .auth_proxy_binding import bind_proxy_account
 from .auth_proxy_retirement import retire_managed_proxy, retire_terminal_proxy
+from .auth_verification import recover_verified_identity, verification_data
 from .auth_callback import validate_callback
 from .errors import BridgeError
 from .grantbridge import GrantBridgeClient
@@ -187,6 +188,7 @@ class AuthenticationService:
     def status(self, attempt_id, *, owner_ref=None, account_ref=None,
                grantbridge_root=None, data_dir=None):
         row = self._owned(attempt_id, owner_ref, account_ref)
+        row = recover_verified_identity(self, row)
         if row['status'] in TERMINAL | {'verified', 'bound', 'usable'}:
             retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
             return self._public(row)
@@ -242,6 +244,7 @@ class AuthenticationService:
         if inference:
             raise BridgeError('unsupported_operation', 'Proxy login checks do not start a model turn.')
         row = self._owned(attempt_id, owner_ref, account_ref)
+        row = recover_verified_identity(self, row)
         if row['status'] == 'verified':
             return self._public(row)
         if row['status'] in TERMINAL | {'bound'}:
@@ -256,9 +259,7 @@ class AuthenticationService:
             ProxyRoute(row['account_id'], route['proxy_base_url'], route['key_env']),
             route['management_key_env']).observe()
         verify_or_fail_new_email(self.store, self.accounts, self.managed_proxy, row, observed)
-        data = {**row['data'], 'verification': {'proxyBinding': 'passed'},
-                'proxy_binding': {'binding_fingerprint': observed['binding_fingerprint'],
-                                  'identity_fingerprint': observed['identity_fingerprint']}}
+        data = verification_data(row, observed)
         row = self.store.update_auth_attempt(attempt_id, row['owner'], status='verified', data=data)
         return self._public(row)
 
@@ -294,6 +295,7 @@ class AuthenticationService:
             # The remote outcome is unknown. This only abandons local ownership;
             # it must never claim that the proxy cancelled OAuth.
             row = self.store.update_auth_attempt(attempt_id, row['owner'], status='abandoned')
+            retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)
             return self._public(row)
         if row['status'] in TERMINAL | {'bound'}:
             retire_terminal_proxy(row, self.store, self.accounts, self.managed_proxy)

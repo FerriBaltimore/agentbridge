@@ -1,0 +1,68 @@
+diff --git a/bubblewrap.c b/bubblewrap.c
+index 687ed71..1b056a9 100644
+--- a/bubblewrap.c
++++ b/bubblewrap.c
+@@ -145,6 +145,7 @@ typedef enum {
+ typedef enum {
+   NO_CREATE_DEST = (1 << 0),
+   ALLOW_NOTEXIST = (1 << 1),
++  PROC_READONLY = (1 << 2),
+ } SetupOpFlag;
+ 
+ typedef struct _SetupOp SetupOp;
+@@ -351,6 +352,7 @@ usage (int ecode, FILE *out)
+            "    --exec-label LABEL           Exec label for the sandbox\n"
+            "    --file-label LABEL           File label for temporary sandbox content\n"
+            "    --proc DEST                  Mount new procfs on DEST\n"
++           "    --proc-ro DEST               Mount new read-only private procfs on DEST\n"
+            "    --dev DEST                   Mount new dev on DEST\n"
+            "    --tmpfs DEST                 Mount new tmpfs on DEST\n"
+            "    --mqueue DEST                Mount new mqueue on DEST\n"
+@@ -1118,7 +1120,8 @@ privileged_op (int         privileged_op_socket,
+       break;
+ 
+     case PRIV_SEP_OP_PROC_MOUNT:
+-      if (mount ("proc", arg1, "proc", MS_NOSUID | MS_NOEXEC | MS_NODEV, NULL) != 0)
++      if (mount ("proc", arg1, "proc",
++                 MS_NOSUID | MS_NOEXEC | MS_NODEV | (flags & MS_RDONLY), NULL) != 0)
+         die_with_mount_error ("Can't mount proc on %s", arg1);
+       break;
+ 
+@@ -1325,6 +1328,9 @@ setup_newroot (bool unshare_pid,
+           break;
+ 
+         case SETUP_MOUNT_PROC:
++          if ((op->flags & PROC_READONLY) && !unshare_pid && opt_pidns_fd == -1)
++            die ("--proc-ro requires a private PID namespace");
++
+           if (ensure_dir (dest, 0755) != 0)
+             die_with_error ("Can't mkdir %s", op->dest);
+ 
+@@ -1332,7 +1338,8 @@ setup_newroot (bool unshare_pid,
+             {
+               /* Our own procfs */
+               privileged_op (privileged_op_socket,
+-                             PRIV_SEP_OP_PROC_MOUNT, 0, 0, 0,
++                             PRIV_SEP_OP_PROC_MOUNT,
++                             (op->flags & PROC_READONLY) ? MS_RDONLY : 0, 0, 0,
+                              dest, NULL);
+             }
+           else
+@@ -2092,13 +2099,15 @@ parse_args_recurse (int          *argcp,
+           argv += 1;
+           argc -= 1;
+         }
+-      else if (strcmp (arg, "--proc") == 0)
++      else if (strcmp (arg, "--proc") == 0 || strcmp (arg, "--proc-ro") == 0)
+         {
+           if (argc < 2)
+-            die ("--proc takes an argument");
++            die ("%s takes an argument", arg);
+ 
+           op = setup_op_new (SETUP_MOUNT_PROC);
+           op->dest = argv[1];
++          if (strcmp (arg, "--proc-ro") == 0)
++            op->flags |= PROC_READONLY;
+ 
+           argv += 1;
+           argc -= 1;

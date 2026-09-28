@@ -47,6 +47,22 @@ def test_update_policy_preserves_native_identity_and_is_atomic(bridge, tmp_path)
     assert bridge.instance_get(value['id']) == updated
 
 
+def test_update_relocates_the_workspace_while_keeping_the_native_thread(bridge, tmp_path):
+    value = create(bridge, tmp_path, account_ref='a')
+    completed(bridge, value['id'])
+    moved = tmp_path / 'moved-workspace'
+    moved.mkdir()
+    updated = dispatch(bridge, 'instances.update', {
+        'instance_id': value['id'], 'workspace_path': str(moved), 'expected_version': 1})
+    assert updated['workspace_path'] == str(moved.resolve())
+    assert (updated['native_session_id'], updated['version']) == ('native-a', 2)
+    assert bridge.get_session(value['id'])['cwd'] == str(moved.resolve())
+    with pytest.raises(BridgeError) as error:
+        bridge.instance_update(value['id'], workspace_path=str(tmp_path / 'missing'))
+    assert error.value.code == 'invalid_workspace'
+    assert bridge.instance_get(value['id']) == updated
+
+
 @pytest.mark.parametrize('field,value,code', [
     ('permission_mode', None, 'invalid_permissions'),
     ('permission_mode', 'bypassPermissions', 'invalid_permissions'),

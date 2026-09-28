@@ -128,7 +128,8 @@ def main():
             native_temp=tempfile.mkdtemp(prefix='agentbridge-native-')
             env['TMPDIR']=native_temp
             cmd=wrap(cmd, workspace_write=options.sandbox == 'workspace-write',
-                     full_access=options.sandbox == 'danger-full-access')
+                     full_access=options.sandbox == 'danger-full-access',
+                     host_isolated=options.host_isolated)
         if run['stop_requested'] or stopped[0]:
             store.finish(run_id,'cancelled','user_stop');return
         mark_native_launch(store, run_id)

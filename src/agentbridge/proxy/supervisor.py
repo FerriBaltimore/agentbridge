@@ -108,15 +108,30 @@ def _write_record(account_dir, record):
         temporary.unlink(missing_ok=True)
 
 
-def _proxy_config(port, auth_dir, client_key, management_key):
-    return {"host": "127.0.0.1", "port": port, "auth-dir": str(auth_dir),
-            "api-keys": [client_key], "request-retry": 0,
-            "remote-management": {"allow-remote": False,
-                                  "secret-key": management_key,
-                                  "disable-control-panel": True,
-                                  "disable-auto-update-panel": True},
-            "plugins": {"enabled": False}, "discovery": {"enabled": False},
-            "pprof": {"enable": False}, "logging-to-file": False}
+def _upstream_proxy_url(environment=os.environ):
+    for key in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
+                "HTTP_PROXY", "http_proxy"):
+        value = environment.get(key, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _proxy_config(port, auth_dir, client_key, management_key, environment=os.environ):
+    config = {"host": "127.0.0.1", "port": port, "auth-dir": str(auth_dir),
+              "api-keys": [client_key], "request-retry": 0,
+              "remote-management": {"allow-remote": False,
+                                    "secret-key": management_key,
+                                    "disable-control-panel": True,
+                                    "disable-auto-update-panel": True},
+              "plugins": {"enabled": False}, "discovery": {"enabled": False},
+              "pprof": {"enable": False}, "logging-to-file": False}
+    proxy_url = _upstream_proxy_url(environment)
+    if proxy_url:
+        # CLIProxyAPI's uTLS transport for Codex ignores environment proxies, so a
+        # host proxy (for example a sandbox egress proxy) must be configured explicitly.
+        config["proxy-url"] = proxy_url
+    return config
 
 
 def _ready(port, key, process):

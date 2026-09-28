@@ -47,14 +47,16 @@ def test_affinity_retains_unknown_quota_and_waits_for_temporary_limits():
     available = _candidate('b', 5)
     assert select_route(MODEL, (_candidate('a'), available), now=NOW,
                         affinity_account_id='a').reason == 'affinity'
-    for current, code in ((_candidate('a', 10, in_flight=1), 'account_busy'),
-                          (_candidate('a', 10, cooldown_until=NOW + 7), 'rate_limited'),
+    concurrent = select_route(MODEL, (_candidate('a', 10, in_flight=1), available), now=NOW,
+                              affinity_account_id='a')
+    assert concurrent.account_id == 'a' and concurrent.in_flight == 1
+    for current, code in ((_candidate('a', 10, cooldown_until=NOW + 7), 'rate_limited'),
                           (_candidate('a', 10, health='unhealthy'), 'proxy_binding_unverified'),
                           (_candidate('a', 10, health='unknown'), 'proxy_binding_unverified')):
         with pytest.raises(BridgeError) as caught:
             select_route(MODEL, (current, available), now=NOW, affinity_account_id='a')
         assert caught.value.code == code
-        if code in {'account_busy', 'rate_limited'}:
+        if code == 'rate_limited':
             assert caught.value.retryable is True
     assert select_route(MODEL, (available,), now=NOW,
                         affinity_account_id='a').account_id == 'b'
@@ -90,8 +92,7 @@ def test_confirmed_exhaustion_outweighs_cooldown_and_stale_fallback_is_unknown()
     assert caught.value.code == 'quota_unknown'
     assert caught.value.retryable is True
     assert caught.value.details['excluded'] == {
-        'unhealthy': 0, 'cooldown': 0, 'busy': 0,
-        'quota_exhausted': 1, 'quota_unknown': 1}
+        'unhealthy': 0, 'cooldown': 0, 'quota_exhausted': 1, 'quota_unknown': 1}
 
 
 def test_exhaustion_evidence_sanitizes_provider_window_label():

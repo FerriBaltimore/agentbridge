@@ -2,6 +2,7 @@
 
 from ..errors import BridgeError, UnsupportedError
 from ..execution_policy import validate_policy
+from ..workspace_policy import validate_workspace
 from .admission import create_automatic_instance, normalized_exclusions
 from .reconfiguration import PROVIDER_UNSET, validate_mode, validate_provider
 
@@ -49,16 +50,21 @@ class InstanceRoutingMixin:
                         routing_mode=PROVIDER_UNSET, account_ref=PROVIDER_UNSET,
                         effort=None, context_window=None,
                         permission_mode=PROVIDER_UNSET, sandbox_mode=PROVIDER_UNSET, allowed_tools=None,
-                        expected_version=None, metadata=None, provider_options=None, state=None):
+                        expected_version=None, metadata=None, provider_options=None, state=None,
+                        workspace_path=None):
         if any(value is not None for value in (effort, context_window, allowed_tools,
                                                metadata, provider_options)):
-            raise UnsupportedError('Only routing, execution policy and state updates are supported.')
+            raise UnsupportedError('Only routing, execution policy, workspace and state updates '
+                                   'are supported.')
         values = {}
         for key, value in (('permission_mode', permission_mode), ('sandbox_mode', sandbox_mode)):
             if value is not PROVIDER_UNSET:
                 values[key] = value
         if model is not None:
             values['model'] = model
+        if workspace_path is not None:
+            # The host may move an admitted workspace; the native thread resumes in the new cwd.
+            values['cwd'] = str(validate_workspace(workspace_path, self.store.root))
         if state is not None:
             values['state'] = state
         if not values and all(value is PROVIDER_UNSET for value in

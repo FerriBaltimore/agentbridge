@@ -18,7 +18,7 @@ stable AgentBridge code:
 ## Stable codes
 
     invalid_request, invalid_engine, unsupported_operation,
-    unsupported_parameter, account_not_found, account_busy,
+    unsupported_parameter, account_not_found,
     authentication_required, authorization_denied, instance_not_found,
     instance_busy, turn_not_found, idempotency_conflict, model_not_found,
     model_unavailable, quota_exhausted, provider_timeout,

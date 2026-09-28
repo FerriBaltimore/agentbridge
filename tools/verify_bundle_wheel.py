@@ -2,9 +2,11 @@
 
 import argparse
 from hashlib import sha256
+import io
 import json
 from pathlib import Path
 import re
+import tarfile
 from zipfile import ZipFile
 
 
@@ -21,6 +23,33 @@ LICENSES = (
     "grantbridge/LICENSE",
 )
 PLATFORMS = re.compile(r"-py3-none-manylinux_2_28_(x86_64|aarch64)\.whl\Z")
+
+
+def _verify_native_launcher(archive, names, base, lock, arch):
+    asset = lock["native_bwrap"]["assets"].get(arch)
+    member = base + "assets/native_bwrap.tar.gz"
+    if asset is None:
+        if member in names:
+            raise ValueError("The wheel includes a native launcher for an unreviewed platform.")
+        return False
+    if member not in names:
+        raise ValueError("The wheel omits its reviewed native launcher.")
+    data = archive.read(member)
+    if sha256(data).hexdigest() != asset["sha256"]:
+        raise ValueError("The native launcher archive differs from its lock.")
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as source:
+        members = source.getmembers()
+        if ({item.name for item in members} != {"bin/bwrap", "LICENSE"}
+                or len(members) != 2 or any(not item.isfile() for item in members)):
+            raise ValueError("The native launcher archive has unexpected members.")
+        binary = source.extractfile("bin/bwrap").read()
+        license_data = source.extractfile("LICENSE").read()
+    if sha256(binary).hexdigest() != asset["binary_sha256"]:
+        raise ValueError("The native launcher binary differs from its lock.")
+    license_member = base + "licenses/native_bwrap-license.txt"
+    if license_member not in names or archive.read(license_member) != license_data:
+        raise ValueError("The native launcher license is missing or differs from its archive.")
+    return True
 
 
 def verify_wheel(path):
@@ -55,12 +84,16 @@ def verify_wheel(path):
             raise ValueError("The GrantBridge source set differs from its lock.")
         if any(base + relative not in names for relative in LICENSES):
             raise ValueError("The wheel omits a required upstream license or notice.")
+        native = _verify_native_launcher(archive, names, base, lock, arch)
         wheel_file = next((name for name in names if name.endswith(".dist-info/WHEEL")), None)
         if wheel_file is None or f"Tag: py3-none-manylinux_2_28_{matched.group(1)}" not in archive.read(wheel_file).decode():
             raise ValueError("The wheel metadata does not match its platform tag.")
+    components = [*ASSETS, "grantbridge"]
+    if native:
+        components.append("native_bwrap")
     return {"wheel": path.name, "platform": arch,
             "components": {key: lock[key].get("version") or lock[key].get("commit")
-                           for key in (*ASSETS, "grantbridge")}}
+                           for key in components}}
 
 
 def main(argv=None):

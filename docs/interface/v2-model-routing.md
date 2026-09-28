@@ -128,12 +128,13 @@ proxy exposes a complete attributable inventory.
 
 Automatic routing keeps the existing eligible account, including when its
 quota is unknown. It changes after fresh, applicable quota proves exhaustion,
-or explicit configuration makes that account ineligible. Busy accounts,
-temporary cooldowns and failed identity verification preserve the preference
-and return a visible error. At initial selection or failover, known capacity
-is compared by the most constrained applicable quota window. Unknown remains
-unknown; assigned turn counts only break otherwise equal choices. The router
-and usage API use the same full quota-window evidence.
+or explicit configuration makes that account ineligible. Temporary cooldowns
+and failed identity verification preserve the preference and return a visible
+error. An account executes turns from several conversations concurrently; only
+one turn per conversation is active. At initial selection or failover, known
+capacity is compared by the most constrained applicable quota window. Unknown
+remains unknown; in-flight and assigned turn counts only break otherwise equal
+choices. The router and usage API use the same full quota-window evidence.
 
 The account decision and evidence are persisted before execution. An unknown
 outcome, Stop or quota error never authorizes an implicit rerun through another

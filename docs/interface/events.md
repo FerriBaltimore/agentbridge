@@ -64,6 +64,7 @@ the method reads one available snapshot without waiting. The lower-level
     recovery.observed
     recovery.gap
     queue.changed
+    provider.notice
     provider.event
 
 The existing legacy event names remain readable during migration. New methods
@@ -99,3 +100,12 @@ admitted, its `turn_id` is null; queue-wide changes can also have a null
 `permission.required` contains the bounded action and tool identifier. It
 never contains a secret, private reasoning or an unbounded provider payload.
 The host decides whether and how a permission is granted.
+
+`provider.notice` carries known Codex lifecycle metadata rather than missing
+message evidence. Its `kind` is `configuration_warning`, `warning`,
+`deprecation_warning`, `remote_control`, `mcp_startup`, `goal`, or
+`input_observed`; `status` preserves the
+reviewed lifecycle state. Provider warning prose, paths and remote identities
+are not copied. A native user-message echo does not add another SDK user message.
+Unknown notifications and items still produce `recovery.gap`; unknown lifecycle
+status values remain protocol errors.

@@ -120,7 +120,19 @@ Reproduction:
 python -m pytest tests/test_bundled_native_access.py tests/test_bundled_native_continuity.py -q
 ```
 
-## Delivery validation
+These cases, and the host-isolated case, need a host which lets the unconfined
+bundled bubblewrap create its own user namespace. With
+`kernel.apparmor_restrict_unprivileged_userns=1`, AppArmor confines that
+launcher as `unprivileged_userns` and denies its uid map
+(`bwrap: setting up uid map: Permission denied`); every restricted native turn
+then ends `interrupted` with `unknown_outcome`, which is the intended fail-closed
+behavior rather than a defect. The shared test mark probes that permission and
+skips these files with an explicit reason. Run them from a process already
+confined by a profile granting `userns`, as the recorded runs inherited from the
+IDE profile, or from a host-configured launcher profile. Do not weaken the host
+policy or remove the isolation to make them pass.
+
+## Historical 2.3.3 delivery validation
 
 The final complete suite passed on 2026-09-25: **1,088 passed in 383.73 seconds**,
 with no failures or skipped tests. It includes all eight native-runtime cases
@@ -144,3 +156,106 @@ SHA-256:
 This validates the SDK and its playground using synthetic accounts and local
 fixture servers. Live upstream provider acceptance remains separate. No package
 was published and Fullbrain's installation was not changed.
+
+## 2.4 host-isolated full-access LAB
+
+Objective: retain real native shell, workspace writes, selected context and MCP
+inside a trusted host worker while denying service state and other tenants.
+The standard `danger-full-access` profile retains its existing meaning; the host
+must explicitly select `host_isolated: true`. Inputs-only modes reject it.
+
+A normal nested system bubblewrap failed under the host's stacked unprivileged
+AppArmor profile. Inside an explicitly permitted test environment, a second
+barrier remained: the outer procfs contains locked read-only child mounts, so
+Linux refuses another procfs mount. Mounting only the inner procfs read-only or
+with `subset=pid` was insufficient. An empty procfs was rejected because native
+executables need genuine `/proc/self/exe`; fabricated executable links were not
+accepted. No host security settings or system executables were changed.
+
+Accepted namespace experiment: a separately compiled, reproducible bubblewrap
+0.11.1 adds `--proc-ro` without changing `--proc`. The trusted host worker has
+its normal procfs and a second pristine read-only procfs. Native execution gets
+a fresh PID namespace and fresh read-only procfs; it never receives the helper
+mount. The exact static executable produced identical bytes in three builds.
+Its source, patch, dependency versions, license notices and build recipe are
+recorded alongside the separately locked `native_bwrap` resource. The upstream
+Codex package remains unchanged.
+
+The real host experiment inherited the existing IDE profile's explicit user
+namespace permission. Native PID 2 resolved `/proc/self/exe` to the actual
+Python interpreter and could not see `/run/native-proc`. The production-style
+probe then loaded the SDK's exact inherited seccomp filter after namespace setup:
+ordinary child processes and threads worked, while further user namespaces were
+denied. This replaces a nested sysctl write with a process-local restriction;
+no host policy is weakened. Fullbrain probes the exact locked launcher and SDK
+filter before advertising the capability, and fails before turn admission when
+the host service profile cannot support it.
+
+The combined integration test is
+`tests/contract/agentbridge/native_context/test_host_isolated.py` in Fullbrain.
+It uses actual bundled Codex inside the production worker, with only synthetic
+local Responses/account fixtures. Its three-turn sequence includes queued
+context/MCP delivery, model and account changes, and dispatcher loss followed by
+exact-message context rebind. Service-file and sibling-socket canaries remain
+inaccessible while shell, child-process and thread workspace writes succeed.
+A single native UUID must survive the complete sequence. Live upstream provider
+acceptance remains separate.
+
+The completed native sequence also exposed known app-server notices being
+misclassified as gaps. The pinned executable's generated JSON Schema confirms
+`configWarning`, `warning`, `deprecationNotice`, remote-control connection
+status, MCP startup status, and native goal clearing. These now produce typed
+`provider.notice` metadata. A `userMessage` item acknowledges existing admitted
+input without duplicating its text. Unknown notifications/items remain explicit
+gaps, future lifecycle states remain errors, and selected MCP startup failure
+cannot silently remove admitted tools. The combined test requires all three
+final assistant answers and no unexpected gap; terminal state alone is not its
+success criterion.
+
+A separate regression appeared only when the native temporary directory was
+outside `/tmp`: the projection had relied on its parent directory being created
+incidentally. Explicitly creating the isolated `/tmp` directory restores the
+nested native tool sandbox without adding a writable host path. All four
+restricted native canaries passed after this correction, followed by all six
+permission cases and both native continuity cases.
+
+The final source fixture is based on commit
+`73a9c2e412891a1daab61465b1c86cbf13b21940` plus the reviewed working tree.
+Fullbrain archive SHA-256:
+
+```text
+11f8d4fd0aad6e034af125ddd7c429b18d7bca4ae13b5309808e99947fb9552b
+```
+
+Final collection contains 1,135 cases. The broad Python run completed 1,054
+cases and exposed the four `/tmp` projection failures. Those four passed after
+the fix; the related native/normalization/event regression run passed 70 cases
+in 45.59 seconds. The final notice and continuation gate passed 46 cases in
+5.25 seconds, including both new structural negative/positive tests. Browser
+coverage completed 74 cases in its broad run, and its one diagnostic-metadata
+expectation passed unchanged in a 3.24-second rerun after that temporary
+instrumentation was removed. All 75 collected browser cases have passing
+evidence. The two optional real-native offline checks were enabled.
+
+Fullbrain's final pinned integration and binding/manifest/MCP checks passed
+seven cases in 11.80 seconds with native access required. That includes all
+three actual native replies, exact operation-bound MCP calls, queue context
+recovery and unchanged native identity. The same run checks private file/socket
+denials and actual shell, process and thread writes. No live upstream account
+is part of this evidence.
+
+The final 2.4.0 wheel and source distribution were built and verified. The wheel
+was installed into a disposable environment and this repository's `.venv`.
+All 144 selected package files matched the source, wheel and both installations;
+installed CLI help, quickstart and the reviewed native-launcher extraction passed.
+The source distribution includes the launcher patch, recipe and provenance.
+
+Wheel: `ferran_agentbridge-2.4.0-py3-none-manylinux_2_28_x86_64.whl`.
+SHA-256:
+
+```text
+a9879f709927aa105aa376917e1b5741274df25536d005a31659e80103d66229
+```
+
+Nothing was published. Fullbrain consumes the separate immutable source archive;
+its Python environment does not install this SDK wheel.

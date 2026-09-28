@@ -19,12 +19,18 @@ def validate_steering(db, row, run):
         raise BridgeError('steering_unsupported', 'This turn does not accept live input; use interrupt delivery.')
     queued = json.loads(row['options'])
     if queued.get('context_package_digest') or queued.get('mcp_binding_digest'):
-        raise BridgeError('steering_context_unsupported', 'Live input cannot replace the active execution context.')
+        same_context = queued.get('context_package_digest') == options.context_package_digest
+        same_mcp = (not queued.get('mcp_binding_digest') and not options.mcp_binding_digest
+                    or queued.get('mcp_endpoint_digest') is not None
+                    and queued['mcp_endpoint_digest'] == options.mcp_endpoint_digest)
+        if not same_context or not same_mcp:
+            raise BridgeError('steering_context_unsupported',
+                              'Live input must retain the active selected context and MCP endpoint.')
     session = db.execute('SELECT model FROM sessions WHERE id=?', (row['session_id'],)).fetchone()
     current_model = options.model or session['model']
     for field, current in (('model', current_model), ('effort', options.effort),
                            ('sandbox', options.sandbox), ('permission_mode', options.permission_mode),
-                           ('context_window', options.context_window)):
+                           ('context_window', options.context_window), ('host_isolated', options.host_isolated)):
         if queued.get(field) is not None and queued[field] != current:
             raise BridgeError('steering_options_conflict', 'Live input must use the active turn settings.')
     if json.loads(row['exclusions']):

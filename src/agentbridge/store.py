@@ -63,8 +63,9 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
                     error TEXT, exit_code INTEGER);
                 CREATE UNIQUE INDEX IF NOT EXISTS active_session ON runs(session_id)
                     WHERE state IN ('starting','running','stopping');
-                CREATE UNIQUE INDEX IF NOT EXISTS active_account ON runs(account_id)
-                    WHERE state IN ('starting','running','stopping');
+                -- Conversations sharing one account may run concurrently; the former
+                -- per-account active-run index is dropped from existing stores.
+                DROP INDEX IF EXISTS active_account;
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL,
                     at REAL NOT NULL, data TEXT NOT NULL);
@@ -271,7 +272,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
     def update_session(self, id, *, expected_version=None,
                        routing_provider=PROVIDER_UNSET, routing_mode=PROVIDER_UNSET,
                        routing_account_id=PROVIDER_UNSET, **values):
-        allowed = {'model', 'native_id', 'context', 'state', 'permission_mode', 'sandbox_mode'}
+        allowed = {'model', 'native_id', 'context', 'state', 'permission_mode', 'sandbox_mode', 'cwd'}
         routing_change = any(value is not PROVIDER_UNSET for value in
                              (routing_provider, routing_mode, routing_account_id))
         if (not values and not routing_change) or not values.keys() <= allowed:
@@ -285,7 +286,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
         if routing_mode is not PROVIDER_UNSET:
             validate_mode(routing_mode)
         route_changed = 'model' in values or routing_change
-        policy_changed = bool(values.keys() & {'permission_mode', 'sandbox_mode'})
+        policy_changed = bool(values.keys() & {'permission_mode', 'sandbox_mode', 'cwd'})
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM sessions WHERE id=?', (id,)).fetchone()
@@ -309,7 +310,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
                               (id,)).fetchone():
                     raise BridgeError('evaluation_immutable',
                                       'Evaluation instances cannot change their route.')
-            if policy_changed:
+            if values.keys() & {'permission_mode', 'sandbox_mode'}:
                 policy = read_policy(db, id)
                 policy.update({key: values[key] for key in policy if key in values})
                 write_policy(db, id, policy)
@@ -319,7 +320,8 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
                     provider=routing_provider, account_id=routing_account_id)
             else:
                 route_values = {}
-            session_values = {key: value for key, value in values.items() if key in {'model', 'native_id', 'context'}}
+            session_values = {key: value for key, value in values.items()
+                              if key in {'model', 'native_id', 'context', 'cwd'}}
             session_values.update(route_values)
             if 'native_id' in session_values:
                 native_id = session_values['native_id']

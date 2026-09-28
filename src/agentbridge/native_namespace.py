@@ -3,9 +3,10 @@
 import os
 from pathlib import Path
 import shutil
+import stat
 
-from .bundle.runtime import is_bundled_codex
-from .native_process_guard import restrict_process_inspection
+from .bundle.runtime import is_bundled_codex, resolve_binary
+from .native_process_guard import namespace_filter_fd, restrict_process_inspection
 from .workspace_policy import (overlaps_private_state, validate_private_state_root,
                                writable_runtime_in_workspace)
 
@@ -17,7 +18,7 @@ def _directory(value):
     return path
 
 
-def _launcher(command, home, temporary):
+def _launcher(command, home, temporary, host_isolated=False):
     if not command:
         raise ValueError('A native command is required')
     selected = shutil.which(command[0])
@@ -30,7 +31,8 @@ def _launcher(command, home, temporary):
     package = is_bundled_codex(executable, home.parent.parent)
     if executable.is_relative_to(home.parent.parent) and package is None:
         raise ValueError('The native executable is not a verified bundled runtime')
-    path = package / 'codex-resources/bwrap' if package else Path('/usr/bin/bwrap')
+    path = (resolve_binary('native_bwrap', home.parent.parent) if host_isolated else
+            package / 'codex-resources/bwrap' if package else Path('/usr/bin/bwrap'))
     if (not path.is_absolute() or path != path.resolve(strict=True)
             or not path.is_file() or not os.access(path, os.X_OK)
             or any(path.is_relative_to(root) for root in roots)):
@@ -56,11 +58,12 @@ def _system_mounts():
     return args
 
 
-def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False):
+def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False,
+           host_isolated=False):
     """Launch ordinary Codex with a projected filesystem and private procfs."""
     home, temporary = _directory(home), _directory(temporary)
     cwd = _directory(Path.cwd())
-    if mcp_enabled:
+    if mcp_enabled and not host_isolated:
         raise ValueError('Selected MCP inputs require their separate isolation policy')
     if home.parent.name != 'codex-runtime' or temporary == Path('/tmp'):
         raise ValueError('Native state and temporary paths must be private')
@@ -69,16 +72,30 @@ def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False
         raise ValueError('Workspace includes private worker state')
     if workspace_write and writable_runtime_in_workspace(cwd):
         raise ValueError('Writable workspace includes the AgentBridge runtime')
-    launcher, executable, package = _launcher(command, home, temporary)
+    launcher, executable, package = _launcher(command, home, temporary, host_isolated)
     # Start with bubblewrap's empty filesystem, without host-root or host-proc
     # mounts. Keep the existing network namespace so the proxy stays reachable.
     args = [str(launcher), '--unshare-user', '--unshare-pid',
             '--uid', str(os.getuid()), '--gid', str(os.getgid()),
             '--die-with-parent', '--cap-drop', 'ALL', *_system_mounts(),
-            '--dev', '/dev', '--proc', '/proc',
+            '--dev', '/dev', '--dir', '/tmp',
+            '--proc-ro' if host_isolated else '--proc', '/proc',
             '--bind' if workspace_write else '--ro-bind', str(cwd), str(cwd),
             '--bind', str(home), str(home), '--chdir', str(cwd),
             '--bind', str(temporary), str(temporary)]
+    if host_isolated:
+        args.extend(('--add-seccomp-fd', str(namespace_filter_fd())))
+        if mcp_enabled:
+            from .execution_context import MCP_SOCKET_ENV
+            socket_path = Path(os.environ[MCP_SOCKET_ENV])
+            if (not socket_path.is_absolute() or socket_path != socket_path.resolve(strict=True)
+                    or not stat.S_ISSOCK(socket_path.stat().st_mode)):
+                raise ValueError('The selected MCP socket must be canonical')
+            source = Path(__file__).resolve().parents[1]
+            if home.parent.parent.is_relative_to(source):
+                raise ValueError('MCP source overlaps private state')
+            args.extend(('--ro-bind', str(socket_path), str(socket_path),
+                         '--ro-bind', str(source), str(source)))
     native_root = package or executable
     args.extend(('--ro-bind', str(native_root), str(native_root),
                  '--remount-ro', '/',

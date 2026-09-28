@@ -11,12 +11,12 @@ MODEL = "claude-sonnet"
 
 
 def candidate(account_id, used=None, *, models=(MODEL,), observed_at=NOW,
-              health="healthy", in_flight=0, max_in_flight=1, cooldown_until=None,
+              health="healthy", in_flight=0, cooldown_until=None,
               limit_reached=None, reset_at=None, assigned_turns=0):
     quota = () if used is None else (QuotaObservation(used, observed_at, MODEL,
                                                      reset_at, limit_reached),)
     return RouteCandidate(account_id, models, quota, health, cooldown_until,
-                          in_flight, max_in_flight, assigned_turns)
+                          in_flight, assigned_turns)
 
 
 def test_selects_smallest_fraction_of_quota_used_not_absolute_spend():
@@ -86,18 +86,18 @@ def test_exhaustion_and_cooldown_do_not_trigger_hidden_failover():
     assert caught.value.code == "quota_exhausted"
 
 
-def test_busy_and_unhealthy_accounts_excluded():
-    rows = [candidate("busy", 1, in_flight=1),
+def test_in_flight_accounts_stay_eligible_and_unhealthy_accounts_excluded():
+    rows = [candidate("active", 1, in_flight=2),
             candidate("unhealthy", 1, health="unhealthy"), candidate("ready", 60)]
-    assert select_route(MODEL, rows, now=NOW).account_id == "ready"
+    decision = select_route(MODEL, rows, now=NOW)
+    assert decision.account_id == "active" and decision.in_flight == 2
     with pytest.raises(BridgeError) as caught:
-        select_route(MODEL, rows[:1], now=NOW)
-    assert caught.value.code == "account_busy"
+        select_route(MODEL, rows[1:2], now=NOW)
+    assert caught.value.code == "provider_unavailable"
 
 
 def test_deterministic_ties_and_in_flight_load():
-    rows = [candidate("b", 25, in_flight=1, max_in_flight=3),
-            candidate("a", 25, in_flight=1, max_in_flight=3)]
+    rows = [candidate("b", 25, in_flight=1), candidate("a", 25, in_flight=1)]
     assert select_route(MODEL, rows, now=NOW).account_id == "a"
     rows.append(candidate("c", 25))
     assert select_route(MODEL, list(reversed(rows)), now=NOW).account_id == "c"
