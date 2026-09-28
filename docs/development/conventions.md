@@ -21,7 +21,7 @@ Classes use PascalCase. Constants use UPPER_SNAKE_CASE. Python tests start
 with test_.
 
 Markdown filenames use lowercase kebab-case, except standard contract names
-such as README.md, AGENTS.md and CLAUDE.md. Other text files use lowercase
+such as README.md, AGENTS.md, CLAUDE.md and CHANGELOG.md. Other text files use lowercase
 names with dots, underscores or hyphens.
 
 Public RPC methods use plural_resource.verb, for example instances.create and
