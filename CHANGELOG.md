@@ -15,8 +15,13 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 First release cut with a manifest (`tools/release_manifest.py`) and a compatibility matrix.
 Everything since the `2.3.3` package metadata is listed. The part Fullbrain v2 already runs
-as its pinned artifact `a7ac24a5…` (v2 label `2.4.2`, AgentBridge commit `32e3cbd`) is
-marked *(in the v2 pin)*; it was never published under its own version.
+as its pinned artifact `a7ac24a5…` (v2 label `2.4.2`) is marked *(in the v2 pin)*; it was
+never published under its own version. That artifact was built from commit `32e3cbd` plus
+a reviewed working tree that had not been committed; `3b406bd` brings that tree onto this
+branch (native launcher, host-isolated access, notices, verified identity, cleanup, tests,
+docs and tools), so `2.5.0` is a superset of what v2 runs. The Fullbrain v2 pin for `2.5.0`
+is the archive `3786cea5b8d637ef3691284c9f5d2b9088663dcdde27bece6f6e8c8e422bc4c8`
+(149 source files, `docs/compatibility.md`).
 
 Compatibility: Python ≥ 3.11; Linux x86_64 and aarch64 `manylinux_2_28` wheels; GrantBridge
 ≥ `1.0.0-rc.1` when AgentBridge is pointed at an external GrantBridge checkout or artifact
@@ -25,8 +30,8 @@ needs the `auth.proxy_start` fields (`browser`, `mode`, `owner`, `viewerUrl`) th
 ship in that release. The wheel bundles its own copy of that adapter, so same-host,
 isolated and mobile-browser logins work without an external GrantBridge; only
 `mode: "hosted"` needs a long-lived GrantBridge host. AgentBridge does not use the source
-broker (`source.*`, `client_credentials`, `local_session`). The Fullbrain v2 pin for this
-version is pending (`docs/compatibility.md`).
+broker (`source.*`, `client_credentials`, `local_session`). The host-isolated profile is
+Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 
 ### Added
 
@@ -69,8 +74,38 @@ version is pending (`docs/compatibility.md`).
   observations (`73a9c2e`).
 - *(in the v2 pin)* Context package limits (`32e3cbd`): `MAX_INSTRUCTION_BYTES` 1 MiB and
   `MAX_PACKAGE_BYTES` 1.5 MiB; upstream provider selection inside context packages.
+- *(in the v2 pin)* Host-isolated full access (`3b406bd`): `messages.create` accepts
+  `host_isolated: true` with `sandbox_mode: danger-full-access`; `capabilities.get` reports
+  `host_isolated` (`support: adapter`, `maturity: fixture_tested`). Native code gets a fresh
+  PID namespace, a fresh read-only procfs, the admitted workspace, private home/temp and the
+  selected MCP socket; inherited seccomp denies further namespaces and process inspection.
+  Inputs-only and evaluation reject it. The launcher is the separately locked
+  `native_bwrap` 0.11.1.roproc1 (bubblewrap 0.11.1 plus a reviewed `--proc-ro` option):
+  `bundle/lock.json` entry, recipe, patch and provenance in `tools/native_bwrap_*` and
+  `tools/native-bwrap.md`. Contract: `docs/interface/execution-access.md`.
+- *(in the v2 pin)* `provider.notice` events (`codex_notices.py`): known Codex app-server
+  notices — `configuration_warning`, `warning`, `deprecation_warning`, `remote_control`,
+  `mcp_startup`, `goal`, `input_observed` — become typed metadata instead of `recovery.gap`;
+  unknown notifications still produce a gap and a selected MCP startup failure cannot
+  silently drop admitted tools.
+- *(in the v2 pin)* `accounts.login.check` publishes the observed `identity`; `status` and
+  repeated `check` recover older verified rows that lacked it only after a fresh observation
+  matches both stored binding fingerprints (`auth_verification.py`). `accounts.login.cancel`
+  on an interrupted attempt persists `abandoned` and then stops its exact managed sidecar;
+  a failed stop reports `managed_proxy_stop_unverified`.
+- *(in the v2 pin)* `instances.update` accepts `workspace_path` to move an admitted
+  workspace; `instances.get` reports it. Selected-context steering requires the exact
+  active context package and MCP endpoint, otherwise `steering_context_unsupported`.
 
 ### Changed
+
+- *(in the v2 pin)* One account may run several conversations at once: `account_busy` and
+  `max_in_flight` leave the routing selector and the stable error codes; in-flight counts
+  only break ties at initial selection and never change affinity.
+- *(in the v2 pin)* The native projection creates its isolated `/tmp` explicitly, so a native
+  temporary directory outside `/tmp` no longer breaks the nested tool sandbox.
+- `MANIFEST.in`, `tools/prepare_bundle.py` and `tools/verify_bundle_wheel.py` carry and
+  check the `native_bwrap` asset and its license next to the other bundled runtimes.
 
 - Bundled GrantBridge proxy adapter refreshed to `ddaa3698…` (`agentbridge-phone-callback`);
   `src/agentbridge/bundle/lock.json` follows.

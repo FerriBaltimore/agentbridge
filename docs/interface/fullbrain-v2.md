@@ -278,8 +278,10 @@ conservatively and never imply success.
 - 2.3.1 (`39b2bb7`): model metadata arrays, normalized event kinds, bounded long polling.
 - 2.3.2 (`fe2d829`): `quota_windows`, `stale_at`, `refresh_reason`.
 - 2.3.3 (`6ffbede`): `accounts.pause`, `accounts.resume`, `routing.paused`.
-- pin, v2 label `2.4.2` (`73a9c2e`, `32e3cbd`): queues, `messages.get`, access defaults,
-  `instances.delete`, affinity, `id:<account_id>` references, context package limits.
+- pin, v2 label `2.4.2` (`73a9c2e`, `32e3cbd`, working tree now `3b406bd`): queues,
+  `messages.get`, access defaults, `instances.delete`, affinity, `id:<account_id>`
+  references, context package limits, `host_isolated`, `provider.notice`, `identity` on
+  `check`, `instances.update(workspace_path)`, abandoned-login sidecar cleanup.
 - 2.5.0 (`14aa9da`, `4bdc4d0`): `browser` `isolated` and `mobile`, `mode` `hosted`,
   `viewer_url`, echoed `browser` and `mode`, `identity.email`, the new login error codes, the
-  release manifest and `agentbridge.protocol_versions`.
+  release manifest and `agentbridge.protocol_versions`. Fullbrain v2 pin `3786cea5…`.

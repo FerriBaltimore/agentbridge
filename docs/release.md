@@ -133,8 +133,8 @@ its x86_64 bundle prepared (`python3 tools/prepare_bundle.py`, or after the whee
 
 1. `python3 dev/agentbridge/build_v2.py <agentbridge checkout> <artifacts dir>` prints the
    archive `sha256` and `manifest_sha256`. The builder also expects the `native_bwrap` asset
-   and license of the v2 native launcher, which this repository's lock does not carry; the v2
-   lane reconciles that first.
+   and license of the v2 native launcher, which `bundle/lock.json` locks and
+   `tools/prepare_bundle.py` places with the other runtimes.
 2. Set `PIN_SHA256` in `backend/fullbrain/adapters/agentbridge/client.py` to the archive
    digest.
 3. Refresh `tests/fixtures/agentbridge_protocol.json`: `base_commit` (= `git_commit`),

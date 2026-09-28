@@ -40,8 +40,8 @@ FULLBRAIN_PIN_NOTE = (
     'its SHA-256. That digest is PIN_SHA256 in backend/fullbrain/adapters/agentbridge/client.py, '
     'immutable_artifact_sha256 in tests/fixtures/agentbridge_protocol.json and '
     'components.agentbridge.latest_known in deploy/delivery/known-versions.json. Prepare the '
-    'x86_64 bundle first (tools/prepare_bundle.py); the v2 builder also expects a native_bwrap '
-    'asset and license that this repository lock does not carry.')
+    'x86_64 bundle first (tools/prepare_bundle.py), which also places the native_bwrap asset '
+    'and license the v2 builder requires.')
 # setuptools rewrites sys.argv inside each hook, so the driver reads its arguments once.
 BUILD_DRIVER = ('import sys; tools, dist = sys.argv[1:3]; sys.path.insert(0, tools); '
                 'import bundle_backend as backend; print(backend.build_sdist(dist)); '

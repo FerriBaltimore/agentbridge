@@ -20,6 +20,8 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 | `bundle` | CLIProxyAPI 7.3.16, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
 
 The bundled GrantBridge proxy adapter is commit `ddaa3698…` (`bundle.grantbridge_commit`);
+the x86_64 bundle also locks the `native_bwrap` 0.11.1.roproc1 launcher of the host-isolated
+profile (`bundle/lock.json` `native_bwrap`, archive and executable digests).
 `tools/verify_bundle_wheel.py` checks every bundled asset of a built wheel against the lock.
 
 ## SDK version
@@ -94,27 +96,32 @@ the artifact Fullbrain v2 pins today. `2.5.0` satisfies it. Both bounds must hol
 
 | AgentBridge | Commit | GrantBridge minimum | Fullbrain v2 pin (`PIN_SHA256`) | v2 label |
 | --- | --- | --- | --- | --- |
-| `2.3.3` | `32e3cbd` | none released (see below) | `a7ac24a5…` | `2.4.2` |
-| `2.5.0` | tag `v2.5.0` | `1.0.0-rc.1` | pending | — |
+| `2.3.3` | `32e3cbd` + working tree | none released (see below) | `a7ac24a5…` | `2.4.2` |
+| `2.5.0` | tag `v2.5.0` | `1.0.0-rc.1` | `3786cea5…` | `2.5.0` |
 
-- `2.3.3` row: the current v2 pin
-  `a7ac24a5254711cf0e253cff653f5c77fec5b15c2986a59c98b99174e73d7b47` (`known-versions.json`
-  `components.agentbridge.latest_known`), built from a reviewed working tree on `73a9c2e`
-  whose changes became `32e3cbd` (P05). Its login entry is same-host only, so it needs no
+- `2.3.3` row (history): the previous v2 pin
+  `a7ac24a5254711cf0e253cff653f5c77fec5b15c2986a59c98b99174e73d7b47`, built from a reviewed
+  working tree on `73a9c2e` whose committed part became `32e3cbd` (P05) and whose
+  uncommitted part (`native_bwrap`, host-isolated access, notices, verified identity) is
+  commit `3b406bd` of this branch. Its login entry is same-host only, so it needs no
   released GrantBridge: the engine surface of GrantBridge `main` `d60873c` (`0.1.0`,
   untagged) suffices.
-- `2.5.0` row: the commit is the manifest `git_commit`, which must equal
-  `git rev-parse v2.5.0^{commit}`. The pin is computed by the v2 lane with
-  `dev/agentbridge/build_v2.py` after the owner tags; until then v2 stays on the `2.3.3` row.
+- `2.5.0` row: the current v2 pin
+  `3786cea5b8d637ef3691284c9f5d2b9088663dcdde27bece6f6e8c8e422bc4c8` (`known-versions.json`
+  `components.agentbridge.latest_known`, 149 source files, 182,210,560 bytes, manifest
+  `5ec10fa7df0f4c1d309f539b6debdf6bfc122fe9ef3163f9c4c50c077ad36957`), built with
+  `dev/agentbridge/build_v2.py` from this branch with its x86_64 bundle prepared. The
+  commit is the manifest `git_commit`, which must equal `git rev-parse v2.5.0^{commit}` once
+  the owner tags.
 
 The pin column is not the wheel digest: Fullbrain v2 pins the SHA-256 of the archive that
 `dev/agentbridge/build_v2.py` builds from the AgentBridge checkout with its x86_64 bundle
 prepared (`fullbrain_pin_note` in the manifest). The same digest goes to
 `backend/fullbrain/adapters/agentbridge/client.py`, `tests/fixtures/agentbridge_protocol.json`
 (`immutable_artifact_sha256`, `sdk_version`, `base_commit`) and
-`deploy/delivery/known-versions.json` (`components.agentbridge`). The v2 builder currently
-also expects a `native_bwrap` asset and license that this repository's `bundle/lock.json`
-does not carry; the v2 lane reconciles that before computing the `2.5.0` pin.
+`deploy/delivery/known-versions.json` (`components.agentbridge`). The v2 builder also
+requires the `native_bwrap` asset and license that `bundle/lock.json` locks since `3b406bd`;
+`tools/prepare_bundle.py` places both next to the other runtimes.
 
 ## The rule the Fullbrain v2 installer applies
 
