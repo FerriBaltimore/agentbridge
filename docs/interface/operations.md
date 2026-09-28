@@ -38,8 +38,12 @@ credential in its isolated auth directory. `login.check` verifies one active
 credential, stable identity and an observed model catalogue. `login.complete`
 repeats required checks and atomically creates the account. An ambiguous,
 failed or cancelled attempt cannot be promoted. The blocking `accounts.login`
-wrapper runs this same flow. In v2, `mode` must be `browser` and `browser`
-must be `same_host`; the other login methods require the returned `owner_ref`
+wrapper runs this same flow. In v2, `browser` is `same_host` (default) or
+`mobile`, and `mode` is `browser` (default) or `hosted`; `hosted` needs
+`mobile` and a long-lived GrantBridge host, and returns `viewer_url` instead of
+`authorization_url`. Attempt projections echo `browser` and `mode`. See
+[mobile-login.md](mobile-login.md) for the phone flow and its owner binding.
+The other login methods require the returned `owner_ref`
 or an account reference to resolve ownership. A remote browser can pass its
 one-use Codex or Claude localhost redirect to `accounts.login.callback` for
 the same pending attempt. AgentBridge validates its expected state and passes

@@ -63,8 +63,13 @@ Provider is the upstream account type: `codex`, `claude` or `grok`. Normal
 onboarding lets AgentBridge manage one private CLIProxyAPI sidecar. Advanced
 external routes supply all of `proxy_base_url`, `key_env` and
 `management_key_env` to the **same** login flow. The last two are environment
-variable *names*, never secret values. The browser mode remains `same_host`;
-the explicit callback method relays a remote Codex or Claude redirect into
+variable *names*, never secret values. `browser` defaults to `same_host`; a
+phone sends `browser: "mobile"` with `mode: "browser"` (opens
+`authorization_url`, returns the loopback redirect through
+`accounts.login.callback` or GrantBridge's owner-bound callback route) or
+`mode: "hosted"` (opens `viewer_url` on the GrantBridge origin). Details and
+the fields Fullbrain must read are in [mobile-login.md](mobile-login.md). The
+explicit callback method relays a remote Codex or Claude redirect into
 that same pending login.
 
 ## Read the model and account controls

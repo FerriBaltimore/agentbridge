@@ -12,6 +12,8 @@ function safeError(error) {
   const code = error instanceof GrantBridgeError ? error.code : 'provider_error';
   const messages = {
     invalid_provider: 'The selected provider or login mode is not supported.',
+    invalid_browser: 'The selected browser location is not supported.',
+    hosted_browser_unavailable: 'A hosted browser needs a long-lived GrantBridge host.',
     invalid_params: 'Invalid authentication parameters.',
     invalid_proxy_endpoint: 'The proxy endpoint must be a canonical local HTTP /v1 URL.',
     proxy_unavailable: 'The local proxy did not respond.',

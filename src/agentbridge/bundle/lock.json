@@ -36,14 +36,14 @@
     "version": "0.153.0"
   },
   "grantbridge": {
-    "commit": "d60873c999b7ee5215eb8cfa7bb65326175ff2f6",
+    "commit": "ddaa3698ff2e51eb077d31b3836ae738e76ceb20",
     "files": {
       "LICENSE": "909350af40c822e47840abe9f36dea176c5c8d0feec0bb82a5c6d54cb34763f6",
-      "scripts/agentbridge-proxy-adapter.mjs": "a34c4fb5ff80558fdd6933947fea7eddd6401fdde624109af238530dcc233fc4",
+      "scripts/agentbridge-proxy-adapter.mjs": "312cd70c6a098bfb9b58e47ae2e78ad8e0367045559d56e3acd556a637b7dd61",
       "src/agentbridge-proxy-errors.mjs": "dfa63fb95c8b55bab9e328cc143ae8d99e19bca3cd4c92621a37fca52238534a",
-      "src/agentbridge-proxy.mjs": "160a3057b7e193142ce92f58ef508abd537ef864bc1c8fcdf1821496c018ca1e"
+      "src/agentbridge-proxy.mjs": "bd53b3fc98d2e991e486e2923fe741aa4424078c3a75996b17dbd2cbe7faf22f"
     },
-    "source_sha256": "e2eeeaaae72f60171e3365b3c70726adbb5e2fcddddac43ffe746fdce31365f0"
+    "source_sha256": "607a5541f8f08bf4abf021eea891c84e2f830711551ba2f6146209f211f1dfd1"
   },
   "node": {
     "assets": {

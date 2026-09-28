@@ -9,7 +9,7 @@ CLIProxyAPI execution and GrantBridge account-login flow:
 | --- | --- | --- |
 | CLIProxyAPI | 7.3.16 `no-plugin` release | Release archive and its MIT license |
 | Codex CLI | 0.153.0 | Official package archive, license and notice |
-| GrantBridge | Proxy-only adapter at `d60873c999b7ee5215eb8cfa7bb65326175ff2f6` | Reviewed source files and license |
+| GrantBridge | Proxy-only adapter at `ddaa3698ff2e51eb077d31b3836ae738e76ceb20` | Reviewed source files and license |
 | Node.js | 24.21.0 | Official Linux archive and license |
 
 The exact asset URLs and SHA-256 hashes are in

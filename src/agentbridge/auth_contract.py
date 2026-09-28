@@ -3,6 +3,8 @@
 Source: GrantBridge src/agentbridge-protocol.mjs and src/agentbridge-proxy.mjs.
 Additive fields are ignored. Unknown states or malformed evidence never verify a login.
 """
+from urllib.parse import urlsplit
+
 from .account_probe import safe_identity
 from .errors import BridgeError
 from .models import finite_number
@@ -10,6 +12,7 @@ from .models import finite_number
 REMOTE_STATES = frozenset(('starting', 'awaiting_user', 'exchanging', 'authorized',
                           'failed', 'cancelled', 'expired', 'interrupted', 'revoked', 'replaced'))
 ERROR_CODES = frozenset(('invalid_request', 'invalid_params', 'invalid_provider', 'invalid_browser',
+    'hosted_browser_unavailable', 'browser_busy', 'browser_closed',
     'provider_busy', 'not_found', 'already_finished', 'not_ready', 'method_not_found',
     'authentication_required', 'authentication_not_verified', 'credential_unavailable',
     'credential_expired', 'identity_changed', 'activation_unsupported', 'provider_error',
@@ -48,6 +51,19 @@ def text(value, maximum=512):
     return isinstance(value, str) and 0 < len(value) <= maximum and not any(ord(c) < 32 for c in value)
 
 
+def https_url(value, maximum=2048, loopback=False):
+    """A URL a phone may open: https, or plain http on the local host when allowed."""
+    if not text(value, maximum) or any(ord(c) <= 32 for c in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    local = loopback and parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1', 'localhost', '::1')
+    return bool(parsed.hostname) and not parsed.username and not parsed.password and (
+        parsed.scheme == 'https' or local)
+
+
 def projection(remote):
     """Closed nested projection; never persist opaque provider errors or future secrets."""
     if not isinstance(remote, dict):
@@ -60,6 +76,9 @@ def projection(remote):
     if 'authorizationUrl' in remote and (remote['authorizationUrl'] is None
                                          or text(remote['authorizationUrl'], 16384)):
         result['authorizationUrl'] = remote.get('authorizationUrl')
+    # The hosted-browser page lives on the GrantBridge origin; a phone opens it directly.
+    if https_url(remote.get('viewerUrl'), loopback=True):
+        result['viewerUrl'] = remote['viewerUrl']
     for key in ('createdAt', 'updatedAt', 'expiresAt'):
         value = remote.get(key)
         if finite_number(value) and value >= 0:

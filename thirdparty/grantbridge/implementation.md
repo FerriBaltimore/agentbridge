@@ -27,8 +27,11 @@
   unknown.
 - Exercise Codex tool requests, Stop, restart and account changes through the
   actual sidecar. A route stays fixed through one turn, including tool calls.
-- Design and accept a remote browser/callback route before claiming mobile
-  login. The initial local flow assumes browser and sidecar share a host.
+- The phone route is designed and fixture-tested
+  ([mobile-login.md](../../docs/interface/mobile-login.md)): the loopback
+  redirect returns through the broker origin or a hosted browser next to the
+  sidecar. Accept it with a live provider from a phone before claiming mobile
+  login.
 - Maintain one credential per dedicated sidecar. Add a proxy-level credential
   pin or an external exclusive configuration lock if a deployment can change
   sidecar contents during an active turn.

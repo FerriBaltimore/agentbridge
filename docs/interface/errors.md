@@ -34,7 +34,10 @@ Authentication orchestration also uses `authentication_attempt_not_found`,
 `authentication_outcome_unknown`, `activation_unsupported` and
 `login_timeout`. A browser OAuth start may return
 `oauth_callback_port_busy` or `oauth_callback_unavailable` before dispatch
-when the local callback listener cannot be opened. Proxy onboarding and
+when the local callback listener cannot be opened. A mobile start may return
+`hosted_browser_unavailable` or `invalid_browser` before dispatch, and a hosted
+login can end `failed` with `error.code` `browser_busy`, `browser_closed` or
+`hosted_browser_unavailable`. Proxy onboarding and
 routing additionally use
 `account_migration_required`, `proxy_binding_unverified`,
 `proxy_binding_changed`, `proxy_endpoint_shared`, `model_required`,

@@ -54,6 +54,13 @@ The management key is required for these checks even if a later route is
 pinned. CLIProxyAPI retains and renews the credential; GrantBridge does not
 hand an upstream token or native home to AgentBridge.
 
-The initial browser mode is `same_host`. A URL-only fixture or local
-Management API response is not live provider acceptance. Remote callbacks,
-credential refresh and authenticated model execution need separate evidence.
+The default browser location is `same_host`; its wire request is unchanged. A
+phone login adds `browser: "mobile"`, `mode` (`browser` or `hosted`) and `owner`
+to `auth.proxy_start`; GrantBridge echoes `browser` and `mode`, returns
+`viewerUrl` for `hosted`, and a host mounts the owner-bound one-use
+`/oauth/proxy/callback` route for the phone's loopback redirect. The bundled
+stdio adapter answers `hosted_browser_unavailable` for `hosted`. The fields are
+specified in [docs/interface/mobile-login.md](../../docs/interface/mobile-login.md).
+A URL-only fixture or local Management API response is not live provider
+acceptance. Remote callbacks, credential refresh and authenticated model
+execution need separate evidence.

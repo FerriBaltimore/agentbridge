@@ -23,6 +23,8 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - fullbrain-integration.md: host integration principles.
 - fullbrain-v2-migration.md: Fullbrain v1 to v2 migration gates and data changes.
 - fullbrain-v2-rpc.md: implemented JSON-RPC calls and response shapes for Fullbrain.
+- mobile-login.md: phone login through GrantBridge (`browser`, `mode`, `viewer_url`)
+  and the cross-repository JSON contract.
 - rationale.md: why each operation exists and how unsupported parameters behave.
 - ../development/bundled-runtime.md: installed Linux wheel contents and update behavior.
 

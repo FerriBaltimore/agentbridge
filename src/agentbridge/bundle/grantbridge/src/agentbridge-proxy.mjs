@@ -8,20 +8,52 @@ const MANAGEMENT_PATH = Object.freeze({
   claude: '/anthropic-auth-url',
   grok: '/xai-auth-url',
 });
+// The provider redirect URIs are fixed by CLIProxyAPI's registered OAuth clients.
+export const REDIRECT_DESTINATION = Object.freeze({
+  codex: Object.freeze(['1455', '/auth/callback']),
+  claude: Object.freeze(['54545', '/callback']),
+});
+const BROWSERS = new Set(['same_host', 'mobile']);
+const MODES = new Set(['browser', 'hosted']);
 const STATE_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
 const MAX_RESPONSE_BYTES = 16 * 1024;
 const MAX_AUTH_URL_LENGTH = 8192;
 
-function providerOf(value) {
+export function providerOf(value) {
   requireThat(typeof value === 'string' && Object.hasOwn(MANAGEMENT_PATH, value),
     'invalid_provider', 'The proxy provider is not supported.');
   return value;
 }
 
-function stateOf(value, code = 'invalid_params') {
+export function stateOf(value, code = 'invalid_params') {
   requireThat(typeof value === 'string' && STATE_PATTERN.test(value) && !value.includes('..'),
     code, 'Invalid OAuth state.');
   return value;
+}
+
+/** Where the person completes the login. A phone never receives the loopback redirect. */
+export function loginEntry(params, { hosted = false } = {}) {
+  const browser = params?.browser === undefined ? 'same_host' : params.browser;
+  const mode = params?.mode === undefined ? 'browser' : params.mode;
+  requireThat(typeof browser === 'string' && BROWSERS.has(browser), 'invalid_browser',
+    'The browser location is not supported.');
+  requireThat(typeof mode === 'string' && MODES.has(mode), 'invalid_params',
+    'The login mode is not supported.');
+  requireThat(mode !== 'hosted' || hosted, 'hosted_browser_unavailable',
+    'This GrantBridge process cannot run a hosted browser.');
+  return { browser, mode };
+}
+
+/** Canonical loopback redirect that CLIProxyAPI expects for one delivered code. */
+export function loopbackRedirect(provider, code, state) {
+  const destination = REDIRECT_DESTINATION[providerOf(provider)];
+  requireThat(destination, 'invalid_provider', 'Grok uses its device authorization code.');
+  requireThat(typeof code === 'string' && /^[\x21-\x7e]{1,4096}$/.test(code),
+    'invalid_params', 'Invalid OAuth callback code.');
+  const url = new URL(`http://localhost:${destination[0]}${destination[1]}`);
+  url.searchParams.set('code', code);
+  url.searchParams.set('state', stateOf(state));
+  return url.href;
 }
 
 function baseOf(value) {
@@ -113,14 +145,17 @@ function userCode(value) {
   return value;
 }
 
-export async function proxyStart(params) {
+export async function proxyStart(params, options = {}) {
   const provider = providerOf(params?.provider);
+  const entry = loginEntry(params, options);
   const key = keyOf(params?.management_key);
   const suffix = `${MANAGEMENT_PATH[provider]}?is_webui=true`;
   const data = await managementRequest(params, 'GET', suffix);
   requireThat(data.status === 'ok', 'proxy_rejected', 'The local proxy did not start authentication.');
   const id = stateOf(data.state, 'proxy_invalid_response');
   const result = { id, provider, status: 'awaiting_user', authorizationUrl: authorizationUrl(data.url) };
+  // Desktop results keep their exact shape; phones learn how the login is completed.
+  if (entry.browser !== 'same_host') Object.assign(result, entry);
   if (provider === 'grok' && data.user_code !== undefined) result.userCode = userCode(data.user_code);
   requireThat(![id, result.authorizationUrl, result.userCode].some(value => value?.includes(key)) &&
     !result.authorizationUrl.includes(encodeURIComponent(key)),
@@ -175,7 +210,7 @@ export async function proxyCallback(params) {
   const raw = params?.redirect_url;
   let redirect;
   try { redirect = new URL(raw); } catch { /* Return a safe validation code. */ }
-  const destination = provider === 'codex' ? ['1455', '/auth/callback'] : ['54545', '/callback'];
+  const destination = REDIRECT_DESTINATION[provider];
   const code = redirect?.searchParams.getAll('code') || [];
   const state = redirect?.searchParams.getAll('state') || [];
   requireThat(typeof raw === 'string' && raw.length <= 8192 &&

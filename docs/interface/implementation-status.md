@@ -10,7 +10,7 @@ historical evidence and read-only data, not a second usable workflow.
 | Surface | Implemented behavior | Evidence and limit |
 | --- | --- | --- |
 | Account login | `accounts.login.start/status/check/complete/cancel` and blocking `accounts login` use provider `codex`, `claude` or `grok` and name; optional advanced route references select an existing isolated proxy within the same flow | Deterministic Python→Node→fake Management API subprocess coverage; real OAuth pending |
-| Bundled runtime | Linux x86_64 and ARM64 wheels carry pinned CLIProxyAPI 7.3.16, Codex 0.153.0, GrantBridge proxy adapter commit `d60873c` and Node.js 24.21.0; source builds verify pinned downloads and runtime extraction verifies wheel assets | No separate binaries or binary environment variables are required for the installed wheel; build and local smoke checks do not establish live provider acceptance |
+| Bundled runtime | Linux x86_64 and ARM64 wheels carry pinned CLIProxyAPI 7.3.16, Codex 0.153.0, GrantBridge proxy adapter commit `ddaa369` and Node.js 24.21.0; source builds verify pinned downloads and runtime extraction verifies wheel assets | No separate binaries or binary environment variables are required for the installed wheel; build and local smoke checks do not establish live provider acceptance |
 | Managed sidecar | AgentBridge prepares one loopback CLIProxyAPI process and auth directory per account from the bundled executable by default | Linux `memfd` is required; existing sidecars keep their running binary until explicitly restarted; local lifecycle checks do not establish live provider acceptance |
 | Auth custody | GrantBridge coordinates the sidecar Management API browser flow; CLIProxyAPI owns upstream credential and refresh; the supervisor generates local keys and passes them to authorized local processes as needed | No credential values or raw provider errors in AgentBridge records; the client key reaches Codex but the management key does not; live refresh pending |
 | Login binding | New sidecar must be empty; complete requires one active upstream identity and observed models; account is created atomically | Identity and inventory fixture checks; local observation is not live entitlement |
@@ -40,9 +40,9 @@ as an execution engine or account onboarding route.
 
 ## Explicit limits
 
-- The browser OAuth route currently assumes browser and sidecar on the same
-  host. Remote browser/callback behavior needs separate implementation and
-  acceptance.
+- The phone login (`browser: "mobile"`, [mobile-login.md](mobile-login.md))
+  is fixture-tested only; the hosted mode needs a long-lived GrantBridge host,
+  and no live provider consent has been completed from a phone yet.
 - Live login, refresh, model entitlement, provider-specific tools, quota
   accuracy and cross-account continuation remain unverified for the v2 path.
 - Existing chats whose stored native identity differs from their latest

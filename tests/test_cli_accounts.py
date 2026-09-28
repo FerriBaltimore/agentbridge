@@ -185,9 +185,9 @@ def test_legacy_account_creation_and_engine_options_are_removed(capsys):
 
 
 @pytest.mark.parametrize('command', ('login', 'login-start'))
-@pytest.mark.parametrize('option,value', (('--mode', 'device'), ('--mode', 'hosted'),
-                                          ('--browser', 'mobile'), ('--browser', 'remote_desktop')))
-def test_proxy_login_rejects_nonlocal_authentication_modes(command, option, value, capsys):
+@pytest.mark.parametrize('option,value', (('--mode', 'device'), ('--mode', 'remote'),
+                                          ('--browser', 'remote_desktop'), ('--browser', 'mobile_vm')))
+def test_proxy_login_rejects_unknown_authentication_modes(command, option, value, capsys):
     parser, _ = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(['accounts', command, *login_options(), option, value])
