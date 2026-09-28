@@ -19,7 +19,9 @@ Reusable Python SDK, CLI and JSON-RPC stdio API for Codex execution through loca
 - Every repository text file must have at most 450 physical lines, including comments and blank lines. This includes tests, docs, fixtures, configuration and thirdparty notes. Split files by responsibility before crossing the limit. There is no legacy size allowlist.
 - Keep one responsibility per module. Do not compress statements, remove useful documentation or hide code in strings to meet the limit. The size gate is a ceiling, not proof of cohesion.
 - Read [development conventions](docs/development/conventions.md) before adding files or public API names. Use domain folders as features grow; avoid catch-all utils/helpers/common modules.
-- Python files, functions, arguments and variables use snake_case; classes use PascalCase; constants use UPPER_SNAKE_CASE. Markdown uses kebab-case except standard README.md, AGENTS.md, CLAUDE.md and CHANGELOG.md names.
+- Python files, functions, arguments and variables use snake_case; classes use PascalCase;
+  constants use UPPER_SNAKE_CASE. Markdown uses kebab-case except the standard README.md,
+  AGENTS.md, CLAUDE.md and CHANGELOG.md names.
 - Public API methods use plural_resource.verb, fields and stable codes use snake_case, CLI options use --kebab-case. Native provider keys stay inside adapters.
 - Run `python tools/check_repository.py` and `python -m pytest`. CI rejects violations. The repository's `.githooks/pre-commit` also checks exact staged contents, so an unstaged fix cannot hide an invalid commit.
 - The interface in [docs/interface/README.md](docs/interface/README.md) is the target contract. Implemented methods must have deterministic tests; provider-specific claims still require separate live acceptance evidence. Keep legacy compatibility names clearly distinguished from the target methods.
