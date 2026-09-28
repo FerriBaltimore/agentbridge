@@ -175,7 +175,10 @@ class PlaygroundHandler(BaseHTTPRequestHandler):
             return [_account(item, bridge) for item in bridge.accounts()]
         if parts == ['api', 'accounts', 'login', 'start'] and method == 'POST':
             values = _fields(body, ('provider', 'name'), ('email',))
-            attempt = bridge.account_login_start(**values)
+            # The playground records the entry it really uses: a fresh isolated profile when
+            # it owns a browser, otherwise the person's own browser.
+            attempt = bridge.account_login_start(
+                **values, browser='isolated' if self.server.auth_browser else 'same_host')
             opened = (self.server.auth_browser.launch(attempt)
                       if self.server.auth_browser is not None else False)
             return {**attempt, 'browser_opened': opened}
@@ -338,7 +341,7 @@ def main(argv=None):
     options = parser.parse_args(argv)
     if not 0 <= options.port <= 65535:
         parser.error('--port must be between 0 and 65535')
-    from .auth_browser import IsolatedAuthBrowser
+    from agentbridge.auth_browser import IsolatedAuthBrowser
 
     bridge = Bridge(options.root)
     auth_browser = IsolatedAuthBrowser(bridge.store.root)

@@ -43,6 +43,9 @@ as an execution engine or account onboarding route.
 - The phone login (`browser: "mobile"`, [mobile-login.md](mobile-login.md))
   is fixture-tested only; the hosted mode needs a long-lived GrantBridge host,
   and no live provider consent has been completed from a phone yet.
+- The clean desktop entry (`browser: "isolated"`) is recorded by the service
+  and launched by the host process through `agentbridge.auth_browser`; the
+  launcher is fixture-tested with a fake Chromium, not with live consent.
 - Live login, refresh, model entitlement, provider-specific tools, quota
   accuracy and cross-account continuation remain unverified for the v2 path.
 - Existing chats whose stored native identity differs from their latest

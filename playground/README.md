@@ -39,7 +39,10 @@ default. AgentBridge does not silently import or discard the old accounts.
 ## What to inspect
 
 - Add a provider account through the GrantBridge browser flow, then inspect
-  status, exact observed models and usage. Missing usage stays unknown.
+  status, exact observed models and usage. Missing usage stays unknown. When a
+  Chromium and a display exist, the server records `browser: "isolated"` and
+  opens the consent page in a fresh disposable profile
+  (`agentbridge.auth_browser`), so no signed-in session is reused.
 - In a new Chat conversation, choose a provider, routing mode, optional
   observed account and model. Automatic routing starts with the least-used
   eligible account unless one is selected, then keeps that account until

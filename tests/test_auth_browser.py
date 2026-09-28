@@ -1,4 +1,4 @@
-"""Local OAuth browser launching never reuses a signed-in profile."""
+"""Isolated OAuth browser launching never reuses a signed-in profile."""
 
 import os
 from pathlib import Path
@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from playground import auth_browser
+from agentbridge import auth_browser
 
 
 URLS = {
@@ -63,6 +63,7 @@ def _attempt(provider='claude', *, attempt_id='fixture-attempt', url=None,
 def local_profiles(tmp_path, monkeypatch):
     # Force the non-tmpfs branch so each test can inspect its own private root.
     monkeypatch.setattr(auth_browser, 'SHARED_MEMORY_ROOT', tmp_path / 'unavailable')
+    monkeypatch.setenv('DISPLAY', ':7')
     return tmp_path / 'profiles'
 
 
@@ -140,6 +141,7 @@ def test_unsafe_or_mismatched_attempt_does_not_spawn(local_profiles, attempt):
 def test_absent_browser_and_failed_spawn_keep_no_profile(local_profiles, monkeypatch):
     monkeypatch.setattr(auth_browser.shutil, 'which', lambda name: None)
     browser = auth_browser.IsolatedAuthBrowser(local_profiles)
+    assert browser.available() is False
     assert browser.launch(_attempt()) is False
     assert not local_profiles.exists()
 
@@ -150,6 +152,20 @@ def test_absent_browser_and_failed_spawn_keep_no_profile(local_profiles, monkeyp
                                                 browser='/fixture/chromium', popen=fail_spawn)
     assert browser.launch(_attempt()) is False
     assert list(local_profiles.iterdir()) == []
+
+
+def test_headless_host_reports_unavailable_and_never_spawns(local_profiles, monkeypatch):
+    """A sandboxed or headless host (no DISPLAY) must not start a browser that dies unseen."""
+    for name in auth_browser.DISPLAY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    popen = FakePopen()
+    browser = auth_browser.IsolatedAuthBrowser(local_profiles,
+                                                browser='/fixture/chromium', popen=popen)
+    assert browser.available() is False
+    assert browser.launch(_attempt()) is False
+    assert popen.calls == [] and not local_profiles.exists()
+    monkeypatch.setenv('WAYLAND_DISPLAY', 'wayland-0')
+    assert browser.available() is True
 
 
 def test_profile_removed_when_browser_exits_and_close_stops_every_session(

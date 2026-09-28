@@ -38,7 +38,8 @@ credential in its isolated auth directory. `login.check` verifies one active
 credential, stable identity and an observed model catalogue. `login.complete`
 repeats required checks and atomically creates the account. An ambiguous,
 failed or cancelled attempt cannot be promoted. The blocking `accounts.login`
-wrapper runs this same flow. In v2, `browser` is `same_host` (default) or
+wrapper runs this same flow. In v2, `browser` is `same_host` (default),
+`isolated` (the host opens a fresh disposable profile; same wire request) or
 `mobile`, and `mode` is `browser` (default) or `hosted`; `hosted` needs
 `mobile` and a long-lived GrantBridge host, and returns `viewer_url` instead of
 `authorization_url`. Attempt projections echo `browser` and `mode`. See

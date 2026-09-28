@@ -39,7 +39,7 @@ def proxy_payload(*, include_parameters=True):
             item['limitations'] = ['one_use_remote_browser_redirect',
                                    'codex_and_claude_only', 'live_oauth_acceptance_pending']
         elif operation.startswith('accounts.login'):
-            item['limitations'] = ['same_host_or_mobile_browser',
+            item['limitations'] = ['same_host_isolated_or_mobile_browser',
                                    'hosted_browser_requires_grantbridge_host',
                                    'live_oauth_acceptance_pending']
         elif operation == 'accounts.delete':

@@ -1,4 +1,11 @@
-"""Open same-host OAuth in a short-lived, isolated Chromium profile."""
+"""Open a `browser='isolated'` OAuth login in a short-lived, disposable Chromium profile.
+
+The host process that owns the desktop launches it (the playground, a CLI or Fullbrain's
+API); `AuthenticationService` records the entry and never opens a browser itself. Each
+attempt gets a fresh `--user-data-dir` with no cookies or provider session, deleted when
+the browser exits or the attempt settles. This module imports only the standard library
+so a host may load it straight from the reviewed artifact.
+"""
 
 import os
 from pathlib import Path
@@ -31,6 +38,12 @@ DESKTOP_ENVIRONMENT = frozenset({
     'XDG_SESSION_TYPE', 'XDG_CURRENT_DESKTOP', 'DBUS_SESSION_BUS_ADDRESS',
     'GDK_BACKEND', 'FONTCONFIG_PATH', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
 })
+DISPLAY_VARIABLES = ('DISPLAY', 'WAYLAND_DISPLAY')
+
+
+def display_available():
+    """A desktop the person can see; without one Chromium exits at once."""
+    return any(os.environ.get(name) for name in DISPLAY_VARIABLES)
 
 
 def _authorization(attempt):
@@ -144,6 +157,11 @@ class IsolatedAuthBrowser:
         self._lock = threading.Lock()
         self._closed = False
 
+    def available(self):
+        """Whether this host can show an isolated browser: a Chromium and a display."""
+        return (not self._closed and display_available()
+                and _browser_command(self.browser) is not None)
+
     def launch(self, attempt):
         """Open one fresh profile per pending attempt; never relaunch a replay."""
         authorization = _authorization(attempt)
@@ -157,7 +175,7 @@ class IsolatedAuthBrowser:
                 session = self._sessions.get(attempt_id)
                 return session is not None and session.process.poll() is None
             command = _browser_command(self.browser)
-            if command is None:
+            if command is None or not display_available():
                 return False
             parent = _profile_parent(self.root)
             profile = None

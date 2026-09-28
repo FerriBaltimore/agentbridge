@@ -292,7 +292,8 @@ def test_login_and_removal_only_call_public_sdk(local_server):
     removed = request(server, 'DELETE', '/api/accounts/Personal')[1]['result']
     assert removed == {'account_ref': 'Personal', 'removed': True,
                        'upstream_credential_removed': False}
-    assert ('account_login_start', (), start) in bridge.calls
+    # Without an owned browser the playground records the person's own browser entry.
+    assert ('account_login_start', (), {**start, 'browser': 'same_host'}) in bridge.calls
     assert ('account_delete', ('Personal',), {}) in bridge.calls
 
 
@@ -317,7 +318,7 @@ def test_login_start_opens_isolated_browser_once_and_forwards_email(browser_serv
     assert auth_browser.launched == [{
         'attempt_id': 'login-1', 'owner_ref': 'owner-1', 'status': 'awaiting_user',
         'authorization_url': 'https://auth.example.test/authorize'}]
-    assert ('account_login_start', (), values) in bridge.calls
+    assert ('account_login_start', (), {**values, 'browser': 'isolated'}) in bridge.calls
     status_result = request(server, 'GET', '/api/accounts/login/login-1?owner_ref=owner-1')
     assert status_result[0] == 200
     assert status_result[1]['result']['browser_opened'] is False

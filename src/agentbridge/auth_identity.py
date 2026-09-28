@@ -37,7 +37,11 @@ def verify_observation(store, accounts, row, observed):
 
 
 def verify_or_fail_new_email(store, accounts, managed_proxy, row, observed):
-    """A new account authenticated as a different email fails terminally and releases its proxy."""
+    """A new account authenticated as a different email fails terminally and releases its proxy.
+
+    The failed attempt keeps the observed identity email so the host can tell the person
+    which account the provider actually returned; the credential itself is retired.
+    """
     try:
         verify_observation(store, accounts, row, observed)
     except BridgeError as error:
@@ -49,6 +53,7 @@ def verify_or_fail_new_email(store, accounts, managed_proxy, row, observed):
             saved = store.update_auth_attempt(
                 row['id'], row['owner'], status='failed',
                 data={**row['data'], 'verification': {'proxyBinding': 'failed'},
+                      'identity': {'email': actual},
                       'error': {'code': 'identity_changed'}})
             retire_terminal_proxy(saved, store, accounts, managed_proxy)
         raise

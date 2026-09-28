@@ -54,7 +54,8 @@ The management key is required for these checks even if a later route is
 pinned. CLIProxyAPI retains and renews the credential; GrantBridge does not
 hand an upstream token or native home to AgentBridge.
 
-The default browser location is `same_host`; its wire request is unchanged. A
+The default browser location is `same_host`; its wire request is unchanged and
+AgentBridge's `isolated` entry (a fresh profile the host opens) shares it. A
 phone login adds `browser: "mobile"`, `mode` (`browser` or `hosted`) and `owner`
 to `auth.proxy_start`; GrantBridge echoes `browser` and `mode`, returns
 `viewerUrl` for `hosted`, and a host mounts the owner-bound one-use

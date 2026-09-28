@@ -100,8 +100,8 @@ def build_parser():
     login.add_argument('--grantbridge-data-dir', help='GrantBridge adapter data directory; OAuth credentials remain in the local proxy')
     login.add_argument('--mode', choices=('browser', 'hosted'), default='browser',
                        help='browser opens the provider URL; hosted drives a GrantBridge browser (mobile only)')
-    login.add_argument('--browser', choices=('same_host', 'mobile'), default='same_host',
-                       help='same_host completes on this machine; mobile returns through GrantBridge')
+    login.add_argument('--browser', choices=('same_host', 'isolated', 'mobile'), default='same_host',
+                       help='same_host completes on this machine; isolated opens a fresh disposable profile here; mobile returns through GrantBridge')
     login.add_argument('--timeout', type=float, default=600, help='Maximum login wait in seconds')
     login.add_argument('--poll-interval', type=float, default=1.0, help='Status polling interval in seconds')
     login.add_argument('--json', action='store_true')
@@ -112,8 +112,8 @@ def build_parser():
     start.add_argument('--grantbridge-data-dir')
     start.add_argument('--mode', choices=('browser', 'hosted'), default='browser',
                        help='browser opens the provider URL; hosted drives a GrantBridge browser (mobile only)')
-    start.add_argument('--browser', choices=('same_host', 'mobile'), default='same_host',
-                       help='same_host completes on this machine; mobile returns through GrantBridge')
+    start.add_argument('--browser', choices=('same_host', 'isolated', 'mobile'), default='same_host',
+                       help='same_host completes on this machine; isolated opens a fresh disposable profile here; mobile returns through GrantBridge')
     start.add_argument('--request-key')
     start.add_argument('--owner-ref')
     start.add_argument('--json', action='store_true')

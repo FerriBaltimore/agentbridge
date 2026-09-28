@@ -103,9 +103,10 @@ Replacing the wheel does not replace an already-running account sidecar;
 drain its active work and explicitly restart it before asserting the new
 CLIProxyAPI version is in service.
 
-The implemented login flow supports `browser="same_host"` (desktop) and
-`browser="mobile"` with `mode="browser"` or `mode="hosted"`
-([mobile-login.md](mobile-login.md)). The phone journey has deterministic
+The implemented login flow supports `browser="same_host"` (desktop),
+`browser="isolated"` (desktop, a fresh disposable profile the host launches with
+`agentbridge.auth_browser`) and `browser="mobile"` with `mode="browser"` or
+`mode="hosted"` ([mobile-login.md](mobile-login.md)). The phone journey has deterministic
 fixture coverage in both repositories; live provider acceptance from a phone is
 still pending, so keep remote account creation gated until that evidence
 exists. A displayed authorization URL by itself does not verify or create an
