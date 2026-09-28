@@ -150,7 +150,10 @@ Fullbrain's v1-to-v2 work is mapped in the
 The [bundled runtime guide](docs/development/bundled-runtime.md) describes
 platform wheels, pinned sources, offline execution and upgrade behavior.
 The [CLIProxyAPI update guide](docs/development/cli-proxy-api-update.md)
-describes the reviewed updater.
+describes the reviewed updater. Releases follow [docs/release.md](docs/release.md);
+the numbers a consumer checks and the AgentBridge × GrantBridge × Fullbrain v2
+matrix are in [docs/compatibility.md](docs/compatibility.md), with the exact
+Fullbrain v2 surface in [docs/interface/fullbrain-v2.md](docs/interface/fullbrain-v2.md).
 For a JSON-RPC caller:
 
 ```bash
