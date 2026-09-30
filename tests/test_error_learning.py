@@ -86,7 +86,9 @@ def test_unknown_secret_native_code_and_body_never_reach_learning_store(learning
     case = learning.capture('claude', value)
     learning.propose(case['id'], {'status': 'insufficient_evidence', 'target_code': None})
     with learning.store.connect() as db:
-        text = '\n'.join(db.iterdump())
+        text = '\n'.join(str(tuple(row)) for table in
+                         ('error_cases', 'error_proposals', 'error_rules', 'error_learning_audit')
+                         for row in db.execute('SELECT * FROM ' + table))
     assert 'secret' not in text
     assert 'unknown-secret-provider-code' not in json.dumps(case)
 

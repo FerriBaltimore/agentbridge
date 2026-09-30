@@ -24,7 +24,8 @@ def safe_error(code):
               'native_version_unverified': 'runtime_incompatible'}.get(code, code)
     if mapped not in {'checkpoint_busy', 'checkpoint_incomplete', 'checkpoint_corrupt',
                       'runtime_incompatible', 'scope_mismatch', 'unsupported_version',
-                      'dependency_missing', 'cursor_generation_mismatch', 'cursor_rollback'}:
+                      'dependency_missing', 'cursor_generation_mismatch', 'cursor_rollback',
+                      'checkpoint_sql_backup_required'}:
         mapped = 'checkpoint_incomplete'
     return {'code': mapped, 'retryable': mapped in {'checkpoint_busy', 'checkpoint_incomplete'}}
 

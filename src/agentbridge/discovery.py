@@ -45,6 +45,10 @@ class DiscoveryMixin:
             result['operations']['checkpoints.' + name] = {
                 'support': durability['support'], 'maturity': durability['maturity'],
                 'limitations': list(durability['limitations'])}
+        durability['store_backend'] = self.store.storage.name
+        if self.store.storage.name == 'postgresql':
+            result['operations']['checkpoints.snapshot_store'].update(
+                support='unsupported', limitations=['checkpoint_sql_backup_required'])
         return result
 
     def models(self, engine=None, *, account_ref=None, provider=None, refresh=False, include_hidden=False,

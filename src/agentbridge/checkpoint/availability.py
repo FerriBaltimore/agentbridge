@@ -18,6 +18,10 @@ def inspect(root):
     info = root.stat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise BridgeError('native_identity_unknown', 'The Store location cannot be verified.')
+    from ..storage.inspection import inspect_postgres
+
+    if selected := inspect_postgres(root):
+        return selected
     database = root / 'bridge.sqlite3'
     if not database.exists():
         if any(root.iterdir()):

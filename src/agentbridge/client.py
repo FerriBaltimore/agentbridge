@@ -39,10 +39,10 @@ from .proxy.credential_snapshots import CredentialSnapshots
 
 class Bridge(InstanceRoutingMixin, QueueMixin, EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
-    def __init__(self, root=None, *, owner_ref=None, durable=None):
+    def __init__(self, root=None, *, owner_ref=None, durable=None, backend=None, postgres=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
         self.store=Store(default_root() if root is None else root,
-                         owner_ref=owner_ref, durable=durable)
+                         owner_ref=owner_ref, durable=durable, backend=backend, postgres=postgres)
         self.checkpoints = Checkpoints(self.store)
         self.account_service=AccountService(self.store)
         self.managed_proxy=ManagedProxyClient(self.store.root)

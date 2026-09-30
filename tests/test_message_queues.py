@@ -223,7 +223,11 @@ def test_rpc_queue_controls_and_credentials_redaction(queued):
     listing = dispatch(bridge, 'queues.list', {'instance_id': instance})
     assert listing['items'][0]['content'] == '[redacted] and [redacted]'
     assert dispatch(bridge, 'messages.get', {'message_id': item['message_id']})['state'] == 'queued'
-    saved = bridge.store.path.read_bytes()
+    with bridge.store.connect() as connection:
+        saved = repr([tuple(row) for row in connection.execute(
+            'SELECT * FROM queued_messages')]).encode()
+    if bridge.store.path is not None:
+        saved += bridge.store.path.read_bytes()
     assert b'fixture-client-key' not in saved and b'fixture-management-key' not in saved
     moved = dispatch(bridge, 'queues.move', {'instance_id': instance,
         'message_id': item['message_id'], 'position': 0, 'expected_version': listing['version']})

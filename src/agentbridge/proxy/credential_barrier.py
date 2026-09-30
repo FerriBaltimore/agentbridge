@@ -1,10 +1,7 @@
 """Persistent account-scoped holds shared by admission, login and the proxy supervisor."""
 
-from contextlib import closing
 from hashlib import sha256
 import json
-from pathlib import Path
-import sqlite3
 
 from ..errors import BridgeError
 from ..models import identifier
@@ -46,11 +43,10 @@ def require_account(db, account_id, *, login=False):
 
 
 def supervisor_hold(root, account_id):
-    path = Path(root) / 'bridge.sqlite3'
-    if not path.exists():
-        return None
-    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
-        return hold(db, account_id)
+    from ..storage.inspection import connect_selected
+
+    with connect_selected(root) as db:
+        return hold(db, account_id) if db is not None else None
 
 
 def require_supervisor(root, account_id):

@@ -73,7 +73,8 @@ def test_failed_seal_blocks_mutations_but_not_other_instances_and_retry_is_stabl
     assert bridge.store.admit('other', 'independent', 'hello', RunOptions(), 'other')[1]
     bridge.store.finish('other', 'failed')
     assert terminal(bridge, 'other').data['durability']['reason'] == 'not_started'
-    assert b'synthetic-secret-must-not-be-persisted' not in bridge.store.path.read_bytes()
+    if bridge.store.path is not None:
+        assert b'synthetic-secret-must-not-be-persisted' not in bridge.store.path.read_bytes()
     monkeypatch.setattr(content, 'publish_descriptor', original)
     restarted = Bridge(bridge.root)
     descriptor = retry(restarted)

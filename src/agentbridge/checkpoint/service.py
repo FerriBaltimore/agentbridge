@@ -149,6 +149,11 @@ class Checkpoints:
     def register_content(self, reference, source):
         return content.register(self.store, reference, source)
 
+    def observe_store(self, *, format_version, params):
+        from ..storage.observation import observe
+
+        return observe(self.store, format_version=format_version, params=params)
+
     @checkpoint_operation
     def snapshot_store(self, *, format_version, operation_id, params):
         from .snapshot import snapshot_store

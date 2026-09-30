@@ -12,15 +12,19 @@ from agentbridge.store import dumps
 def test_diagnosis_rejects_before_account_lookup_or_receipt_creation(tmp_path):
     bridge = Bridge(tmp_path / 'store')
     with bridge.store.connect() as db:
-        before = {row[0] for row in db.execute('SELECT name FROM sqlite_master WHERE type="table"')}
+        before = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     with pytest.raises(BridgeError) as failure:
         bridge.error_diagnose('missing-case', account_ref='missing-account', model='fixture',
                               idempotency_key='never-submitted')
     assert failure.value.code == 'unsupported_operation'
     with bridge.store.connect() as db:
-        after = {row[0] for row in db.execute('SELECT name FROM sqlite_master WHERE type="table"')}
+        after = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert after == before
-    assert 'error_diagnoses' not in after
+    if bridge.store.storage.name == 'sqlite':
+        assert 'error_diagnoses' not in after
+    else:
+        with bridge.store.connect() as db:
+            assert db.execute('SELECT COUNT(*) FROM error_diagnoses').fetchone()[0] == 0
 
 
 def test_historical_completed_and_failed_receipts_remain_readable(tmp_path):

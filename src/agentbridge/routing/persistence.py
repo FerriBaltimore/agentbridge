@@ -3,6 +3,8 @@
 from dataclasses import asdict
 import json
 import sqlite3
+
+from ..storage.postgres import StoreIntegrityError
 import time
 
 from ..errors import BridgeError, BusyError
@@ -339,7 +341,7 @@ class RoutingStoreMixin:
                     VALUES (?,?,?,?,?,?,?,?,?,?)""",
                            (id, message_id, session_id, selected, "starting", prompt,
                             _dumps(asdict(options)), key, now, now))
-            except sqlite3.IntegrityError as error:
+            except (sqlite3.IntegrityError, StoreIntegrityError) as error:
                 raise BusyError() from error
             if excluded_account_refs:
                 db.execute('INSERT INTO run_route_exclusions(run_id,refs) VALUES (?,?)',

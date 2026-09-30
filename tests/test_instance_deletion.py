@@ -90,7 +90,9 @@ def test_delete_purges_conversation_and_preserves_minimal_receipt(tmp_path):
         request = db.execute('SELECT payload FROM instance_requests WHERE session_id=?',
                              ('conversation',)).fetchone()
         assert json.loads(request['payload']) == {'instance_deleted': True}
-    assert b'private prompt 57230' not in store.path.read_bytes()
+    # PostgreSQL deletion is logical; its MVCC/WAL retention is host-owned.
+    if store.path is not None:
+        assert b'private prompt 57230' not in store.path.read_bytes()
     with pytest.raises(BridgeError) as error:
         bridge.instance_get('conversation')
     assert error_code(error) == 'not_found'

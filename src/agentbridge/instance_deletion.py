@@ -1,5 +1,7 @@
 """Delete a durable conversation and its private local execution evidence."""
 
+from .storage.sqlite import prepare_deletion, finish_deletion
+
 import time
 import re
 import sqlite3
@@ -63,7 +65,7 @@ class InstanceDeletionStoreMixin:
         """Purge a conversation after its turn and owned processes have ended."""
         identifier(instance_id)
         with self.connect() as db:
-            db.execute('PRAGMA secure_delete=ON')
+            prepare_deletion(db)
             db.execute('BEGIN IMMEDIATE')
             require_admission(db, instance_id)
             marker = db.execute('SELECT status FROM deleted_instances WHERE session_id=?',
@@ -122,8 +124,8 @@ class InstanceDeletionStoreMixin:
         remove_session_home(self.root, instance_id, error_code='instance_cleanup_failed')
         remove_instance_archives(self.root, instance_id)
         with self.connect() as db:
-            checkpoint = db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
-        if checkpoint is None or checkpoint[0] != 0:
+            checkpoint = finish_deletion(db)
+        if not checkpoint:
             return {'instance_id': instance_id, 'deleted': False, 'pending': True}
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')

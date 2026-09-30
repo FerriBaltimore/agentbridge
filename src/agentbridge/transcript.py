@@ -36,7 +36,8 @@ def messages(bridge, instance_id, *, after=None, before=None, role=None, limit=1
                    0.5, COALESCE(q.turn_id,q.id), q.id, q.content, q.created, 'user',
                    NULL, q.options, q.state FROM queued_messages q
               WHERE q.session_id=? AND q.state NOT IN ('dispatched','cancelled')
-        ) SELECT * FROM transcript WHERE (? IS NULL OR role=?) AND (? IS NULL OR at>?)
+        ) SELECT * FROM transcript WHERE (CAST(? AS TEXT) IS NULL OR role=?)
+          AND (CAST(? AS DOUBLE PRECISION) IS NULL OR at>?)
           ORDER BY position,slot,at,message_id LIMIT ? OFFSET ?''',
                           (instance_id, instance_id, instance_id, role, role, after, after, limit, cursor)).fetchall()
     result = []

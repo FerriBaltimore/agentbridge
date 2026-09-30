@@ -100,7 +100,8 @@ Records predating v2 remain readable but cannot create accounts or start turns.
 Their evidence does not establish acceptance of the proxy path.
 
 AgentBridge records requests, normalized events, usage evidence and unknown
-outcomes in SQLite. Stop is explicit cancellation. Recovery never silently
+outcomes in SQLite by default, or in an explicitly selected
+[PostgreSQL Store](docs/development/postgres-store.md). Stop is explicit cancellation. Recovery never silently
 replays work or changes accounts. Credentials, raw provider errors and private
 reasoning are not persisted. The package is independent of Fullbrain.
 `bridge.instance_delete(instance_id)` removes an ordinary conversation's local

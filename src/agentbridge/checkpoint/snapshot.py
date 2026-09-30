@@ -68,6 +68,8 @@ def snapshot_store(store, *, format_version, operation_id, params):
             binding = state.identity(db)
             if not binding['enabled'] or any(params[key] != binding[key] for key in state.IDENTITY_KEYS):
                 native.fail('checkpoint_scope_mismatch')
+            if store.storage.name == 'postgresql':
+                native.fail('checkpoint_sql_backup_required')
             operation = db.execute('SELECT * FROM store_snapshot_operations WHERE operation_id=?',
                                    (operation_id,)).fetchone()
             if operation and operation['generation'] != binding['store_generation']:

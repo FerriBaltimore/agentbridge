@@ -19,10 +19,10 @@ def test_inspection_does_not_create_database_and_rejects_unknown_material(tmp_pa
         inspect(root)
     assert unknown.value.code == 'native_identity_unknown'
     private.unlink()
-    with Bridge(root, owner_ref='fixture-owner', durable=True):
-        pass
+    with Bridge(root, owner_ref='fixture-owner', durable=True) as bridge:
+        backend = bridge.store.storage.name
     assert inspect(root) == {'state': 'present'}
-    database = root / 'bridge.sqlite3'
+    database = root / ('store-backend.json' if backend == 'postgresql' else 'bridge.sqlite3')
     database.rename(root / 'saved')
     database.symlink_to(root / 'saved')
     with pytest.raises(BridgeError):

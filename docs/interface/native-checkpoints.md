@@ -10,7 +10,7 @@ identity = bridge.checkpoints.identity()
 ```
 
 The owner comes from trusted host configuration. An omitted owner uses a stable Store-derived
-reference. SQLite persists owner, Store UUID and generation UUID once. Reopening a durable
+reference. The selected Store persists owner, Store UUID and generation UUID once. Reopening a durable
 Store preserves this configuration; requests cannot rebind the owner or disable durability.
 Standalone legacy Stores declare `durability.support = disabled`. Their terminal events keep
 legacy behavior; the SDK does not claim `not_required` for unsupported durability.
@@ -62,6 +62,14 @@ which was never observed is not manufactured by the retry.
 
 `snapshot_store.params` contains exactly `owner_ref`, `store_id`, `store_generation`.
 SQLite online backup captures one coherent whole Store, including concurrent instances.
+This whole-Store file operation is SQLite-specific. PostgreSQL returns
+`checkpoint_sql_backup_required` and advertises the operation as unsupported. Its host-only
+`checkpoints.observe_store(format_version="1", params=scope)` reads identity, cursor and
+coverage coherently and returns a next-record-exclusive WAL position. The host must bind
+that observation to its verified physical SQL recovery chain; the observation is not a backup.
+Native checkpoint `create` and `restore` remain available on both Store backends. See the
+[PostgreSQL guide](../development/postgres-store.md) for selection and recovery boundaries.
+
 The descriptor reads its cursor and coverage from that copied database. Coverage includes
 only contained terminal/checkpoint associations in the required ordering. A running or
 pending instance is not falsely covered. Reusing an operation ID returns that same snapshot;

@@ -1,5 +1,7 @@
 """Atomic deletion and idempotent receipt for one disposable evaluation."""
 
+from ..storage.sqlite import prepare_deletion, finish_deletion
+
 import time
 
 from ..errors import BridgeError
@@ -29,7 +31,7 @@ class EvaluationStoreMixin:
         """Purge only marked evaluations after all owned processes have exited."""
         identifier(instance_id)
         with self.connect() as db:
-            db.execute('PRAGMA secure_delete=ON')
+            prepare_deletion(db)
             db.execute('BEGIN IMMEDIATE')
             require_admission(db, instance_id)
             marker = db.execute('SELECT * FROM evaluation_instances WHERE session_id=?',
@@ -71,8 +73,8 @@ class EvaluationStoreMixin:
         remove_session_home(self.root, instance_id, error_code='evaluation_cleanup_failed',
                             retry_action='discard')
         with self.connect() as db:
-            checkpoint = db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
-        if checkpoint is None or checkpoint[0] != 0:
+            checkpoint = finish_deletion(db)
+        if not checkpoint:
             return {'instance_id': instance_id, 'discarded': False, 'pending': True}
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')

@@ -1,10 +1,8 @@
-"""SQLite is the durable authority. A single writer transaction admits each run."""
-from contextlib import contextmanager
+"""Store is the durable authority; backend selection never follows ambient credentials."""
 from dataclasses import asdict
 import json
 import os
 from pathlib import Path
-import sqlite3
 import time
 
 from .errors import BridgeError, BusyError
@@ -12,19 +10,15 @@ from .models import Event, RunOptions
 from .auth_store import AuthStoreMixin
 from .routing.persistence import RoutingStoreMixin
 from .routing.binding import ProxyBindingStoreMixin
-from .routing.schema import migrate_v4, migrate_v5, migrate_v11
 from .routing.reconfiguration import (PROVIDER_UNSET, configure_route, validate_mode,
                                       validate_provider)
-from .evaluation.schema import migrate_v6
 from .evaluation.persistence import EvaluationStoreMixin
-from .account_retirement import AccountRetirementStoreMixin, migrate_v7
-from .account_pause import AccountPauseStoreMixin, migrate_v8
-from .instance_deletion import InstanceDeletionStoreMixin, migrate_v9
-from .queueing.schema import migrate_v10
-from .native_sessions import bind_native_session, migrate_v12
-from .execution_policy import migrate_v13, read_policy, write_policy
-from .checkpoint.state import migrate as migrate_v14, configure, require_admission
-from .checkpoint.upgrade import migrate as migrate_v15
+from .account_retirement import AccountRetirementStoreMixin
+from .account_pause import AccountPauseStoreMixin
+from .instance_deletion import InstanceDeletionStoreMixin
+from .native_sessions import bind_native_session
+from .execution_policy import read_policy, write_policy
+from .checkpoint.state import configure, require_admission
 
 
 def dumps(value):
@@ -33,151 +27,28 @@ def dumps(value):
 
 class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
             RoutingStoreMixin, AuthStoreMixin):
-    def __init__(self, root, *, owner_ref=None, durable=None):
+    def __init__(self, root, *, owner_ref=None, durable=None, backend=None, postgres=None):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.root, 0o700)
-        self.path = self.root / "bridge.sqlite3"
-        if self.path.is_symlink():
-            raise BridgeError("unsafe_store", "Database cannot be a symbolic link.")
+        from .storage.selection import select
+        from .storage.schema import initialize
+
+        self.storage = select(self.root, backend=backend, postgres=postgres)
+        self.path = self.storage.path
         with self.connect() as db:
-            db.executescript('''
-                PRAGMA journal_mode=WAL;
-                CREATE TABLE IF NOT EXISTS metadata(version INTEGER NOT NULL);
-                INSERT INTO metadata SELECT 3 WHERE NOT EXISTS(SELECT 1 FROM metadata);
-                CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, config TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS proxy_bindings(
-                    account_id TEXT PRIMARY KEY,
-                    binding_fingerprint TEXT NOT NULL,
-                    identity_fingerprint TEXT NOT NULL UNIQUE);
-                CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
-                    cwd TEXT NOT NULL, model TEXT, native_id TEXT, parent_id TEXT, context TEXT,
-                    created REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS instance_metadata(
-                    session_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'active',
-                    version INTEGER NOT NULL DEFAULT 1, updated REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    account_id TEXT NOT NULL, state TEXT NOT NULL, prompt TEXT NOT NULL,
-                    options TEXT NOT NULL, request_key TEXT UNIQUE, created REAL NOT NULL,
-                    updated REAL NOT NULL, worker_pid INTEGER, worker_identity TEXT,
-                    child_pid INTEGER, child_identity TEXT, stop_requested INTEGER DEFAULT 0,
-                    error TEXT, exit_code INTEGER);
-                CREATE UNIQUE INDEX IF NOT EXISTS active_session ON runs(session_id)
-                    WHERE state IN ('starting','running','stopping');
-                -- Conversations sharing one account may run concurrently; the former
-                -- per-account active-run index is dropped from existing stores.
-                DROP INDEX IF EXISTS active_account;
-                CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
-                    run_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL,
-                    at REAL NOT NULL, data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS run_route_exclusions(
-                    run_id TEXT PRIMARY KEY, refs TEXT NOT NULL);
-                CREATE INDEX IF NOT EXISTS event_run ON events(run_id,seq);
-                CREATE INDEX IF NOT EXISTS event_session ON events(session_id,seq);
-                CREATE TABLE IF NOT EXISTS account_observations(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    account_id TEXT NOT NULL, observed_at REAL NOT NULL,
-                    source TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
-                CREATE INDEX IF NOT EXISTS account_observation_latest
-                    ON account_observations(account_id, observed_at DESC, id DESC);
-                CREATE TABLE IF NOT EXISTS usage_observations(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    account_id TEXT NOT NULL, observed_at REAL NOT NULL,
-                    source TEXT NOT NULL, scope TEXT NOT NULL,
-                    stale INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
-                CREATE INDEX IF NOT EXISTS usage_observation_latest
-                    ON usage_observations(account_id, scope, observed_at DESC, id DESC);
-                CREATE TABLE IF NOT EXISTS instance_requests(
-                    request_key TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE,
-                    payload TEXT NOT NULL, created REAL NOT NULL);
-                CREATE TABLE IF NOT EXISTS auth_attempts(
-                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, account_id TEXT NOT NULL,
-                    engine TEXT NOT NULL, name TEXT NOT NULL, email TEXT,
-                    mode TEXT NOT NULL, browser TEXT NOT NULL, request_key TEXT,
-                    grantbridge_id TEXT, status TEXT NOT NULL, data TEXT NOT NULL,
-                    created REAL NOT NULL, updated REAL NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS auth_owner_request
-                    ON auth_attempts(owner, request_key)
-                    WHERE request_key IS NOT NULL;
-                CREATE TABLE IF NOT EXISTS auth_proxy_routes(
-                    attempt_id TEXT PRIMARY KEY, config TEXT NOT NULL,
-                    connection TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS retired_accounts(
-                    account_id TEXT PRIMARY KEY, retired_at REAL NOT NULL);
-            ''')
-            version = db.execute('SELECT version FROM metadata').fetchone()[0]
-            if version == 1:
-                db.executescript('''
-                    CREATE TABLE IF NOT EXISTS account_observations(
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        account_id TEXT NOT NULL, observed_at REAL NOT NULL,
-                        source TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
-                    CREATE INDEX IF NOT EXISTS account_observation_latest
-                        ON account_observations(account_id, observed_at DESC, id DESC);
-                    CREATE TABLE IF NOT EXISTS usage_observations(
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        account_id TEXT NOT NULL, observed_at REAL NOT NULL,
-                        source TEXT NOT NULL, scope TEXT NOT NULL,
-                        stale INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
-                    CREATE INDEX IF NOT EXISTS usage_observation_latest
-                        ON usage_observations(account_id, scope, observed_at DESC, id DESC);
-                    UPDATE metadata SET version=2;
-                ''')
-                version = 2
-            if version < 3:
-                columns = {row['name'] for row in db.execute('PRAGMA table_info(runs)')}
-                if 'message_id' not in columns:
-                    db.execute('ALTER TABLE runs ADD COLUMN message_id TEXT')
-                    db.execute('UPDATE runs SET message_id=id WHERE message_id IS NULL')
-                db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
-                db.executescript('''
-                    CREATE TABLE IF NOT EXISTS instance_requests(
-                        request_key TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE,
-                        payload TEXT NOT NULL, created REAL NOT NULL);
-                    CREATE TABLE IF NOT EXISTS auth_attempts(
-                        id TEXT PRIMARY KEY, owner TEXT NOT NULL, account_id TEXT NOT NULL,
-                        engine TEXT NOT NULL, name TEXT NOT NULL, email TEXT,
-                        mode TEXT NOT NULL, browser TEXT NOT NULL, request_key TEXT,
-                        grantbridge_id TEXT, status TEXT NOT NULL, data TEXT NOT NULL,
-                        created REAL NOT NULL, updated REAL NOT NULL);
-                    CREATE UNIQUE INDEX IF NOT EXISTS auth_owner_request
-                        ON auth_attempts(owner, request_key)
-                        WHERE request_key IS NOT NULL;
-                    UPDATE metadata SET version=3;
-                ''')
-                version = 3
-            version = migrate_v4(db, version)
-            version = migrate_v5(db, version)
-            version = migrate_v6(db, version)
-            version = migrate_v7(db, version)
-            version = migrate_v8(db, version)
-            version = migrate_v9(db, version)
-            version = migrate_v10(db, version)
-            version = migrate_v11(db, version)
-            version = migrate_v12(db, version)
-            version = migrate_v13(db, version)
-            version = migrate_v14(db, version)
-            version = migrate_v15(db, version)
-            if version != 15:
-                raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
-            db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
-        os.chmod(self.path, 0o600)
+            initialize(db)
+        if self.path is not None:
+            os.chmod(self.path, 0o600)
+        if self.storage.name == 'postgresql':
+            from .storage.schema import initialize_optional
+
+            initialize_optional(self)
         configure(self, owner_ref=owner_ref, durable=durable)
         self.recover_deleting_instances()
 
-    @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=10)
-        db.row_factory = sqlite3.Row
-        try:
-            yield db
-            db.commit()
-        except BaseException:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        return self.storage.connect()
 
     def get(self, table, id):
         if table not in ('runs','sessions','accounts'):

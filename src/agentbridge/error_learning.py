@@ -83,7 +83,7 @@ class Learning:
             db.execute('BEGIN IMMEDIATE')
             db.execute('''INSERT INTO error_cases VALUES (?,?,?,?,?,1,?,?,?,?)
                 ON CONFLICT(engine,provider_version,fingerprint) DO UPDATE SET
-                count=count+1,last_seen=excluded.last_seen,last_turn_id=excluded.last_turn_id''',
+                count=error_cases.count+1,last_seen=excluded.last_seen,last_turn_id=excluded.last_turn_id''',
                 (id, engine, provider_version or '', value['fingerprint'], dumps(value),
                  now, now, turn_id, turn_id))
             row = db.execute('''SELECT * FROM error_cases

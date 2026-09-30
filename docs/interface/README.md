@@ -11,6 +11,7 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - operations.md: method names, parameters and return values.
 - capabilities.md: v2 proxy behavior, support and acceptance maturity.
 - events.md: event envelope and stream semantics.
+- ../development/postgres-store.md: optional SQL backend, selection and physical recovery boundary.
 - native-checkpoints.md: explicit durable mode, local native seals, full cursors and held recovery.
 - credential-snapshots.md: private credential capture, held recovery and authorized reconnection.
 - interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
