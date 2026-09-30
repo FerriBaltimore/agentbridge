@@ -16,6 +16,8 @@ from .errors import BridgeError
 from .grantbridge import GrantBridgeClient
 from .models import account_name_key, identifier
 from .proxy import ManagementClient, ProxyRoute
+from .proxy.credential_barrier import require_account
+from .proxy.credential_reconnection import ensure_login_proxy
 
 
 TERMINAL = {'failed', 'cancelled', 'expired', 'interrupted', 'abandoned', 'revoked', 'replaced'}
@@ -75,6 +77,8 @@ class AuthenticationService:
                               'Multiple accounts with this name already exist for the provider.')
         existing = matching[0] if matching else None
         account_id = existing.id if existing else uuid4().hex
+        with self.store.connect() as db:
+            require_account(db, account_id, login=True)
         supplied = (proxy_base_url, key_env, management_key_env)
         managed_created = not existing and not any(value is not None for value in supplied)
         if any(value is not None for value in supplied) and not all(value is not None for value in supplied):
@@ -95,7 +99,8 @@ class AuthenticationService:
                 if not self.managed_proxy.is_managed(existing.to_dict(), account_id):
                     raise BridgeError('account_migration_required',
                                       'This account uses an externally configured proxy route.')
-                config = self.managed_proxy.ensure(account_id, existing.proxy_base_url)
+                config = ensure_login_proxy(self.store, self.managed_proxy,
+                                            account_id, existing.proxy_base_url)
             else:
                 config = self.managed_proxy.provision(account_id)
             proxy_base_url = config['proxy_base_url']
@@ -376,10 +381,13 @@ class AuthenticationService:
         return self.complete(attempt['attempt_id'], owner_ref=attempt['owner_ref'])
 
     def _route(self, row):
+        with self.store.connect() as db:
+            require_account(db, row['account_id'], login=True)
         saved = self.store.auth_proxy_route(row['id'])
         route = saved['config']
         if self.managed_proxy and self.managed_proxy.is_managed(route, row['account_id']):
-            self.managed_proxy.ensure(row['account_id'], route['proxy_base_url'])
+            ensure_login_proxy(self.store, self.managed_proxy,
+                               row['account_id'], route['proxy_base_url'])
         return saved['config'], saved['connection']
 
     @staticmethod

@@ -27,6 +27,7 @@ from .route import ProxyRoute
 from .stop_marker import (clear_stop_marker, read_stop_marker, sync_directory,
                           write_stop_marker)
 from .supervisor_auth import authorized, create_auth, same_user_pid
+from .credential_barrier import require_supervisor, supervisor_hold
 
 
 MAX_REQUEST = 4096
@@ -273,7 +274,21 @@ class Supervisor:
                 return {"stopped": True}
             account_dir = _account_dir(self.directory, account_id)
             record = _read_record(account_dir)
+            if action == 'snapshot_stop':
+                if not supervisor_hold(self.directory.parent, account_id):
+                    raise BridgeError('credential_snapshot_pending',
+                                      'Credential capture must first fence the account.')
+                active = self.running.get(account_id)
+                if active:
+                    _stop_record(active['record'], account_dir)
+                    if active['process'] is not None:
+                        active['process'].poll()
+                elif record:
+                    _stop_record(record, account_dir)
+                self.running.pop(account_id, None)
+                return {'stopped': True, 'account_id': account_id}
             if action == "retire":
+                require_supervisor(self.directory.parent, account_id)
                 active = self.running.get(account_id)
                 if active is None and record is None:
                     if not read_stop_marker(account_dir, account_id):
@@ -292,8 +307,20 @@ class Supervisor:
                 (account_dir / "route.json").unlink(missing_ok=True)
                 sync_directory(account_dir)
                 return {"retired": True, "upstream_credential_removed": False}
-            if action not in {"provision", "ensure"}:
+            if action not in {"provision", "ensure", "recovery_probe", "reconnect"}:
                 raise BridgeError("invalid_request", "Unknown managed proxy operation.")
+            if action == 'recovery_probe':
+                held = supervisor_hold(self.directory.parent, account_id)
+                if held is None or held[1] != 'restore':
+                    raise BridgeError('credential_snapshot_pending',
+                                      'Only held restored credentials can be probed by the host.')
+            elif action == 'reconnect':
+                held = supervisor_hold(self.directory.parent, account_id)
+                if held is None or held[1] not in {'reconnect_preparing', 'reconnect'}:
+                    raise BridgeError('credential_snapshot_pending',
+                                      'Only host-authorized reconnection can provision a login route.')
+            else:
+                require_supervisor(self.directory.parent, account_id)
             if action == "ensure" and record is None:
                 raise BridgeError("managed_proxy_not_found", "The saved managed proxy route is unavailable.")
             if record:

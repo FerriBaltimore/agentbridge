@@ -32,7 +32,10 @@ def managed(tmp_path, monkeypatch):
         #!/usr/bin/env python3
         from http.server import BaseHTTPRequestHandler, HTTPServer
         import json
+        from pathlib import Path
         import sys
+        from urllib.parse import parse_qs, urlsplit
+        from uuid import uuid4
 
         with open(sys.argv[sys.argv.index('-config') + 1]) as stream:
             config = json.load(stream)
@@ -42,6 +45,7 @@ def managed(tmp_path, monkeypatch):
             'codex-api-key', 'xai-api-key', 'meta-api-key', 'vertex-api-key',
             'openai-compatibility')}
         inventory['plugins'] = {'enabled': False}
+        sessions = {}
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -51,11 +55,49 @@ def managed(tmp_path, monkeypatch):
                 if self.path == '/v0/management/config':
                     value = inventory
                 elif self.path == '/v0/management/auth-files':
-                    value = {'files': []}
+                    fixture = Path(config['auth-dir']) / 'fixture-observation.json'
+                    value = {'files': [json.loads(fixture.read_text())] if fixture.exists() else []}
+                elif self.path == '/v0/management/auth-files/models?name=fixture.json':
+                    value = {'models': [{'id': 'gpt-5'}]}
+                elif self.path.startswith('/v0/management/codex-auth-url'):
+                    state = str(uuid4())
+                    sessions[state] = 'wait'
+                    value = {'status': 'ok', 'state': state,
+                             'url': 'https://fixture.invalid/authorize?state=' + state}
+                elif self.path.startswith('/v0/management/get-auth-status'):
+                    query = parse_qs(urlsplit(self.path).query)
+                    value = {'status': sessions.get(query.get('state', [''])[0], 'error')}
                 else:
                     self.send_error(404)
                     return
                 body = json.dumps(value).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                if (self.headers.get('Authorization') != 'Bearer ' + key
+                        or self.path != '/v0/management/oauth-callback'):
+                    self.send_error(403)
+                    return
+                callback = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                query = parse_qs(urlsplit(callback['redirect_url']).query)
+                state, code = query['state'][0], query['code'][0]
+                if sessions.get(state) != 'wait' or code not in {'fixture-good', 'fixture-wrong'}:
+                    self.send_error(400)
+                    return
+                account = Path(config['auth-dir']).parent.name
+                identity = 'identity-' + (account if code == 'fixture-good' else 'intruder')
+                fixture = Path(config['auth-dir']) / 'fixture-observation.json'
+                fixture.write_text(json.dumps({
+                    'name': 'fixture.json', 'auth_index': 'fixture-path', 'account_type': 'oauth',
+                    'provider': 'codex', 'status': 'active', 'disabled': False,
+                    'unavailable': False, 'source': 'file', 'runtime_only': False, 'cooldowns': [],
+                    'id_token': {'chatgpt_account_id': identity}}))
+                sessions[state] = 'ok'
+                body = b'{"status":"ok"}'
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))

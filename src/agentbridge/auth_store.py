@@ -4,6 +4,7 @@ import time
 
 from .errors import BridgeError, BusyError
 from .models import account_name_key
+from .proxy.credential_barrier import require_account
 
 
 def dumps(value):
@@ -39,6 +40,7 @@ class AuthStoreMixin:
                             proxy_route=None):
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_account(db, attempt['account_id'], login=True)
             if request_key:
                 old = db.execute('SELECT * FROM auth_attempts WHERE owner=? AND request_key=?',
                                  (attempt['owner'], request_key)).fetchone()

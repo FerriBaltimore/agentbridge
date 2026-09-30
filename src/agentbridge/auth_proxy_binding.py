@@ -7,6 +7,8 @@ import time
 from .auth_store import dumps
 from .errors import BridgeError, BusyError
 from .models import Account, account_name_key
+from .proxy.credential_barrier import require_account
+from .proxy.credential_reconnection import finish_reconnection
 
 
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
@@ -46,6 +48,10 @@ def bind_proxy_account(store, attempt, route_config, observation):
     )
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        require_account(db, account.id, login=True)
+        if db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
+                      (account.id,)).fetchone():
+            raise BridgeError('authentication_required', 'The account was removed during login.')
         current = db.execute('SELECT status,data FROM auth_attempts WHERE id=? AND owner=?',
                              (attempt['id'], attempt['owner'])).fetchone()
         if current is None or current['status'] != 'verified':
@@ -99,4 +105,5 @@ def bind_proxy_account(store, attempt, route_config, observation):
                    'VALUES (?,?,?,?,?)', (account.id, now, 'grantbridge_proxy', 'usable',
                    dumps({'identity': remote['identity'], 'state': 'usable',
                           'source': 'grantbridge_proxy_check'})))
+        finish_reconnection(db, account.id, attempt['id'])
     return account, store.get_auth_attempt(attempt['id'], attempt['owner'])

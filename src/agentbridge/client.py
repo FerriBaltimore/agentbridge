@@ -34,6 +34,7 @@ from .instance_deletion import InstanceDeletionMixin
 from .queueing.service import QueueMixin
 from .checkpoint.service import Checkpoints
 from .checkpoint.state import saved_intent
+from .proxy.credential_snapshots import CredentialSnapshots
 
 
 class Bridge(InstanceRoutingMixin, QueueMixin, EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
@@ -45,6 +46,7 @@ class Bridge(InstanceRoutingMixin, QueueMixin, EventStreamMixin, InstanceDeletio
         self.checkpoints = Checkpoints(self.store)
         self.account_service=AccountService(self.store)
         self.managed_proxy=ManagedProxyClient(self.store.root)
+        self.credential_snapshots = CredentialSnapshots(self.store, self.managed_proxy)
         self.routes=RoutingService(self.store, self.account_service, self.managed_proxy)
         self.authentication=AuthenticationService(self.store, self.account_service,
                                                   self.managed_proxy)

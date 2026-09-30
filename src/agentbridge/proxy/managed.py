@@ -83,6 +83,18 @@ class ManagedProxyClient:
         """Stop the sidecar while retaining its upstream credential directory."""
         return self._request("retire", account_id)
 
+    def suspend_for_capture(self, account_id):
+        """Stop only the fenced account while retaining its port and upstream auth directory."""
+        return self._request('snapshot_stop', account_id)
+
+    def provision_for_recovery(self, account_id):
+        """Trusted host probe of restored credentials while account admission stays held."""
+        return self._route(account_id, self._request('recovery_probe', account_id))
+
+    def reconnect_route(self, account_id, base_url=None):
+        """Use the explicitly authorized login-only route without admitting execution."""
+        return self._route(account_id, self._request('reconnect', account_id, base_url=base_url))
+
     def shutdown(self):
         """Explicitly stop this state's sidecars and supervisor (mainly for tests)."""
         return self._request("shutdown", "supervisor")

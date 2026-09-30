@@ -2,6 +2,7 @@
 
 from .auth_proxy_retirement import retire_terminal_proxy
 from .errors import BridgeError
+from .proxy.credential_barrier import hold
 
 
 def check_existing(store, account, provider, config, management):
@@ -45,6 +46,13 @@ def verify_or_fail_new_email(store, accounts, managed_proxy, row, observed):
     try:
         verify_observation(store, accounts, row, observed)
     except BridgeError as error:
+        with store.connect() as db:
+            recovery = hold(db, row['account_id'])
+        if recovery and recovery[1] == 'reconnect':
+            store.update_auth_attempt(row['id'], row['owner'], status='failed',
+                                      data={**row['data'], 'error': {'code': error.code}})
+            managed_proxy.suspend_for_capture(row['account_id'])
+            raise
         expected, actual = row.get('email'), observed.get('email')
         if (error.code == 'identity_changed' and isinstance(expected, str) and expected
                 and isinstance(actual, str) and '@' in actual

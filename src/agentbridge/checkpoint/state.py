@@ -96,6 +96,11 @@ def recovery_held(db, instance_id):
 
 
 def blocked(db, instance_id):
+    from ..proxy.credential_barrier import hold
+
+    session = db.execute('SELECT account_id FROM sessions WHERE id=?', (instance_id,)).fetchone()
+    if session and hold(db, session[0]):
+        return True
     if recovery_held(db, instance_id):
         return True
     return identity(db)['enabled'] and db.execute(
@@ -104,6 +109,11 @@ def blocked(db, instance_id):
 
 
 def require_admission(db, instance_id):
+    from ..proxy.credential_barrier import require_account
+
+    session = db.execute('SELECT account_id FROM sessions WHERE id=?', (instance_id,)).fetchone()
+    if session:
+        require_account(db, session[0])
     if blocked(db, instance_id):
         raise BridgeError('checkpoint_pending', 'Native continuity is held until recovery completes.',
                           retryable=True, details={'instance_id': instance_id})

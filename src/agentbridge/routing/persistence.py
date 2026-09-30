@@ -11,6 +11,7 @@ from ..models import Account, RunOptions, TERMINAL, identifier, model_id
 from ..native_sessions import bind_native_session, require_native_session
 from ..checkpoint import persistence as checkpoints
 from ..checkpoint.state import require_admission
+from ..proxy.credential_barrier import require_account
 from .binding import has_bound_proxy_login
 from .evidence import route_evidence
 from .service import OBSERVATION_TTL, RoutingService
@@ -57,6 +58,7 @@ def _session_payload(account_id, cwd, model, native_id, parent_id, context,
 
 
 def _verified_proxy_config(db, account_id, model, *, provider=None):
+    require_account(db, account_id)
     if db.execute('SELECT 1 FROM paused_accounts WHERE account_id=?',
                   (account_id,)).fetchone():
         raise BridgeError('account_paused', 'The selected proxy account is paused for new work.')
@@ -326,6 +328,7 @@ class RoutingStoreMixin:
                 if route_decision is not None:
                     raise BridgeError("invalid_request", "Pinned sessions do not accept route decisions.")
                 _verified_proxy_config(db, selected, options.model or session["model"])
+            require_account(db, selected)
             now = time.time()
             from ..queueing.records import admit as admit_queue_message
             admit_queue_message(self, db, session_id, message_id, id, prompt, options,

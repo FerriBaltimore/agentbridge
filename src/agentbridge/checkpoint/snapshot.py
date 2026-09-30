@@ -152,6 +152,9 @@ def restore_store(destination, snapshot, source, *, owner_ref, workspace_paths=N
             from .recovery import interrupt_copied_execution
 
             interrupt_copied_execution(db)
+            from ..proxy.credential_barrier import reset_restored_authority
+
+            reset_restored_authority(db, generation)
         with target.open('rb') as handle:
             os.fsync(handle.fileno())
         content.sync_directory(stage)
