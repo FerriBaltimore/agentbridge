@@ -11,14 +11,29 @@ from .selection import load
 
 @contextmanager
 def connect_selected(root):
+    from .authority import guard
+
     root = Path(root)
+    if not root.exists():
+        yield None
+        return
+    with guard(root):
+        with connect_locked(root) as connection:
+            yield connection
+
+
+@contextmanager
+def connect_locked(root):
+    from .authority import require_ready
+
     selected = load(root)
+    require_ready(selected)
     if selected and selected['backend'] == 'postgresql':
         from .postgres import PostgresBackend
 
-        configuration = PostgresConfiguration(selected['schema'], selected['conninfo_file'])
-        with PostgresBackend(configuration).connect() as connection:
-            connection.connection.execute('SET TRANSACTION READ ONLY')
+        configuration = PostgresConfiguration(selected['schema'], selected['conninfo_file'],
+                                                selected.get('physical_guard'))
+        with PostgresBackend(configuration).connect(read_only=True) as connection:
             yield connection
         return
     path = root / 'bridge.sqlite3'

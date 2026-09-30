@@ -34,16 +34,23 @@ def read_private(path):
 class PostgresConfiguration:
     schema: str
     conninfo_file: Path
+    physical_guard: int | None = None
 
     def __post_init__(self):
         if not isinstance(self.schema, str) or not re.fullmatch(r'ab_[a-z0-9_]{1,59}', self.schema):
             raise BridgeError('invalid_store_configuration', 'Use a dedicated ab_ Store schema.')
+        if (self.physical_guard is not None and
+                (type(self.physical_guard) is not int or not -(2**63) <= self.physical_guard < 2**63)):
+            raise BridgeError('invalid_store_configuration', 'Physical guard must be a signed bigint.')
         object.__setattr__(self, 'conninfo_file', Path(self.conninfo_file))
         if not self.conninfo_file.is_absolute():
             raise BridgeError('invalid_store_configuration', 'Connection file must be absolute.')
 
     def document(self):
-        return {'schema': self.schema, 'conninfo_file': str(self.conninfo_file)}
+        value = {'schema': self.schema, 'conninfo_file': str(self.conninfo_file)}
+        if self.physical_guard is not None:
+            value['physical_guard'] = self.physical_guard
+        return value
 
     def connection_parameters(self):
         try:

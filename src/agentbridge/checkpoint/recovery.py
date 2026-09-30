@@ -39,3 +39,20 @@ def interrupt_copied_execution(db):
                    "stop_requested=1 WHERE id=?", (run['id'],))
         finished(Store, db, run, 'interrupted')
         persistence.observe(Store, db, run['id'], terminal)
+
+
+def hold_import(db, destination, snapshot, generation, workspace_paths):
+    """Invalidate copied process/credential authority and retain the source replay floor."""
+    from .workspaces import rebind
+    from ..proxy.credential_barrier import reset_restored_authority
+
+    db.execute('UPDATE store_identity SET store_generation=?,source_generation=?,source_seq=?, '
+               'recovery_held=1,enabled=1 WHERE singleton=1',
+               (generation, snapshot['store_generation'], snapshot['cursor']['seq']))
+    db.execute('UPDATE runs SET worker_pid=NULL,worker_identity=NULL,child_pid=NULL,'
+               'child_identity=NULL')
+    db.execute('UPDATE conversation_queues SET dispatcher_pid=NULL,dispatcher_identity=NULL')
+    db.execute('DELETE FROM recovery_workspaces')
+    rebind(db, destination, workspace_paths)
+    interrupt_copied_execution(db)
+    reset_restored_authority(db, generation)

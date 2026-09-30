@@ -28,6 +28,12 @@ def build_parser():
     parser.add_argument('--owner-ref', help='Trusted host configuration for the persistent owner')
     parser.add_argument('--durability', choices=('legacy', 'required'),
                         help='Require durable continuity; existing legacy history needs host upgrade')
+    parser.add_argument('--store-backend', choices=('sqlite', 'postgresql'),
+                        help='Explicit host Store selection; defaults to the saved backend')
+    parser.add_argument('--postgres-schema', help='Dedicated host-provisioned ab_ schema')
+    parser.add_argument('--postgres-conninfo-file', help='Private external libpq connection file')
+    parser.add_argument('--postgres-physical-guard', type=int,
+                        help='Optional host physical-cut advisory bigint')
     sub=parser.add_subparsers(dest='action')
     add_errors(sub)
     add_contracts(sub)

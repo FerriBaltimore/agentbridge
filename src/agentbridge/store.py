@@ -1,4 +1,5 @@
 """Store is the durable authority; backend selection never follows ambient credentials."""
+from contextlib import contextmanager
 from dataclasses import asdict
 import json
 import os
@@ -47,8 +48,14 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
         configure(self, owner_ref=owner_ref, durable=durable)
         self.recover_deleting_instances()
 
+    @contextmanager
     def connect(self):
-        return self.storage.connect()
+        from .storage.authority import guard, require_selected
+
+        with guard(self.root):
+            require_selected(self.root, self.storage)
+            with self.storage.connect() as connection:
+                yield connection
 
     def get(self, table, id):
         if table not in ('runs','sessions','accounts'):

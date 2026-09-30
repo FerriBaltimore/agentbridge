@@ -148,22 +148,9 @@ def restore_store(destination, snapshot, source, *, owner_ref, workspace_paths=N
             # separately below, invalidating every imported upgrade proof.
             if migrate(db, snapshot['store_schema']) != 15:
                 native.fail('checkpoint_incompatible')
-            db.execute('UPDATE store_identity SET store_generation=?,source_generation=?,source_seq=?, '
-                       'recovery_held=1,enabled=1 WHERE singleton=1',
-                       (generation, snapshot['store_generation'], snapshot['cursor']['seq']))
-            db.execute('UPDATE runs SET worker_pid=NULL,worker_identity=NULL,child_pid=NULL,'
-                       'child_identity=NULL')
-            db.execute('UPDATE conversation_queues SET dispatcher_pid=NULL,dispatcher_identity=NULL')
-            from .workspaces import rebind
+            from .recovery import hold_import
 
-            db.execute('DELETE FROM recovery_workspaces')
-            rebind(db, destination, workspace_paths)
-            from .recovery import interrupt_copied_execution
-
-            interrupt_copied_execution(db)
-            from ..proxy.credential_barrier import reset_restored_authority
-
-            reset_restored_authority(db, generation)
+            hold_import(db, destination, snapshot, generation, workspace_paths)
         with target.open('rb') as handle:
             os.fsync(handle.fileno())
         content.sync_directory(stage)

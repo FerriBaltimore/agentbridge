@@ -54,17 +54,25 @@ class Result:
 class Connection:
     backend = 'postgresql'
 
-    def __init__(self, connection, schema):
+    def __init__(self, connection, schema, physical_guard=None, *, read_only=False):
         self.connection, self.schema, self.locked = connection, schema, False
+        self.physical_guard, self.read_only = physical_guard, read_only
         self.lock_key = int.from_bytes(hashlib.sha256(('agentbridge:' + schema).encode()).digest()[:8],
                                        'big', signed=True)
 
     @property
     def in_transaction(self):
-        return self.locked
+        return self.locked or self.read_only
 
     def _lock(self):
+        if self.read_only:
+            return
         if not self.locked:
+            # Host physical cut before Store lock, including a read that may later write.
+            # Acquiring these in the opposite order can deadlock a multi-Store capture.
+            if self.physical_guard is not None:
+                self.connection.execute('SELECT pg_advisory_xact_lock_shared(%s)',
+                                        (self.physical_guard,))
             self.connection.execute('SELECT pg_advisory_xact_lock(%s)', (self.lock_key,))
             self.locked = True
 
@@ -141,7 +149,7 @@ class PostgresBackend:
         self.configuration = configuration
 
     @contextmanager
-    def connect(self):
+    def connect(self, *, read_only=False):
         try:
             import psycopg
             from psycopg import sql
@@ -167,7 +175,11 @@ class PostgresBackend:
             connection.execute(sql.SQL('SET search_path TO {}, pg_catalog').format(
                 sql.Identifier(self.configuration.schema)))
             connection.commit()
-            wrapped = Connection(connection, self.configuration.schema)
+            if read_only:
+                connection.read_only = True
+                connection.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+            wrapped = Connection(connection, self.configuration.schema,
+                                 self.configuration.physical_guard, read_only=read_only)
             yield wrapped
             wrapped.commit()
         except psycopg.Error as error:

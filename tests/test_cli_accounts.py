@@ -56,7 +56,7 @@ class AccountBridge:
 @pytest.fixture
 def account_bridge(monkeypatch):
     bridge = AccountBridge()
-    monkeypatch.setattr(cli, 'Bridge', lambda _root: bridge)
+    monkeypatch.setattr(cli, 'Bridge', lambda _root, **_options: bridge)
     return bridge
 
 

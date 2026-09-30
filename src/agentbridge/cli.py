@@ -23,7 +23,17 @@ def error_payload(error):
 
 
 def open_bridge(args):
-    bridge = Bridge(args.root)
+    from .storage.configuration import PostgresConfiguration
+
+    configured = (args.postgres_schema, args.postgres_conninfo_file, args.postgres_physical_guard)
+    postgres = None
+    if any(value is not None for value in configured):
+        if (args.store_backend != 'postgresql' or not args.postgres_schema
+                or not args.postgres_conninfo_file):
+            raise BridgeError('invalid_store_configuration',
+                              'Explicit PostgreSQL selection requires schema and connection file.')
+        postgres = PostgresConfiguration(*configured)
+    bridge = Bridge(args.root, backend=args.store_backend, postgres=postgres)
     if args.owner_ref is None and args.durability is None:
         return bridge
     if args.durability == 'required':

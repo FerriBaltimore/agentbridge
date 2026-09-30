@@ -11,6 +11,24 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-01
+
+- Optional PostgreSQL 16 Store metadata uses explicit private host configuration and scoped
+  roles; SQLite remains the standalone default. Native Codex SQLite, GrantBridge vaults and
+  CLIProxy files stay outside PostgreSQL. Failures never fall back to stale SQLite.
+- Host migration preserves identity, event/replay positions, native coverage, queues and
+  tombstones after a verified closed execution domain. Durable source fences and a same-COMMIT
+  destination receipt support retry without dual writers or recopying committed changes.
+- Shared physical recovery uses a writer guard before each Store lock and a read-only host
+  observation inside the physical cut. PostgreSQL Store snapshots require the host's verified
+  SQL frontier; the SDK never manufactures a SQLite snapshot or accepts a protection claim.
+- Rebinding a recovered physical Store requires new host-provisioned credentials. It rotates
+  generation, retains the source cursor, invalidates imported execution authority and stays held.
+  Native content and credential restoration remain separate, explicit operations.
+- Deterministic acceptance covers both Store backends, migration failures/retry, concurrent cuts,
+  and Fullbrain's actual artifact/namespace/SCRAM/physical PG16 restore path. Cloud/PITR and live
+  provider acceptance remain separate gates; the optional driver ships in Fullbrain's own bundle.
+
 ## [2.7.0] - 2026-09-30
 
 - Online credential capture uses CLIProxyAPI `7.3.16-fullbrain.1` writer protocol 1 without
@@ -187,7 +205,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.8.0
 [2.7.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.7.0
 [2.5.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.5.0
 

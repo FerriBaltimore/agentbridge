@@ -52,7 +52,7 @@ class RecordingBridge:
 
 def test_model_cli_uses_model_first_catalog_without_engine_filter(monkeypatch, capsys):
     bridge = RecordingBridge()
-    monkeypatch.setattr(cli, 'Bridge', lambda _root: bridge)
+    monkeypatch.setattr(cli, 'Bridge', lambda _root, **_options: bridge)
 
     cli.main(['models', 'list'])
     output = capsys.readouterr().out
@@ -82,7 +82,7 @@ def test_model_cli_labels_unverified_account_declarations(capsys):
 
 def test_instance_cli_uses_model_and_auto_account_unless_pinned(monkeypatch, capsys):
     bridge = RecordingBridge()
-    monkeypatch.setattr(cli, 'Bridge', lambda _root: bridge)
+    monkeypatch.setattr(cli, 'Bridge', lambda _root, **_options: bridge)
 
     cli.main(['instances', 'create', '--model', 'provider/model',
               '--workspace-path', '/workspace', '--idempotency-key', 'create-1'])
@@ -129,7 +129,7 @@ def test_v2_rpc_forwards_model_and_automatic_account_choice():
 
 def test_instance_cli_and_rpc_forward_execution_policy(monkeypatch, capsys):
     bridge = RecordingBridge()
-    monkeypatch.setattr(cli, 'Bridge', lambda _root: bridge)
+    monkeypatch.setattr(cli, 'Bridge', lambda _root, **_options: bridge)
     cli.main(['instances', 'create', '--model', 'provider/model', '--permission-mode', 'default',
               '--sandbox-mode', 'danger-full-access', '--json'])
     capsys.readouterr()
@@ -169,7 +169,7 @@ def test_accounts_rpc_exposes_provider_and_models_without_proxy_configuration(tm
 
 def test_proxy_account_login_cli_passes_route_and_provider_together(monkeypatch, capsys):
     bridge = RecordingBridge()
-    monkeypatch.setattr(cli, 'Bridge', lambda _root: bridge)
+    monkeypatch.setattr(cli, 'Bridge', lambda _root, **_options: bridge)
     options = ['--name', 'Primary', '--provider', 'claude',
                '--proxy-base-url', 'http://127.0.0.1:8317/v1',
                '--proxy-key-env', 'PROXY_CLIENT_KEY_REF',

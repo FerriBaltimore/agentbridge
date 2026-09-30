@@ -89,7 +89,7 @@ observation = bridge.checkpoints.observe_store(format_version='1', params=scope)
 ```
 
 The observation contains identity, schema version, generation-scoped event cursor and
-native checkpoint coverage read under one Store barrier. PostgreSQL also returns
+native checkpoint coverage read in one repeatable-read, read-only transaction. PostgreSQL returns
 `sql_position` with database, schema and the next WAL insertion LSN; its boundary is
 `next_record_exclusive`. It does not return a backup, a protected frontier, a cluster
 identity or an externally supplied receipt. It is a host SDK operation, not model RPC.
@@ -102,16 +102,48 @@ optional tables (permissions, diagnoses, learning, provider and credential state
 host can inventory and instrument them. Merely using the same server does not make two
 independent application transactions atomic or include AgentBridge in another application's
 protection claim. Physical recovery, migration and provider sandbox mounts are host gates.
-Lock order also matters: writers own the Store advisory lock before table triggers run.
-Do not hold an exclusive host SQL barrier and then wait for `observe_store` if those triggers
-can wait for that barrier. Observe first and revalidate the common change marker at the cut,
-or establish one reviewed transaction-guard order before activating combined protection.
+Set `PostgresConfiguration(..., physical_guard=<signed bigint>)` to the host's shared
+physical barrier key. Writers acquire its shared transaction lock BEFORE their Store lock.
+The host holds the exclusive physical barrier, calls `agentbridge.checkpoint.observe_store`
+without opening/bootstraping `Bridge`, commits its candidate and observes its WAL cut before
+unlocking. This observation is read-only and takes neither writer lock; another Store can
+continue unrelated work outside that short cut. Never observe again after uploading and
+attach that newer observation to an older physical frontier.
 
-A SQLite migration must drain all writers, preserve every logical row, primary key, cursor,
-queue and tombstone, and copy source rowid to `_ab_order` for `accounts`, `sessions`, `runs`,
-`deleted_instances`, `provider_inspections` and `checkpoint_restore_operations`. Reseed
-identity sequences after importing IDs. Verify parity before atomically changing selection;
-after a PG write, returning to the old SQLite database requires a reverse migration.
+## Explicit host migration and restore
+
+```python
+from agentbridge.storage import migrate_postgres
+
+receipt = migrate_postgres(
+    root, operation_id=operation_id, owner_ref=owner,
+    postgres=configuration, verify_quiescence=verify_closed_execution_domain,
+)
+```
+
+The host callback receives the same operation/owner/Store/generation and source-root inode
+binding twice: before fencing/copy and before the PostgreSQL COMMIT. It must verify a closed
+execution domain and current exclusive host authority. A caller boolean, a new lock unknown
+to old clients or inability to read arbitrary `/proc` entries is not quiescence evidence.
+Standalone callers without that verifier receive `store_migration_unsupported`.
+
+The SDK checks legacy recorded workers/queue locks, drains SQLite, persists a migration
+journal, installs permanent SQLite DML fences and publishes a pending PG selector before
+copying. The transaction preserves logical rows, identity, events, queue/tombstone data,
+explicit `_ab_order` and deleted AUTOINCREMENT high-water marks. A receipt in the same PG
+COMMIT makes retry safe after COMMIT but before local acknowledgement. A failure stays
+pending; it never writes stale SQLite or claims native credential files were copied.
+Source SQLite and native files remain available for controlled recovery, never dual writes.
+
+After restoring the exact physical SQL cut, the trusted host provisions a new restricted
+role/connection and invokes `agentbridge.checkpoint.restore_postgres(destination, snapshot,
+postgres=configuration, owner_ref=owner, operation_id=operation_id, workspace_paths=...)`.
+The authenticated G0 PostgreSQL descriptor identifies the exact SQL frontier. The SDK
+compares restored Store identity, cursor and checkpoint coverage; it does not attest the
+host's physical backup. It changes generation, preserves the source cursor/replay floor,
+removes imported process/credential authority and remains held. Retry reuses its SQL receipt.
+Native Codex files and provider credential snapshots are restored through their own existing
+APIs; these files do not become PostgreSQL data. A restored selector is never new authority.
 
 ## Focused validation
 
@@ -130,5 +162,6 @@ PYTHONPATH=src:tests AGENTBRIDGE_TEST_POSTGRES_SOCKET=/private/lab/socket \
 Without the plugin, the common contracts use SQLite; PostgreSQL-only tests skip unless the
 explicit fixture is configured. Use a short private SSD `TMPDIR`/pytest `--basetemp` for
 Unix socket subprocess tests. No accounts, provider requests or production databases belong
-in these tests. Native restore tests simulate an already recovered SQL generation; they
-are not evidence of an implemented physical PostgreSQL backup or host migration.
+in these tests. The SDK tests simulate an already recovered SQL generation. Fullbrain separately gates its
+installed artifact, closed execution domain, SCRAM projection and physical PG16 restore;
+neither suite substitutes for a deployed cloud/PITR acceptance gate.

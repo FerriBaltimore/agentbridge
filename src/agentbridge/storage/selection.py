@@ -28,20 +28,30 @@ def load(root):
     fields = {'format_version', 'backend'}
     if value.get('backend') == 'postgresql':
         fields |= {'schema', 'conninfo_file'}
+        for pending in ('migration_operation', 'recovery_operation'):
+            if pending in value:
+                fields.add(pending)
+                from ..checkpoint.state import canonical_uuid
+
+                canonical_uuid(value[pending])
+        if 'physical_guard' in value:
+            fields.add('physical_guard')
+            if type(value['physical_guard']) is not int:
+                raise BridgeError('invalid_store_configuration', 'Physical guard is invalid.')
     if (set(value) != fields or value.get('format_version') != '1'
             or value.get('backend') not in {'sqlite', 'postgresql'}):
         raise BridgeError('invalid_store_configuration', 'Backend selection is invalid.')
     return value
 
 
-def save(root, value):
+def save(root, value, *, filename=FILENAME):
     descriptor, temporary = tempfile.mkstemp(prefix='.backend-', dir=root)
     try:
         with os.fdopen(descriptor, 'w') as output:
             json.dump(value, output, sort_keys=True)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, root / FILENAME)
+        os.replace(temporary, root / filename)
         parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(parent)
@@ -52,6 +62,13 @@ def save(root, value):
 
 
 def select(root, *, backend=None, postgres=None):
+    from .authority import guard
+
+    with guard(root):
+        return select_locked(root, backend=backend, postgres=postgres)
+
+
+def select_locked(root, *, backend=None, postgres=None):
     if backend not in {None, 'sqlite', 'postgresql'}:
         raise BridgeError('invalid_store_configuration', 'Select sqlite or postgresql explicitly.')
     if postgres is not None and (backend != 'postgresql'
@@ -64,6 +81,9 @@ def select(root, *, backend=None, postgres=None):
             raise BridgeError('unsafe_store_configuration', 'Backend lock must be private.')
         fcntl.flock(lock, fcntl.LOCK_EX)
         saved = load(root)
+        from .authority import require_ready
+
+        require_ready(saved)
         selected = backend or (saved['backend'] if saved else 'sqlite')
         if saved and selected != saved['backend']:
             raise BridgeError('store_migration_required', 'Migrate the Store before changing backend.')
@@ -73,7 +93,8 @@ def select(root, *, backend=None, postgres=None):
             if postgres is None:
                 if not saved:
                     raise BridgeError('invalid_store_configuration', 'PostgreSQL configuration is required.')
-                postgres = PostgresConfiguration(saved['schema'], Path(saved['conninfo_file']))
+                postgres = PostgresConfiguration(saved['schema'], Path(saved['conninfo_file']),
+                                                  saved.get('physical_guard'))
             if postgres.conninfo_file.resolve().is_relative_to(root.resolve()):
                 raise BridgeError('unsafe_store_configuration', 'Keep connection secrets outside the Store.')
             desired = {'format_version': '1', 'backend': selected, **postgres.document()}
