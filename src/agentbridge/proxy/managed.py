@@ -62,7 +62,10 @@ def _socket_address(directory):
 class ManagedProxyClient:
     """Provision and reconnect one isolated CLIProxyAPI sidecar per account."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, allow_start=True):
+        if type(allow_start) is not bool:
+            raise ValueError('allow_start must be a boolean')
+        self.allow_start = allow_start
         self.directory = _managed_root(root)
         self.socket_path = self.directory / "supervisor.sock"
 
@@ -196,6 +199,9 @@ class ManagedProxyClient:
         return read_auth(pid, descriptor)
 
     def _start_supervisor(self):
+        if not self.allow_start:
+            raise BridgeError('credential_snapshot_pending',
+                              'The existing credential writer is not available.')
         if self.socket_path.exists():
             details = self.socket_path.lstat()
             if not stat.S_ISSOCK(details.st_mode) or details.st_uid != os.getuid():

@@ -14,6 +14,7 @@ from agentbridge.errors import BridgeError
 from agentbridge.bundle import resolve_grantbridge_adapter
 from agentbridge.proxy import credential_content as capsule
 from agentbridge.proxy.credential_barrier import hold
+from agentbridge.proxy.managed import ManagedProxyClient
 from agentbridge.proxy.process_lifecycle import _record_process_running
 from fixtures.test_proxy_account_fixture import seed_authenticated_proxy_account
 from test_credential_snapshots import target
@@ -194,3 +195,13 @@ def test_old_writer_refuses_online_capture_without_stopping_it(managed):
             capture(bridge, 'first')
         assert unsupported.value.code == 'credential_snapshot_unsupported'
         assert bridge.managed_proxy.ensure('first', route['proxy_base_url']) == route
+
+
+def test_administrative_client_never_starts_a_fallback_supervisor(tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail('Administrative snapshot client must not launch a process')
+    monkeypatch.setattr('agentbridge.proxy.managed.subprocess.Popen', forbidden)
+    client = ManagedProxyClient(tmp_path / 'absent', allow_start=False)
+    with pytest.raises(BridgeError) as pending:
+        client.credential_revision('fixture')
+    assert pending.value.code == 'credential_snapshot_pending'
