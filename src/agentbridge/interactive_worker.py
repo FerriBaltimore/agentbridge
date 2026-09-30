@@ -58,6 +58,7 @@ def main():
             temporary = TemporaryDirectory(prefix='agentbridge-native-')
             with temporary as temp_dir:
                 native_env = os.environ.copy()
+                native_env.pop('PYTHONPATH', None)
                 native_env['TMPDIR'] = temp_dir
                 native_env['HOME'] = native_env['CODEX_HOME']
                 with ProviderChannel(payload['command'], cwd=payload['cwd'], env=native_env,

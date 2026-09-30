@@ -9,6 +9,7 @@ import time
 from .errors import BridgeError
 from .process import alive, identity
 from .security import base_environment
+from .subprocess_path import python_path
 from .store import dumps
 from .execution_context import PRIVATE_EXECUTION_KEY
 
@@ -121,7 +122,8 @@ def launch(store, run_id, secrets, *, execution=None):
     payload = dumps({PRIVATE_EXECUTION_KEY: True, 'secrets': secrets,
                      'execution': execution}).encode() if execution else dumps(secrets).encode()
     env = base_environment()
-    env['PYTHONPATH'] = str(Path(__file__).resolve().parent.parent)
+    env['PYTHONPATH'] = python_path()
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
     try:
         process = subprocess.Popen([sys.executable, '-P', '-m', 'agentbridge.worker', str(store.root), run_id],
             env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

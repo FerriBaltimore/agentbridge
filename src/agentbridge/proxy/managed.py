@@ -206,13 +206,14 @@ class ManagedProxyClient:
             details = self.socket_path.lstat()
             if not stat.S_ISSOCK(details.st_mode) or details.st_uid != os.getuid():
                 raise BridgeError("unsafe_store", "The managed proxy socket is unsafe.")
-        source_root = str(Path(__file__).resolve().parents[2])
+        from ..subprocess_path import python_path
         environment = {key: value for key, value in os.environ.items() if key in {
             "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "AGENTBRIDGE_CLIPROXY_BIN",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
             "http_proxy", "https_proxy", "no_proxy", "all_proxy",
             "SSL_CERT_FILE", "SSL_CERT_DIR"}}
-        environment["PYTHONPATH"] = source_root
+        environment["PYTHONPATH"] = python_path()
+        environment["PYTHONDONTWRITEBYTECODE"] = '1'
         try:
             subprocess.Popen(
                 [sys.executable, "-m", "agentbridge.proxy.supervisor", str(self.directory)],

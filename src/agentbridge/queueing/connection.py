@@ -12,6 +12,7 @@ import time
 from ..errors import BridgeError
 from ..models import identifier
 from ..security import base_environment
+from ..subprocess_path import python_path
 
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
@@ -77,7 +78,8 @@ def request(root, instance_id, payload, *, start=True):
                         process.wait()
                         _CHILDREN.remove(process)
                 env = base_environment()
-                env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2])
+                env['PYTHONPATH'] = python_path()
+                env['PYTHONDONTWRITEBYTECODE'] = '1'
                 _CHILDREN.append(subprocess.Popen(
                     [sys.executable, '-P', '-m', 'agentbridge.queueing.worker', str(root), instance_id],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

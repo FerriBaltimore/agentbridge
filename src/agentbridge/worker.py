@@ -122,6 +122,9 @@ def main():
             prompt=session['context']+'\n\nCurrent user request:\n'+prompt
         prompt = text_prompt(prompt, options.attachments)
         if duplex(account, options):
+            from .subprocess_path import python_path
+            env['PYTHONPATH'] = python_path()
+            env['PYTHONDONTWRITEBYTECODE'] = '1'
             payload = json.dumps({'engine': account.engine, 'prompt': prompt, 'cwd': session['cwd'],
                 'model': options.model or session.get('model'), 'native_id': session.get('native_id'),
                 'options': asdict(options), 'root': str(store.root), 'turn_id': run_id,

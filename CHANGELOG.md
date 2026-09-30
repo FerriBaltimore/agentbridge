@@ -11,6 +11,13 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-10-01
+
+- Trusted proxy, run, queue and interactive children retain the host bundle's verified
+  Python dependencies, so PostgreSQL Store access also works in detached processes.
+  Paths come from the installed package and its bundle manifest, never ambient PYTHONPATH;
+  native Codex does not inherit the trusted dependency path.
+
 ## [2.8.0] - 2026-10-01
 
 - Optional PostgreSQL 16 Store metadata uses explicit private host configuration and scoped
