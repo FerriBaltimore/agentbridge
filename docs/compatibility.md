@@ -9,7 +9,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 
 | Number | Current | Where it appears |
 | --- | --- | --- |
-| SDK version | `2.7.0` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
+| SDK version | `2.8.0` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
 | `rpc_contract` | `v2` | manifest `protocols`; `capabilities.get` `contract_version` |
 | `http` | `2` | manifest `protocols`; playground `/api/meta` `api_revision` |
 | `cli` | `1` | manifest `protocols`; `agentbridge --root DIR rpc`, `--version` |
@@ -98,7 +98,7 @@ minimum for `same_host`, `isolated` and `mobile` + `mode: "browser"`; only `mode
 needs a long-lived GrantBridge host, which is where `grantbridge_min` is enforced.
 
 GrantBridge states its own bound in its manifest: `agentbridge_min` `2.4.2`, the label of
-the artifact Fullbrain v2 pins today. `2.5.0` satisfies it. Both bounds must hold.
+an earlier Fullbrain v2 artifact. Releases from `2.5.0` satisfy it. Both bounds must hold.
 
 ## Matrix
 
@@ -106,6 +106,8 @@ the artifact Fullbrain v2 pins today. `2.5.0` satisfies it. Both bounds must hol
 | --- | --- | --- | --- | --- |
 | `2.3.3` | `32e3cbd` + working tree | none released (see below) | `a7ac24a5…` | `2.4.2` |
 | `2.5.0` | tag `v2.5.0` | `1.0.0-rc.1` | `3786cea5…` | `2.5.0` |
+| `2.7.0` | tag `v2.7.0` | `1.0.0-rc.3` | `f7a9f083…` | `2.7.0` |
+| `2.8.0` | tag `v2.8.0` | `1.0.0-rc.3` | `da9edc6f…` | `2.8.0` |
 
 - `2.3.3` row (history): the previous v2 pin
   `a7ac24a5254711cf0e253cff653f5c77fec5b15c2986a59c98b99174e73d7b47`, built from a reviewed
@@ -114,7 +116,7 @@ the artifact Fullbrain v2 pins today. `2.5.0` satisfies it. Both bounds must hol
   commit `3b406bd` of this branch. Its login entry is same-host only, so it needs no
   released GrantBridge: the engine surface of GrantBridge `main` `d60873c` (`0.1.0`,
   untagged) suffices.
-- `2.5.0` row: the current v2 pin
+- `2.5.0` row (history): the former v2 pin
   `3786cea5b8d637ef3691284c9f5d2b9088663dcdde27bece6f6e8c8e422bc4c8` (`known-versions.json`
   `components.agentbridge.latest_known`, 149 source files, 182,210,560 bytes, manifest
   `5ec10fa7df0f4c1d309f539b6debdf6bfc122fe9ef3163f9c4c50c077ad36957`), built with
@@ -152,3 +154,9 @@ signatures and digests, and then:
 
 A rejected pair leaves the previous installation untouched. `make pins-update VERSION=…`
 rewrites the pin from a published manifest; it does not bypass these checks.
+
+The `2.8.0` Fullbrain archive contains the optional PostgreSQL driver for its supported
+Python 3.12/3.13/3.14 worker hosts. The standalone SDK keeps SQLite as the default and
+installs its PostgreSQL extra explicitly. Store migration and physical restore require
+trusted host fencing and fresh scoped credentials; native engine files remain separate.
+See [PostgreSQL Store](development/postgres-store.md) for the implemented boundary.
