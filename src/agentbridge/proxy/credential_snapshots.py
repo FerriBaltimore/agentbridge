@@ -22,7 +22,8 @@ def safe(function):
             allowed = {'credential_snapshot_pending', 'credential_snapshot_corrupt',
                        'credential_snapshot_conflict', 'credential_snapshot_proof_required',
                        'credential_snapshot_scope', 'credential_snapshot_reauthentication',
-                       'credential_snapshot_identity', 'credential_snapshot_authority'}
+                       'credential_snapshot_identity', 'credential_snapshot_authority',
+                       'credential_snapshot_unsupported'}
             if code not in allowed:
                 code = 'credential_snapshot_failed'
             raise BridgeError(code, 'The private credential operation could not complete.',
@@ -61,6 +62,24 @@ def validate(descriptor, owner_ref):
 class CredentialSnapshots:
     def __init__(self, store, managed_proxy):
         self.store, self.managed_proxy = store, managed_proxy
+
+    @safe
+    def capture_online(self, *, operation_id, account_ids):
+        from .credential_online import capture
+
+        return capture(self.store, self.managed_proxy, operation_id, account_ids)
+
+    @safe
+    def configuration(self):
+        from .credential_configuration import configuration
+
+        return configuration(self.store)
+
+    @safe
+    def verify_current(self, *, snapshot_id, account_ids=None):
+        from .credential_online import verify_current
+
+        return verify_current(self.store, self.managed_proxy, snapshot_id, account_ids)
 
     @safe
     def capture(self, *, operation_id, account_ids, proof_ref, verify_quiescence):

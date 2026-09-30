@@ -9,17 +9,25 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 
 | Number | Current | Where it appears |
 | --- | --- | --- |
-| SDK version | `2.5.0` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
+| SDK version | `2.7.0` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
 | `rpc_contract` | `v2` | manifest `protocols`; `capabilities.get` `contract_version` |
 | `http` | `2` | manifest `protocols`; playground `/api/meta` `api_revision` |
 | `cli` | `1` | manifest `protocols`; `agentbridge --root DIR rpc`, `--version` |
 | `login_start` | `2` | manifest `protocols`; `accounts.login.start` shape |
-| `grantbridge_min` | `1.0.0-rc.1` | manifest |
+| `grantbridge_min` | `1.0.0-rc.3` | manifest |
 | `python_requires` | `>=3.11` | `pyproject.toml`, manifest |
 | `platform` | `linux_x86_64`, `linux_aarch64` | wheel tag `manylinux_2_28_<arch>`, manifest |
-| `bundle` | CLIProxyAPI 7.3.16, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
+| `bundle` | CLIProxyAPI 7.3.16-fullbrain.1, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
 
-The bundled GrantBridge proxy adapter is commit `ddaa3698…` (`bundle.grantbridge_commit`);
+The bundled GrantBridge proxy adapter is the dependency-free rc.3 closure (commit `45921c0…`);
+its exact source and artifact digests live in `bundle/lock.json`. The source broker's rc.4
+artifact retains this proxy transport; source vault/snapshot support is outside this closure.
+Online credentials additionally require CLIProxy credential protocol `1` at runtime, not
+merely the version string. The downstream writer source, patch and signed manifest are
+recorded in the CLIProxy lock entry. The two architectures compile from the same source;
+the concurrent A/B fixture has been executed on Linux x86_64 only.
+
+For native process isolation,
 the x86_64 bundle also locks the `native_bwrap` 0.11.1.roproc1 launcher of the host-isolated
 profile (`bundle/lock.json` `native_bwrap`, archive and executable digests).
 `tools/verify_bundle_wheel.py` checks every bundled asset of a built wheel against the lock.

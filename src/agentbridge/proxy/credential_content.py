@@ -64,20 +64,33 @@ def capture(store, account_ids, snapshot):
                 fail()
         if inventory(root, account_ids) != before:
             fail()
-        archive = stage / 'credentials.tar'
-        manifest = json.dumps({'snapshot': snapshot, 'files': before}, sort_keys=True).encode()
-        with tarfile.open(archive, 'w', format=tarfile.PAX_FORMAT) as target:
-            info = tarfile.TarInfo(MANIFEST)
-            info.size, info.mode = len(manifest), 0o600
-            target.addfile(info, io.BytesIO(manifest))
-            for item in before:
-                info = tarfile.TarInfo(item['path'])
-                info.size, info.mode = item['bytes'], 0o600
-                with (stage / item['path']).open('rb') as source:
-                    target.addfile(info, source)
-        return content.publish(store, snapshot['snapshot_id'], archive)
+        return publish_files(store, stage, snapshot, before)
     finally:
         shutil.rmtree(stage)
+
+
+def publish_files(store, stage, snapshot, files, *, writer_state=None):
+    archive = stage / 'credentials.tar'
+    manifest = {'snapshot': snapshot, 'files': files}
+    if writer_state is not None:
+        manifest['writer_state'] = writer_state
+    encoded = json.dumps(manifest, sort_keys=True).encode()
+    with tarfile.open(archive, 'w', format=tarfile.PAX_FORMAT) as target:
+        info = tarfile.TarInfo(MANIFEST)
+        info.size, info.mode = len(encoded), 0o600
+        target.addfile(info, io.BytesIO(encoded))
+        for item in files:
+            info = tarfile.TarInfo(item['path'])
+            info.size, info.mode = item['bytes'], 0o600
+            with (stage / item['path']).open('rb') as source:
+                target.addfile(info, source)
+    return content.publish(store, snapshot['snapshot_id'], archive)
+
+
+def writer_state(store, reference):
+    read(store, reference)
+    with tarfile.open(content.resolve(store, reference), 'r:') as archive:
+        return json.load(archive.extractfile(archive.next())).get('writer_state')
 
 
 def read(store, reference, destination=None):

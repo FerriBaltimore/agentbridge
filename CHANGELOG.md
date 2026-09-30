@@ -11,6 +11,17 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-09-30
+
+- Online credential capture uses CLIProxyAPI `7.3.16-fullbrain.1` writer protocol 1 without
+  stopping active native turns. Exact writer revision, hash/size and private files are checked;
+  refresh or account retirement invalidates current coverage without changing historical seals.
+- Trusted configuration distinguishes supported active credentials, completed local retirement,
+  unknown legacy layouts and cold Store absence. Inspection never initializes an absent Store.
+- The runtime requires the authenticated writer capability in addition to the new pinned digest.
+  Deterministic coverage includes the final Go binary in a loopback-only namespace with two
+  native sessions and synthetic credential rotation; live provider acceptance is separate.
+
 ## [2.6.0] - 2026-09-30
 
 - Native checkpoints fence admission until a stopped Codex history is sealed. Durable replay
@@ -176,7 +187,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.7.0
 [2.5.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.5.0
 
 [2.6.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.6.0

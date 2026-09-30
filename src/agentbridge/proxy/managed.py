@@ -87,6 +87,14 @@ class ManagedProxyClient:
         """Stop only the fenced account while retaining its port and upstream auth directory."""
         return self._request('snapshot_stop', account_id)
 
+    def snapshot_files(self, account_id, capture_id):
+        """Ask the credential writer to export under its lock, without stopping execution."""
+        return self._request('credential_snapshot', account_id, capture_id=capture_id)
+
+    def credential_revision(self, account_id):
+        """Read the writer's current inventory digest without a heartbeat mutation."""
+        return self._request('credential_revision', account_id)
+
     def provision_for_recovery(self, account_id):
         """Trusted host probe of restored credentials while account admission stays held."""
         return self._route(account_id, self._request('recovery_probe', account_id))

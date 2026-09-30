@@ -7,6 +7,47 @@ request parameters cannot supply or change that owner.
 Enable the administrative durable mode before capture; legacy mode cannot create these
 snapshots or change their owner after publication.
 
+## Online writer capture
+
+The pinned CLIProxyAPI `7.3.16-fullbrain.1` provides credential writer protocol `1`.
+The SDK requires its authenticated snapshot/revision headers, bounded manifest and file
+hashes at runtime; a version string or a running process alone cannot prove support.
+
+```python
+configuration = bridge.credential_snapshots.configuration()
+account_ids = configuration['cliproxyapi']['account_ids']
+capture = bridge.credential_snapshots.capture_online(
+    operation_id=stable_uuid, account_ids=account_ids)
+bridge.credential_snapshots.verify_current(
+    snapshot_id=capture['snapshot_id'], account_ids=account_ids)
+```
+
+Capture uses the real writer's cross-process lock and durable inventory without stopping
+native turns or restarting the sidecar. Login/account holds remain admission boundaries;
+refresh, management uploads and persisted cooldown changes participate in the writer cut.
+Snapshots contain auth JSON and cooldown files, excluding ephemeral OAuth callback files.
+A changed writer revision makes the historical snapshot stale. Retry the same operation
+only to recover its immutable result; use a new operation to capture a newer revision.
+Observation performs no heartbeat SQL writes. No local observation establishes cloud custody.
+
+Configuration checks managed account bindings and the pinned dependency-free login adapter.
+Unknown legacy/custom credential layouts remain unsupported, never silently absent.
+Completed local account retirement excludes that account from recoverable credentials;
+incomplete retirement stays pending. This is a semantic tombstone, not a process namespace
+closure assertion. The host must preserve retirement in its SQL cut and external revocation
+state, and recheck configuration before claiming current protection or activating a restore.
+The SDK refuses to promote any retired account's restored credential.
+
+`agentbridge.checkpoint.availability.inspect(root)` distinguishes an empty/missing Store
+from an existing one without creating SQLite files. Unknown files, links and unsafe ownership
+fail closed. Existing legacy identity still requires the explicit trusted upgrade operation.
+
+Tests cover the final Go writer binary with a synthetic credential and concurrent native
+protocol fixture A/B in a loopback-only network namespace. They establish local capture and
+continued execution, not live provider refresh or inference acceptance.
+
+## Offline capture under a host boundary
+
 ```python
 capture = bridge.credential_snapshots.capture(
     operation_id=stable_uuid, account_ids=managed_account_ids,
