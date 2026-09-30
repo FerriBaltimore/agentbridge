@@ -122,7 +122,7 @@ def restore_store(destination, snapshot, source, *, owner_ref, workspace_paths=N
         native.fail('checkpoint_corrupt')
     observed = inspect(source, expected=snapshot)
     if (any(observed[key] != snapshot[key] for key in observed)
-            or snapshot['store_schema'] != 14 or snapshot['backend'] != 'sqlite'):
+            or snapshot['store_schema'] not in {14, 15} or snapshot['backend'] != 'sqlite'):
         native.fail('checkpoint_incompatible')
     parent = destination.parent
     if any(path.is_symlink() for path in (parent, *parent.parents)):
@@ -139,6 +139,13 @@ def restore_store(destination, snapshot, source, *, owner_ref, workspace_paths=N
         target.chmod(0o600)
         with closing(sqlite3.connect(target)) as db, db:
             db.row_factory = sqlite3.Row
+            from .upgrade import migrate
+
+            # Only the reviewed 14 -> 15 table addition is allowed. Store identity and
+            # replay positions are unchanged by this migration; restore changes generation
+            # separately below, invalidating every imported upgrade proof.
+            if migrate(db, snapshot['store_schema']) != 15:
+                native.fail('checkpoint_incompatible')
             db.execute('UPDATE store_identity SET store_generation=?,source_generation=?,source_seq=?, '
                        'recovery_held=1,enabled=1 WHERE singleton=1',
                        (generation, snapshot['store_generation'], snapshot['cursor']['seq']))

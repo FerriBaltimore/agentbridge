@@ -52,7 +52,7 @@ def _verify_native_launcher(archive, names, base, lock, arch):
     return True
 
 
-def verify_wheel(path):
+def verify_wheel(path, *, grantbridge_archive=None, grantbridge_manifest=None):
     path = Path(path)
     matched = PLATFORMS.search(path.name)
     if matched is None:
@@ -74,6 +74,20 @@ def verify_wheel(path):
             if member not in names or sha256(archive.read(member)).hexdigest() != expected:
                 raise ValueError(f"The {component} archive is absent or differs from its lock.")
         grantbridge = lock["grantbridge"]
+        if (not re.fullmatch(r'[0-9a-f]{64}', str(grantbridge.get('artifact_sha256')))
+                or not re.fullmatch(r'[0-9a-f]{40}', str(grantbridge.get('commit')))
+                or not isinstance(grantbridge.get('version'), str)):
+            raise ValueError('The GrantBridge artifact provenance is incomplete.')
+        if grantbridge_archive is not None:
+            if __package__:
+                from .import_grantbridge import derive
+            else:
+                from import_grantbridge import derive
+
+            derived, _ = derive(grantbridge_archive, grantbridge_manifest,
+                                expected_sha256=grantbridge['artifact_sha256'])
+            if derived != grantbridge:
+                raise ValueError('The bundled GrantBridge closure differs from its upstream artifact.')
         combined = sha256()
         for relative, expected in sorted(grantbridge["files"].items()):
             member = base + "grantbridge/" + relative
@@ -99,10 +113,14 @@ def verify_wheel(path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheels", type=Path, nargs="+")
+    parser.add_argument('--grantbridge-archive', type=Path)
+    parser.add_argument('--grantbridge-manifest', type=Path)
     arguments = parser.parse_args(argv)
     try:
         for wheel in arguments.wheels:
-            print(json.dumps(verify_wheel(wheel), sort_keys=True))
+            print(json.dumps(verify_wheel(wheel,
+                grantbridge_archive=arguments.grantbridge_archive,
+                grantbridge_manifest=arguments.grantbridge_manifest), sort_keys=True))
     except (OSError, KeyError, ValueError) as error:
         parser.exit(1, f"Bundle wheel rejected: {error}\n")
     return 0

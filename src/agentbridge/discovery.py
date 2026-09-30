@@ -34,6 +34,7 @@ class DiscoveryMixin:
         result = proxy_payload(include_parameters=include_parameters)
         durability = self.checkpoints.identity()
         durability.update({'support': 'adapter' if durability['enabled'] else 'disabled',
+                           'host_upgrade_version': '1',
                            'maturity': 'fixture_tested',
                            'native_schema': 'codex-0-153-0-home-v1',
                            'limitations': ['linux_only', 'local_seal_only',

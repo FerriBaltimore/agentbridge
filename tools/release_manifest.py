@@ -95,8 +95,12 @@ def distribution_files(dist, name, version, arch):
 
 def bundle_versions(root=ROOT):
     lock = json.loads((root / 'src/agentbridge/bundle/lock.json').read_text())
+    grantbridge = lock['grantbridge']
     return {'cli_proxy_api': lock['cli_proxy_api']['version'], 'codex': lock['codex']['version'],
-            'node': lock['node']['version'], 'grantbridge_commit': lock['grantbridge']['commit']}
+            'node': lock['node']['version'], 'grantbridge_commit': grantbridge['commit'],
+            'grantbridge_version': grantbridge.get('version'),
+            'grantbridge_artifact_sha256': grantbridge.get('artifact_sha256'),
+            'grantbridge_closure_sha256': grantbridge['source_sha256']}
 
 
 def built_at():

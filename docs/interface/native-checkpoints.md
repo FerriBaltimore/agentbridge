@@ -193,3 +193,33 @@ warm local samples, not a production p95 or a guarantee for large homes. No dige
 added without evidence that one was needed. Remote encryption/upload and publication,
 whole-application restoration, operational quiescence attestation, remote retention and
 provider reauthentication are responsibilities of the integrating host.
+
+
+## Migrating a drained legacy Store
+
+`--durability required --owner-ref OWNER` is administrative launch configuration, never an RPC
+parameter. A fresh Store can enable immediately. Existing legacy instances require this host-only
+sequence while the whole previous execution domain is demonstrably closed:
+
+1. `checkpoints.begin_upgrade(operation_id=..., owner_ref=..., proof_ref=...,
+   verify_quiescence=callback)` persists holds before enabling mode. The callback verifies the
+   real owner/Store/generation scope against the closed process domain. A failed callback leaves
+   legacy mode and persistent holds; PID absence or an expired lease is insufficient evidence.
+2. `checkpoints.stage_upgrade(instance_id, operation_id=..., expected={turn_id, native_id,
+   after_seq}, verify_quiescence=callback)` checks actual Store history and seals the native home.
+   The saved integer cursor must identify this instance and latest terminal turn, at or beyond
+   its terminal. Missing, divergent or still-unconsumed history stays held. A fresh, never-started
+   instance instead requires all three expected values to be null/null/zero.
+3. Commit the returned original cursor binding and checkpoint association in the host SQL
+   transaction, using its normal account and conversation CAS. Do not advance over unconsumed
+   history or rewrite any old terminal. The later ready observation is separate from the result.
+4. `checkpoints.confirm_upgrade(instance_id, operation_id=..., reconciliation_ref=...,
+   verify_reconciliation=callback)` revalidates the materialized native bytes and releases only
+   this instance after verifying the durable SQL receipt. Same-proof retries are idempotent;
+   different proofs are rejected. Unselected instances remain held across restart.
+
+These methods are local SDK operations and are absent from RPC. Store schema 14 migrates to 15
+by adding upgrade records; no event position or Store identity changes. Restore accepts only the
+reviewed 14/15 layouts, performs that table migration explicitly and then rotates generation,
+invalidating imported upgrade proofs. Native checkpoint runtime hashes remain exact; restoring
+older native material still requires its original pinned runtime before a reviewed migration.

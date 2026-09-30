@@ -18,7 +18,7 @@ CLI = 1
 LOGIN_START = 2
 # Oldest GrantBridge release whose engine surface (`auth.proxy_*`) serves every login entry
 # when AgentBridge is pointed at an external GrantBridge instead of its bundled adapter.
-GRANTBRIDGE_MIN = '1.0.0-rc.1'
+GRANTBRIDGE_MIN = '1.0.0-rc.3'
 
 
 def protocols():

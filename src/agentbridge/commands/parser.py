@@ -25,6 +25,9 @@ def build_parser():
     )
     parser.add_argument('--version',action='version',version=__version__)
     parser.add_argument('--root', help='Private persistent state directory (default: XDG state)')
+    parser.add_argument('--owner-ref', help='Trusted host configuration for the persistent owner')
+    parser.add_argument('--durability', choices=('legacy', 'required'),
+                        help='Require durable continuity; existing legacy history needs host upgrade')
     sub=parser.add_subparsers(dest='action')
     add_errors(sub)
     add_contracts(sub)

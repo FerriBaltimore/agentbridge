@@ -174,3 +174,23 @@ class Checkpoints:
 
         return adopt_drained(self.store, instance_id, operation_id=operation_id,
                              proof_ref=proof_ref, verify_quiescence=verify_quiescence)
+
+    def begin_upgrade(self, *, operation_id, owner_ref, proof_ref, verify_quiescence):
+        from .upgrade import begin
+
+        return begin(self.store, operation_id=operation_id, owner_ref=owner_ref,
+                     proof_ref=proof_ref, verify_quiescence=verify_quiescence)
+
+    def stage_upgrade(self, instance_id, *, operation_id, expected, verify_quiescence):
+        from .upgrade import stage
+
+        return stage(self.store, instance_id, operation_id=operation_id, expected=expected,
+                     verify_quiescence=verify_quiescence)
+
+    def confirm_upgrade(self, instance_id, *, operation_id, reconciliation_ref,
+                        verify_reconciliation):
+        from .upgrade import confirm
+
+        return confirm(self.store, instance_id, operation_id=operation_id,
+                       reconciliation_ref=reconciliation_ref,
+                       verify_reconciliation=verify_reconciliation)

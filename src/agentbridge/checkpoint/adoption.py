@@ -8,7 +8,8 @@ from ..process import alive
 from . import content, native, persistence, state
 
 
-def adopt_drained(store, instance_id, *, operation_id, proof_ref, verify_quiescence):
+def adopt_drained(store, instance_id, *, operation_id, proof_ref, verify_quiescence,
+                  _upgrade_operation=None):
     """The trusted host verifies its stopped execution boundary while admission is fenced.
 
     The callback receives the exact owner/store/generation/instance/turn/barrier binding. It
@@ -24,7 +25,11 @@ def adopt_drained(store, instance_id, *, operation_id, proof_ref, verify_quiesce
         with store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             binding = state.identity(db)
-            if not binding['enabled'] or state.recovery_held(db, instance_id):
+            from .upgrade import allows_adoption
+
+            held = state.recovery_held(db, instance_id)
+            if not binding['enabled'] or (held and not allows_adoption(
+                    db, instance_id, _upgrade_operation)):
                 native.fail('checkpoint_scope_mismatch')
             session = db.execute('SELECT * FROM sessions WHERE id=?', (instance_id,)).fetchone()
             if not session:

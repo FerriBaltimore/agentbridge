@@ -22,6 +22,25 @@ def error_payload(error):
     return {'error': 'invalid_params', 'message': 'Invalid parameters.'}
 
 
+def open_bridge(args):
+    bridge = Bridge(args.root)
+    if args.owner_ref is None and args.durability is None:
+        return bridge
+    if args.durability == 'required':
+        if not args.owner_ref:
+            raise BridgeError('checkpoint_owner_invalid', 'Durable mode requires a trusted owner.')
+        with bridge.store.connect() as db:
+            existing = db.execute('SELECT 1 FROM sessions LIMIT 1').fetchone()
+        if not bridge.checkpoints.identity()['enabled'] and existing:
+            raise BridgeError('checkpoint_upgrade_required',
+                              'Reconcile legacy history through the trusted host upgrade API.')
+    from .checkpoint.state import configure
+
+    configure(bridge.store, owner_ref=args.owner_ref,
+              durable={'legacy': False, 'required': True}.get(args.durability))
+    return bridge
+
+
 def main(argv=None):
     parser, accounts = build_parser()
     args=parser.parse_args(argv)
@@ -40,7 +59,12 @@ def main(argv=None):
     if args.action == 'errors' and args.errors_command is None:
         parser.parse_args(['errors', '--help'])
         return
-    with Bridge(args.root) as bridge:
+    try:
+        opened = open_bridge(args)
+    except BridgeError as error:
+        print(json.dumps(error_payload(error)), file=sys.stderr)
+        raise SystemExit(1) from None
+    with opened as bridge:
         if args.action=='rpc':rpc(bridge,sys.stdin,sys.stdout)
         elif args.action in {'errors', 'contracts', 'queues'}:
             try:

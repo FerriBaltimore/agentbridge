@@ -24,6 +24,7 @@ from .queueing.schema import migrate_v10
 from .native_sessions import bind_native_session, migrate_v12
 from .execution_policy import migrate_v13, read_policy, write_policy
 from .checkpoint.state import migrate as migrate_v14, configure, require_admission
+from .checkpoint.upgrade import migrate as migrate_v15
 
 
 def dumps(value):
@@ -157,7 +158,8 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
             version = migrate_v12(db, version)
             version = migrate_v13(db, version)
             version = migrate_v14(db, version)
-            if version != 14:
+            version = migrate_v15(db, version)
+            if version != 15:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)

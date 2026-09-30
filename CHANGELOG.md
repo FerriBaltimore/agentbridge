@@ -11,6 +11,22 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-30
+
+- Native checkpoints fence admission until a stopped Codex history is sealed. Durable replay
+  uses persisted owner, Store and generation identity; terminal results remain unchanged when
+  sealing needs recovery. Whole-Store SQLite snapshots preserve explicit coverage and holds.
+- Trusted local credential snapshots fence CLIProxy writers and restore authentication held.
+  Safe reconnection verifies the historical provider identity before reopening execution.
+- Hosts can migrate drained legacy histories with persistent holds, native seals and an
+  explicit SQL reconciliation proof. CLI `--durability required --owner-ref OWNER` refuses
+  to silently enable legacy history. Store schema 15 preserves existing generation and events.
+- The dependency-free GrantBridge login closure is generated from the same verified rc.3
+  artifact used by the source broker. The bundle records version, commit and artifact/closure
+  digests; build tooling can verify its exact bytes against that archive.
+- Old native checkpoints retain their exact runtime requirement. Keep prior artifacts for
+  recovery; this release does not relabel old snapshots as compatible with a new runtime.
+
 ## [2.5.0] - 2026-09-28
 
 First release cut with a manifest (`tools/release_manifest.py`) and a compatibility matrix.
@@ -160,5 +176,7 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.6.0...HEAD
 [2.5.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.5.0
+
+[2.6.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.6.0

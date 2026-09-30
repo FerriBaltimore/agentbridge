@@ -40,4 +40,6 @@ def queue_command(bridge, args):
     method = values.pop('queues_command')
     values.pop('action')
     values.pop('root')
+    values.pop('owner_ref')
+    values.pop('durability')
     return getattr(bridge, 'queue_' + method)(**values)

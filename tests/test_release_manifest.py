@@ -44,10 +44,13 @@ def test_manifest_records_digests_protocols_and_a_reproducible_time(tmp_path, mo
     assert manifest['sdist'] == {'file': sdist.name, 'sha256': release_manifest.digest(sdist),
                                  'bytes': sdist.stat().st_size}
     assert manifest['protocols'] == {'rpc_contract': 'v2', 'http': 2, 'cli': 1, 'login_start': 2}
-    assert manifest['grantbridge_min'] == '1.0.0-rc.1'
+    assert manifest['grantbridge_min'] == '1.0.0-rc.3'
     assert manifest['bundle'] == {
         'cli_proxy_api': LOCK['cli_proxy_api']['version'], 'codex': LOCK['codex']['version'],
-        'node': LOCK['node']['version'], 'grantbridge_commit': LOCK['grantbridge']['commit']}
+        'node': LOCK['node']['version'], 'grantbridge_commit': LOCK['grantbridge']['commit'],
+        'grantbridge_version': LOCK['grantbridge'].get('version'),
+        'grantbridge_artifact_sha256': LOCK['grantbridge'].get('artifact_sha256'),
+        'grantbridge_closure_sha256': LOCK['grantbridge']['source_sha256']}
     expected_time = datetime.fromtimestamp(EPOCH, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     assert (manifest['built_at'], manifest['source_date_epoch']) == (expected_time, EPOCH)
     assert len(manifest['git_commit']) == 40 and isinstance(manifest['working_tree_dirty'], bool)

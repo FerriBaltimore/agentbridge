@@ -9,7 +9,7 @@ CLIProxyAPI execution and GrantBridge account-login flow:
 | --- | --- | --- |
 | CLIProxyAPI | 7.3.16 `no-plugin` release | Release archive and its MIT license |
 | Codex CLI | 0.153.0 | Official package archive, license and notice |
-| GrantBridge | Proxy-only adapter at `ddaa3698ff2e51eb077d31b3836ae738e76ceb20` | Reviewed source files and license |
+| GrantBridge | 1.0.0-rc.3, exact source-broker artifact closure | Static proxy modules and license |
 | Node.js | 24.21.0 | Official Linux archive and license |
 
 The exact asset URLs and SHA-256 hashes are in
@@ -39,6 +39,28 @@ release is a transfer check; review the upstream release and lock before
 building. The resulting wheels use Linux architecture tags, so each must be
 installed on its matching platform. Execute the installed smoke checks on
 both platforms before claiming support for both.
+
+## Deriving GrantBridge from its release
+
+The wheel's dependency-free proxy adapter comes from the same verified release
+tarball as the independent source broker. Never edit the bundled modules by hand.
+After verifying the upstream manifest and archive signature using the host's
+existing trusted signer, pass that trusted archive digest to the importer:
+
+```sh
+python tools/import_grantbridge.py /private/grantbridge-VERSION.tgz \
+  /private/grantbridge-VERSION.manifest.json \
+  --expected-sha256 TRUSTED_ARCHIVE_SHA256 --write
+python tools/verify_bundle_wheel.py dist/wheels/SELECTED.whl \
+  --grantbridge-archive /private/grantbridge-VERSION.tgz \
+  --grantbridge-manifest /private/grantbridge-VERSION.manifest.json
+```
+
+The importer checks every archive member against the manifest, parses static
+ESM imports without executing them and rejects external or dynamic dependencies.
+The generated lock records the source version, commit, complete archive digest
+and exact closure digest. Wheel verification compares packaged bytes with that
+closure; the full npm dependency tree is not duplicated in the wheel.
 
 ## Installed behavior
 
