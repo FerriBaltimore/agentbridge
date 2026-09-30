@@ -25,6 +25,8 @@ EVENT_KINDS = {
     "gap": "recovery.gap",
     "queue_changed": "queue.changed",
     "provider_notice": "provider.notice",
+    "checkpoint_ready": "checkpoint.ready",
+    "checkpoint_pending": "checkpoint.pending",
 }
 
 

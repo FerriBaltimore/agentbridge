@@ -32,13 +32,17 @@ from .account_retirement import AccountRetirementMixin
 from .account_pause import AccountPauseMixin
 from .instance_deletion import InstanceDeletionMixin
 from .queueing.service import QueueMixin
+from .checkpoint.service import Checkpoints
+from .checkpoint.state import saved_intent
 
 
 class Bridge(InstanceRoutingMixin, QueueMixin, EventStreamMixin, InstanceDeletionMixin, AccountPauseMixin, AccountRetirementMixin, EvaluationMixin, MessageSubmissionMixin, DiscoveryMixin,
              TransferMixin, ErrorManagementMixin):
-    def __init__(self, root=None):
+    def __init__(self, root=None, *, owner_ref=None, durable=None):
         if os.name!='posix':raise UnsupportedError('Process supervision currently requires a POSIX host.')
-        self.store=Store(default_root() if root is None else root)
+        self.store=Store(default_root() if root is None else root,
+                         owner_ref=owner_ref, durable=durable)
+        self.checkpoints = Checkpoints(self.store)
         self.account_service=AccountService(self.store)
         self.managed_proxy=ManagedProxyClient(self.store.root)
         self.routes=RoutingService(self.store, self.account_service, self.managed_proxy)
@@ -370,6 +374,11 @@ class Bridge(InstanceRoutingMixin, QueueMixin, EventStreamMixin, InstanceDeletio
                 report['unresolved'].append(id);continue
             if alive(row['child_pid'],row['child_identity']):
                 report['unresolved'].append(id);continue # Never rerun work while its process may still execute.
+            intent = saved_intent(self.store, id)
+            if intent:
+                self.store.finish(id, **intent)
+                report['interrupted'].append(id)
+                continue
             self.store.emit(id,'recovery',{'reason':'worker_lost','automatic_retry':False})
             pending=unresolved(self.run(id)._observations())
             for item in pending:

@@ -9,6 +9,8 @@ from ..errors import BridgeError, BusyError
 from ..execution_policy import policy_payload, validate_policy, write_policy
 from ..models import Account, RunOptions, TERMINAL, identifier, model_id
 from ..native_sessions import bind_native_session, require_native_session
+from ..checkpoint import persistence as checkpoints
+from ..checkpoint.state import require_admission
 from .binding import has_bound_proxy_login
 from .evidence import route_evidence
 from .service import OBSERVATION_TTL, RoutingService
@@ -126,6 +128,7 @@ class RoutingStoreMixin:
                                    excluded_account_refs, initial_account_id, **policy)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            require_admission(db, id)
             if request_key:
                 old = db.execute("SELECT session_id,payload FROM instance_requests WHERE request_key=?",
                                  (request_key,)).fetchone()
@@ -265,6 +268,7 @@ class RoutingStoreMixin:
             session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
             if not session:
                 raise BridgeError("not_found", "Session does not exist.")
+            require_admission(db, session_id)
             metadata = db.execute("SELECT state,version FROM instance_metadata WHERE session_id=?",
                                   (session_id,)).fetchone()
             if expected_instance_version is not None:
@@ -348,21 +352,32 @@ class RoutingStoreMixin:
                          "attachment_content_omitted": bool(options.attachments)})
         return id, True
 
-    def finish(self, id, state, code=None, exit_code=None):
+    def finish(self, id, state, code=None, exit_code=None, *, process_verified=False):
         if state not in TERMINAL:
             raise ValueError(state)
+        checkpoints.prepare_terminal(self, id, state, code, exit_code,
+                                     process_verified=process_verified)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM runs WHERE id=?", (id,)).fetchone()
             if row is None:
                 raise BridgeError("not_found", "Run does not exist.")
             if row["state"] in TERMINAL:
+                checkpoints.observe(self, db, id)
                 return
+            checkpoint = checkpoints.record(db, id)
+            if checkpoint:
+                # A persisted terminal observation survives a later local write failure.
+                intent = json.loads(checkpoint['terminal_intent'])
+                state, code, exit_code = intent['state'], intent['code'], intent['exit_code']
             if row["stop_requested"] and state != "interrupted":
                 state, code = "cancelled", "user_stop"
             from ..turn_outcome import completion
-            self._event(db, id, row["session_id"], "run_finished",
-                        completion(db, id, state, code, exit_code))
+            result = completion(db, id, state, code, exit_code)
+            durability = checkpoints.attachment(db, row)
+            if durability is not None:
+                result['durability'] = durability
+            terminal_seq = self._event(db, id, row["session_id"], "run_finished", result)
             db.execute("UPDATE runs SET state=?,error=?,exit_code=?,updated=? WHERE id=?",
                        (state, code, exit_code, time.time(), id))
             from ..queueing.records import finished
@@ -372,3 +387,4 @@ class RoutingStoreMixin:
                                      (row["session_id"],)).fetchone()
                 db.execute("UPDATE session_routing SET last_completed_account_id=?,last_native_id=? "
                            "WHERE session_id=?", (row["account_id"], current["native_id"], row["session_id"]))
+            checkpoints.observe(self, db, id, terminal_seq)

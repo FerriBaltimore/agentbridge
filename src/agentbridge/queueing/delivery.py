@@ -6,6 +6,7 @@ import time
 from ..errors import BridgeError
 from ..models import Account, RunOptions
 from ..transports import duplex
+from ..checkpoint.state import require_admission
 from .records import (PENDING, active, changed, item_record, pending, queue_record,
                       reorder, set_paused)
 
@@ -42,6 +43,7 @@ def dispatch(store, instance_id, message_id, mode, *, expected_version=None, exp
         raise BridgeError('invalid_delivery', 'Immediate delivery must be steer or interrupt.')
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        require_admission(db, instance_id)
         row = item_record(db, instance_id, message_id)
         if row['delivery'] == mode and row['state'] not in ('cancelled', 'blocked'):
             if expected_turn_id is not None and row['target_turn_id'] != expected_turn_id:

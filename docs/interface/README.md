@@ -11,6 +11,7 @@ implementation evidence. Fixture tests and live-provider acceptance are separate
 - operations.md: method names, parameters and return values.
 - capabilities.md: v2 proxy behavior, support and acceptance maturity.
 - events.md: event envelope and stream semantics.
+- native-checkpoints.md: explicit durable mode, local native seals, full cursors and held recovery.
 - interactive-inputs.md: implemented approvals, attachments, catalogues and quota limits.
 - execution-access.md: persistent sandbox and approval defaults, overrides and effective access.
 - message-queues.md: persistent ordered input, queue editing and explicit immediate delivery.

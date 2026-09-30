@@ -7,6 +7,7 @@ import sqlite3
 from .errors import BridgeError
 from .evaluation.persistence import _process_may_run, _table_exists
 from .models import identifier
+from .checkpoint.state import require_admission
 from .proxy.home import remove_session_home
 
 
@@ -64,6 +65,7 @@ class InstanceDeletionStoreMixin:
         with self.connect() as db:
             db.execute('PRAGMA secure_delete=ON')
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             marker = db.execute('SELECT status FROM deleted_instances WHERE session_id=?',
                                 (instance_id,)).fetchone()
             if marker is None:

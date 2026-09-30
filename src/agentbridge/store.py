@@ -23,6 +23,7 @@ from .instance_deletion import InstanceDeletionStoreMixin, migrate_v9
 from .queueing.schema import migrate_v10
 from .native_sessions import bind_native_session, migrate_v12
 from .execution_policy import migrate_v13, read_policy, write_policy
+from .checkpoint.state import migrate as migrate_v14, configure, require_admission
 
 
 def dumps(value):
@@ -31,7 +32,7 @@ def dumps(value):
 
 class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
             RoutingStoreMixin, AuthStoreMixin):
-    def __init__(self, root):
+    def __init__(self, root, *, owner_ref=None, durable=None):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.root, 0o700)
@@ -155,10 +156,12 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
             version = migrate_v11(db, version)
             version = migrate_v12(db, version)
             version = migrate_v13(db, version)
-            if version != 13:
+            version = migrate_v14(db, version)
+            if version != 14:
                 raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
             db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
         os.chmod(self.path, 0o600)
+        configure(self, owner_ref=owner_ref, durable=durable)
         self.recover_deleting_instances()
 
     @contextmanager
@@ -289,6 +292,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
         policy_changed = bool(values.keys() & {'permission_mode', 'sandbox_mode', 'cwd'})
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, id)
             row = db.execute('SELECT * FROM sessions WHERE id=?', (id,)).fetchone()
             if not row:
                 raise BridgeError('instance_not_found', 'Instance does not exist.')
@@ -380,6 +384,10 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
 
     def claim(self, id, pid, identity):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            run = db.execute('SELECT session_id FROM runs WHERE id=?', (id,)).fetchone()
+            if run:
+                require_admission(db, run[0])
             cursor = db.execute("UPDATE runs SET state='running',worker_pid=?,worker_identity=?,updated=? WHERE id=? AND state='starting' AND worker_pid IS NULL",
                                 (pid,identity,time.time(),id))
             return cursor.rowcount == 1
@@ -401,8 +409,8 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
 
     @staticmethod
     def _event(db, run_id, session_id, kind, data):
-        db.execute('INSERT INTO events(run_id,session_id,kind,at,data) VALUES (?,?,?,?,?)',
-                   (run_id,session_id,kind,time.time(),dumps(data)))
+        return db.execute('INSERT INTO events(run_id,session_id,kind,at,data) VALUES (?,?,?,?,?)',
+                          (run_id,session_id,kind,time.time(),dumps(data))).lastrowid
 
     def events(self, *, run_id=None, session_id=None, after=0, limit=1000):
         if not isinstance(limit, int) or limit < 1 or not isinstance(after, int) or after < 0:
@@ -416,7 +424,8 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
         result = []
         for row in rows:
             data = json.loads(row['data'])
-            data.setdefault('message_id', row['message_id'])
+            if row['kind'] not in {'checkpoint_ready', 'checkpoint_pending'}:
+                data.setdefault('message_id', row['message_id'])
             result.append(Event(seq=row['seq'], run_id=row['run_id'] or None,
                                 session_id=row['session_id'], kind=row['kind'],
                                 at=row['at'], data=data))
@@ -428,6 +437,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
             row = db.execute("SELECT session_id FROM runs WHERE id=? "
                              "AND state IN ('starting','running','stopping')", (id,)).fetchone()
             if row:
+                require_admission(db, row['session_id'])
                 from .queueing.records import occupied, set_paused
                 if occupied(db, row['session_id']):
                     set_paused(self, db, row['session_id'], True, 'user_stop')

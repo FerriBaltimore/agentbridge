@@ -155,11 +155,11 @@ def test_terminal_commit_failure_is_retried_as_unknown_not_success(tmp_path, mon
     in_process(monkeypatch, bridge, run)
     original = bridge.store.finish
     calls = []
-    def finish(run_id, state, *args):
+    def finish(run_id, state, *args, **kwargs):
         calls.append(state)
         if len(calls) == 1:
             raise sqlite3.OperationalError('PRIVATE DISK BODY')
-        return original(run_id, state, *args)
+        return original(run_id, state, *args, **kwargs)
     monkeypatch.setattr(bridge.store, 'finish', finish)
     with pytest.raises(SystemExit):
         worker.main()

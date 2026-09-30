@@ -155,7 +155,7 @@ def test_v13_migration_backfills_restricted_policy_without_touching_native_sessi
     assert row['permission_mode'] == 'dontAsk' and row['sandbox_mode'] == 'read-only'
     assert row['native_id'] == 'native-a'
     with restored.connect() as db:
-        assert migrate_v13(db, 12) == 13
+        assert migrate_v13(db, 12) == 14
         assert db.execute('SELECT count(*) FROM instance_execution_policies').fetchone()[0] == 1
 
 

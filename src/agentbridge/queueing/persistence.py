@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ..attachments import descriptors
 from ..errors import BridgeError
+from ..checkpoint.state import require_admission
 from ..models import identifier, page_values
 from ..process import alive
 from ..store import dumps
@@ -76,6 +77,7 @@ class QueueStore:
         message_id = uuid4().hex
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             if key:
                 old = db.execute('SELECT * FROM queued_messages WHERE request_key=?', (key,)).fetchone()
                 if old:
@@ -118,6 +120,7 @@ class QueueStore:
             raise BridgeError('invalid_position', 'position must be a zero-based integer.')
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             queue_record(db, instance_id, expected_version)
             row = item_record(db, instance_id, identifier(message_id))
             require_pending(row)
@@ -136,6 +139,7 @@ class QueueStore:
     def delete(self, instance_id, message_id, *, expected_version=None):
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             row = item_record(db, instance_id, identifier(message_id))
             if row['state'] == 'cancelled':
                 return {'message_id': message_id, 'instance_id': instance_id, 'state': 'cancelled',
@@ -154,6 +158,7 @@ class QueueStore:
     def pause(self, instance_id, *, expected_version=None):
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             queue_record(db, instance_id, expected_version)
             set_paused(self.store, db, instance_id, True, 'user_pause')
         return self.snapshot(instance_id)
@@ -161,6 +166,7 @@ class QueueStore:
     def resume(self, instance_id, *, expected_version=None):
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             queue_record(db, instance_id, expected_version)
             db.execute("UPDATE queued_messages SET state='queued',error=NULL,updated=? "
                        "WHERE session_id=? AND state IN ('blocked','staged')",
@@ -172,6 +178,7 @@ class QueueStore:
     def activate(self, instance_id, message_id):
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             row = item_record(db, instance_id, message_id)
             if row['state'] == 'staged':
                 db.execute("UPDATE queued_messages SET state='queued',updated=? WHERE id=?",
@@ -181,6 +188,7 @@ class QueueStore:
     def block(self, instance_id, message_id, code):
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             row = item_record(db, instance_id, message_id)
             if row['state'] not in PENDING:
                 return

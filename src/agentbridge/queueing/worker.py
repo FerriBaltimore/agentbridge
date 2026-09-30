@@ -14,6 +14,7 @@ from ..errors import BridgeError
 from ..execution_context import verify
 from ..models import RunOptions
 from ..process import alive, identity
+from ..checkpoint.state import blocked
 from .connection import MAX_REQUEST_BYTES, address, directory
 from .persistence import QueueStore
 from .records import active, pending, queue_record
@@ -87,6 +88,7 @@ class Dispatcher:
         with store.connect() as db:
             db.execute('BEGIN')
             queue = queue_record(db, self.instance_id)
+            durability_held = blocked(db, self.instance_id)
             rows = pending(db, self.instance_id)
             running = active(db, self.instance_id)
             previous = db.execute('SELECT * FROM runs WHERE session_id=? ORDER BY rowid DESC LIMIT 1',
@@ -97,7 +99,7 @@ class Dispatcher:
                 self.execution.pop(message_id, None)
         if not rows:
             return False
-        if queue['paused'] or running or rows[0]['state'] != 'queued':
+        if durability_held or queue['paused'] or running or rows[0]['state'] != 'queued':
             return True
         if time.monotonic() < self.next_admission:
             return True

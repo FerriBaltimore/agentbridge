@@ -31,6 +31,8 @@ from .workspace_policy import validate_execution_workspace
 from .execution_context import (MCP_CAPABILITY_ENV, PRIVATE_EXECUTION_KEY,
                                 mcp_environment, validate_access, verify)
 from .native_sessions import mark_native_launch, require_native_session
+from .checkpoint.state import identity as store_identity
+from .checkpoint.processes import enable_subreaper, quiesce
 
 MAX_LINE=8*1024*1024
 
@@ -46,6 +48,7 @@ def main():
     parser=None
     writer=None
     select=None
+    durable=False
     stopped=[False]
     signal.signal(signal.SIGTERM,lambda *_:stopped.__setitem__(0,True))
     signal.signal(signal.SIGINT,lambda *_:stopped.__setitem__(0,True))
@@ -53,6 +56,10 @@ def main():
         store=Store(root)
         claimed=store.claim(run_id,os.getpid(),identity(os.getpid()))
         if not claimed:return
+        with store.connect() as db:
+            durable=bool(store_identity(db)['enabled'])
+        if durable:
+            enable_subreaper()
         run=store.get('runs',run_id)
         session=store.get('sessions',run['session_id'])
         with store.connect() as db:
@@ -192,6 +199,9 @@ def main():
             if child.poll() is not None:
                 try:os.killpg(child.pid,signal.SIGKILL)
                 except ProcessLookupError:pass
+                if durable:
+                    if not quiesce():
+                        break  # Preserve pending continuity when descendant death is unverified.
                 if not select.get_map():break
             if term_at is not None and now-term_at>options.stop_grace+2:break
         if buffer:parse(buffer,parser)
@@ -199,6 +209,7 @@ def main():
         # Also cover the case where every pipe closed before wrapper exit.
         try:os.killpg(child.pid, signal.SIGKILL)
         except ProcessLookupError:pass
+        process_verified=quiesce() if durable else False
         writer.join(timeout=2)
         if writer_error:reason=reason or 'input_delivery_failed'
         unresolved=parser.end()
@@ -213,7 +224,7 @@ def main():
             issue = observe_error(issue)
             failure = issue['code']
             emit('error', issue)
-        store.finish(run_id, state, failure, code)
+        store.finish(run_id, state, failure, code, process_verified=process_verified)
     except BaseException as error:
         # Each recovery step is independent: a second storage failure must not
         # skip cleanup or a terminal commit that could still succeed.
@@ -224,6 +235,9 @@ def main():
             except OSError:cleaned=False
             try:child.wait(timeout=5)
             except (OSError,subprocess.TimeoutExpired):cleaned=False
+            if durable:
+                try:cleaned=quiesce() and cleaned
+                except BridgeError:cleaned=False
         if parser:
             try:parser.end()
             except Exception:pass
@@ -242,7 +256,8 @@ def main():
             try:store.emit(run_id,'error',issue)
             except Exception:pass
             if cleaned:
-                try:store.finish(run_id,'interrupted' if child else 'failed',issue['code'])
+                try:store.finish(run_id,'interrupted' if child else 'failed',issue['code'],
+                                 process_verified=durable and bool(child) and cleaned)
                 except Exception:pass
         # Persistent disk failure cannot be acknowledged as a saved result.
         # A dead owner remains reconcilable once the store becomes writable.

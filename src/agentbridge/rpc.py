@@ -41,6 +41,8 @@ def public_login(result, bridge=None):
 
 
 def dispatch(bridge,method,params):
+    if method in {'checkpoints.create', 'checkpoints.restore', 'checkpoints.snapshot_store'}:
+        return getattr(bridge.checkpoints, method.split('.')[1])(**params)
     contract_methods = {'contracts.list': 'provider_contracts', 'contracts.get': 'provider_contract',
                         'contracts.check': 'provider_compatibility', 'contracts.inspect': 'provider_inspect'}
     if method in contract_methods:

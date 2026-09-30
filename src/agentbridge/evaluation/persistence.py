@@ -3,6 +3,7 @@
 import time
 
 from ..errors import BridgeError
+from ..checkpoint.state import require_admission
 from ..models import TERMINAL, identifier
 from ..process import alive
 from ..proxy.home import remove_session_home
@@ -30,6 +31,7 @@ class EvaluationStoreMixin:
         with self.connect() as db:
             db.execute('PRAGMA secure_delete=ON')
             db.execute('BEGIN IMMEDIATE')
+            require_admission(db, instance_id)
             marker = db.execute('SELECT * FROM evaluation_instances WHERE session_id=?',
                                 (instance_id,)).fetchone()
             if marker is None:

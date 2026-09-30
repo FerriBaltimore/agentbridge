@@ -31,7 +31,20 @@ class DiscoveryMixin:
             account = self.resolve_account(account_ref)
             if not account.proxy_base_url:
                 raise BridgeError('invalid_proxy_account', 'This historical account cannot execute.')
-        return proxy_payload(include_parameters=include_parameters)
+        result = proxy_payload(include_parameters=include_parameters)
+        durability = self.checkpoints.identity()
+        durability.update({'support': 'adapter' if durability['enabled'] else 'disabled',
+                           'maturity': 'fixture_tested',
+                           'native_schema': 'codex-0-153-0-home-v1',
+                           'limitations': ['linux_only', 'local_seal_only',
+                                           'exact_runtime_digest_required',
+                                           'live_provider_acceptance_pending']})
+        result['durability'] = durability
+        for name in ('create', 'restore', 'snapshot_store'):
+            result['operations']['checkpoints.' + name] = {
+                'support': durability['support'], 'maturity': durability['maturity'],
+                'limitations': list(durability['limitations'])}
+        return result
 
     def models(self, engine=None, *, account_ref=None, provider=None, refresh=False, include_hidden=False,
                include_deprecated=False, limit=None, cursor=0):

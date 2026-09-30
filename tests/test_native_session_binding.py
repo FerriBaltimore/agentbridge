@@ -71,7 +71,7 @@ def test_v12_anchors_current_history_or_last_observation_after_legacy_clear(tmp_
 def test_v12_rechecks_version_under_write_lock(tmp_path):
     store = prepared(tmp_path)
     with store.connect() as db:
-        assert migrate_v12(db, 11) == 13
+        assert migrate_v12(db, 11) == 14
         assert db.execute('SELECT count(*) FROM native_session_bindings').fetchone()[0] == 1
 
 

@@ -5,6 +5,7 @@ import time
 from .errors import BridgeError, UnsupportedError
 from .event_contract import public_event
 from .models import TERMINAL, page_values
+from .checkpoint import state as checkpoint_state
 
 
 def _timeout_seconds(value):
@@ -17,6 +18,24 @@ def _timeout_seconds(value):
 
 
 class EventStreamMixin:
+    def _replay_cursor(self, cursor, after_seq):
+        with self.store.connect() as db:
+            durable = checkpoint_state.identity(db)['enabled']
+            if cursor is not None:
+                if after_seq != 0:
+                    raise BridgeError('cursor_generation_mismatch', 'Use one complete replay cursor.')
+                return checkpoint_state.require_cursor(db, cursor)
+            if durable:
+                raise BridgeError('cursor_generation_mismatch', 'Durable replay requires a full cursor.')
+            return after_seq
+
+    def _public_event(self, event, engine):
+        result = public_event(event, engine)
+        with self.store.connect() as db:
+            if checkpoint_state.identity(db)['enabled']:
+                result['cursor'] = checkpoint_state.cursor(db, event.seq)
+        return result
+
     def _turn_event_page(self, run, after_seq, limit, timeout):
         """Return one saved page, optionally waiting for its first event."""
         started = time.monotonic()
@@ -41,31 +60,34 @@ class EventStreamMixin:
                 wait = min(wait, timeout - (now - started))
             time.sleep(max(0, wait))
 
-    def turn_events(self, turn_id, *, after_seq=0, limit=1000, follow=False, timeout_ms=None):
+    def turn_events(self, turn_id, *, after_seq=0, limit=1000, follow=False, timeout_ms=None, cursor=None):
+        after_seq = self._replay_cursor(cursor, after_seq)
         timeout = _timeout_seconds(timeout_ms)
         limit, after_seq = page_values(limit, after_seq)
         run = self.run(turn_id)
         engine = self.account(run.session['account_id']).engine
         events = (self._turn_event_page(run, after_seq, limit, timeout) if follow
                   else run.events(after=after_seq, limit=limit))
-        return [public_event(event, engine) for event in events]
+        return [self._public_event(event, engine) for event in events]
 
     def instance_events(self, instance_id, *, after_seq=0, limit=1000, follow=False,
-                        timeout_ms=None):
+                        timeout_ms=None, cursor=None):
+        after_seq = self._replay_cursor(cursor, after_seq)
         if follow:
             raise UnsupportedError('Conversation event follow is not supported; poll with after_seq.')
         _timeout_seconds(timeout_ms)
         session = self.get_session(instance_id)
         engine = self.account(session['account_id']).engine
         events = self.store.events(session_id=instance_id, after=after_seq, limit=limit)
-        return [public_event(event, engine) for event in events]
+        return [self._public_event(event, engine) for event in events]
 
-    def turn_events_stream(self, turn_id, *, after_seq=0, timeout_ms=None):
+    def turn_events_stream(self, turn_id, *, after_seq=0, timeout_ms=None, cursor=None):
         """Replay then follow saved events until terminal state or idle timeout.
 
         A caller may close this iterator without cancelling the underlying turn.
         The cursor advances only across events actually yielded to the caller.
         """
+        after_seq = self._replay_cursor(cursor, after_seq)
         _, cursor = page_values(1, after_seq)
         timeout = _timeout_seconds(timeout_ms)
         run = self.run(turn_id)
@@ -76,4 +98,4 @@ class EventStreamMixin:
                 return
             for event in page:
                 cursor = event.seq
-                yield public_event(event, engine)
+                yield self._public_event(event, engine)
