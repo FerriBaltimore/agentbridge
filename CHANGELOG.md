@@ -11,6 +11,12 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-10-01
+
+- Verified restored credentials retain their authenticated login provenance while rebinding
+  the proxy route, so the existing session can be admitted after native recovery is released.
+  Identity, generation, retirement and restore holds are rechecked before the atomic update.
+
 ## [2.8.1] - 2026-10-01
 
 - Trusted proxy, run, queue and interactive children retain the host bundle's verified

@@ -7,11 +7,37 @@ import shutil
 import tempfile
 
 from ..checkpoint import content, native, state
+from ..routing.binding import has_bound_proxy_login
 from . import credential_barrier as barrier
 from . import credential_content as capsule
 from .credential_snapshots import accounts, fail, validate
 from .management import ManagementClient
 from .route import ProxyRoute
+
+
+def rebind_login_route(db, account_id, previous, route):
+    """Move only the authenticated origin's route after proving the restored identity."""
+    if not has_bound_proxy_login(db, previous):
+        fail('credential_snapshot_identity')
+    rows = db.execute("SELECT a.id,a.engine,a.name,a.grantbridge_id,a.data,r.config "
+                      "FROM auth_attempts a JOIN auth_proxy_routes r ON r.attempt_id=a.id "
+                      "WHERE a.account_id=? AND a.status='bound'", (account_id,)).fetchall()
+    for row in rows:
+        if (row['engine'] != previous['provider'] or row['name'] != previous['name']
+                or not row['grantbridge_id']):
+            continue
+        try:
+            attempt, old_route = json.loads(row['data']), json.loads(row['config'])
+        except (TypeError, ValueError):
+            continue
+        fields = ('proxy_base_url', 'key_env', 'management_key_env')
+        if (not isinstance(attempt, dict) or attempt.get('state') != 'usable'
+                or not isinstance(old_route, dict)
+                or any(old_route.get(key) != previous.get(key) for key in fields)):
+            continue
+        old_route.update({key: route[key] for key in fields})
+        db.execute('UPDATE auth_proxy_routes SET config=? WHERE attempt_id=?',
+                   (json.dumps(old_route), row['id']))
 
 
 def restore(store, descriptor):
@@ -121,11 +147,16 @@ def verify(store, managed_proxy, account_id, proof_ref, verify_authority, verify
                 fail('credential_snapshot_reauthentication')
             with store.connect() as db:
                 db.execute('BEGIN IMMEDIATE')
-                if not barrier.hold(db, account_id):
+                current_identity = state.identity(db)
+                if (tuple(barrier.hold(db, account_id) or ()) != (row['snapshot_id'], 'restore')
+                        or any(current_identity[key] != identity[key] for key in state.IDENTITY_KEYS)
+                        or json.loads(db.execute('SELECT config FROM accounts WHERE id=?',
+                                      (account_id,)).fetchone()[0]) != config):
                     fail('credential_snapshot_conflict')
                 if db.execute('SELECT 1 FROM retired_accounts WHERE account_id=?',
                               (account_id,)).fetchone():
                     fail('credential_snapshot_reauthentication')
+                rebind_login_route(db, account_id, config, route)
                 config.update(route)
                 db.execute('UPDATE accounts SET config=? WHERE id=?',
                            (json.dumps(config), account_id))

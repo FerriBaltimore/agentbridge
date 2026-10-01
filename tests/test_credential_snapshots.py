@@ -194,6 +194,51 @@ def test_capture_rejects_links_and_holds_until_private_repair(managed, tmp_path)
     assert capture(bridge, ['first'], operation_id=operation_id, proof_ref=proof_ref)
 
 
+def test_verified_restore_rebinds_login_route_for_existing_session(managed, tmp_path):
+    _, root = managed
+    source = Bridge(root, owner_ref='fixture-owner', durable=True)
+    _, old_route = account(source, 'first')
+    account(source, 'other')
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    source.store.add_session('existing-instance', 'first', str(workspace), 'gpt-5')
+    descriptor = capture(source, ['first'])
+    restored = target(source, tmp_path, descriptor)
+    try:
+        restored.credential_snapshots.restore(descriptor)
+        with restored.store.connect() as db:
+            provenance = dict(db.execute(
+                "SELECT * FROM auth_attempts WHERE account_id='first'").fetchone())
+            other_route = db.execute("SELECT config FROM auth_proxy_routes "
+                                     "WHERE attempt_id='fixture-login-other'").fetchone()[0]
+        restored.credential_snapshots.verify_restored('first', proof_ref=str(uuid4()),
+            verify_authority=lambda scope: True,
+            verify_credential=lambda scope, route, observation: {
+                'authentication': 'verified',
+                'identity_fingerprint': observation['identity_fingerprint']})
+        current = restored.account('first')
+        assert current.proxy_base_url != old_route['proxy_base_url']
+        assert restored.store.proxy_login_origin(current)
+        assert restored.routes.observation(current, refresh=True,
+            include_catalog=False)['data']['binding_verified']
+        with restored.store.connect() as db:
+            assert state.identity(db)['recovery_held']
+            assert dict(db.execute("SELECT * FROM auth_attempts WHERE account_id='first'"
+                                   ).fetchone()) == provenance
+            assert db.execute("SELECT config FROM auth_proxy_routes "
+                              "WHERE attempt_id='fixture-login-other'").fetchone()[0] == other_route
+        identity = restored.checkpoints.identity()
+        restored.checkpoints.release_recovery(expected_generation=identity['store_generation'],
+                                             ready_instances=['existing-instance'])
+        restored.store.admit('after-restore', 'existing-instance', 'admitted only',
+                             RunOptions(), 'after')
+        restored.store.finish('after-restore', 'failed', process_verified=True)
+        assert restored.instance_get('existing-instance')['account_id'] == 'first'
+        assert source.account('first').proxy_base_url == old_route['proxy_base_url']
+    finally:
+        restored.managed_proxy.shutdown()
+
+
 def test_capture_drains_execution_and_login_before_stopping_the_proxy(managed, tmp_path):
     _, root = managed
     bridge = Bridge(root, owner_ref='fixture-owner', durable=True)
