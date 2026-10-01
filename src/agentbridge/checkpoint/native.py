@@ -169,6 +169,18 @@ def runtime(store, session, *, home=None):
             'store_schema': version, 'native_schema': NATIVE_SCHEMA}
 
 
+def prepare_sqlite_reads(home):
+    """Create SQLite's read-side journals before measuring the stopped home's stability."""
+    for _, path in inventory(home):
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as handle:
+            is_sqlite = handle.read(16) == b'SQLite format 3\0'
+        if is_sqlite:
+            # Even a read-only WAL connection can create empty WAL/SHM files. Do not use
+            # immutable mode: committed data may still live in an existing WAL.
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+                db.execute('PRAGMA schema_version').fetchone()
+
+
 def sqlite_copy(source, target):
     # The source is already type/path-checked. Use SQLite's online backup, never raw pages.
     with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True)) as origin:

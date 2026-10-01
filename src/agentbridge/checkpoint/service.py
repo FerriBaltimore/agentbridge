@@ -51,6 +51,7 @@ def seal(store, turn_id):
         home = store.root / 'codex-runtime' / session['id']
         native.inventory(home)
         runtime = native.runtime(store, session)
+        native.prepare_sqlite_reads(home)
         before = native.fingerprint(home)
         if attempt['source_fingerprint'] and before != attempt['source_fingerprint']:
             native.fail('checkpoint_corrupt')

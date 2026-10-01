@@ -11,6 +11,11 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-10-01
+
+- Restored native sessions prepare SQLite read journals before sealing a new checkpoint.
+  Empty journals no longer appear as concurrent changes; committed WAL changes remain detected.
+
 ## [2.9.0] - 2026-10-01
 
 - Hosts can admit operation-scoped local HTTP MCP servers through public context version 2.
@@ -233,7 +238,7 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.9.1...HEAD
 [2.8.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.8.0
 [2.7.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.7.0
 [2.5.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.5.0
@@ -241,3 +246,5 @@ stay readable but cannot create accounts or start turns.
 [2.6.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.6.0
 
 [2.9.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.9.0
+
+[2.9.1]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.9.1

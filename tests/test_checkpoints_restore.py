@@ -1,5 +1,6 @@
 """Offline recovery restores verified native histories held, without replay or authority reuse."""
 
+from contextlib import closing
 from copy import deepcopy
 import json
 import sqlite3
@@ -14,9 +15,20 @@ from agentbridge.errors import BridgeError
 from fixtures.test_checkpoint_fixture import execution, prepared, scope, terminal
 
 
-def sealed(tmp_path):
+def sealed(tmp_path, *, wal_indexes=False):
     bridge = prepared(tmp_path)
-    execution(bridge)
+    home = execution(bridge)
+    if wal_indexes:
+        for name in ('logs_2.sqlite', 'queue_1.sqlite'):
+            path = home / name
+            with closing(sqlite3.connect(path)) as db, db:
+                assert db.execute('PRAGMA journal_mode=WAL').fetchone() == ('wal',)
+                db.execute('CREATE TABLE entries(value TEXT)')
+                db.execute('INSERT INTO entries VALUES (?)', (name,))
+            # A running source has already opened its indexes; restored copies have not.
+            with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
+                db.execute('PRAGMA schema_version').fetchone()
+            assert path.with_name(name + '-wal').stat().st_size == 0
     bridge.store.finish('turn-1', 'completed', process_verified=True)
     checkpoint = terminal(bridge).data['durability']['checkpoint']
     snapshot = bridge.checkpoints.snapshot_store(format_version='1', operation_id=str(uuid4()),
@@ -24,8 +36,8 @@ def sealed(tmp_path):
     return bridge, checkpoint, snapshot
 
 
-def imported(tmp_path):
-    bridge, checkpoint, snapshot = sealed(tmp_path)
+def imported(tmp_path, *, wal_indexes=False):
+    bridge, checkpoint, snapshot = sealed(tmp_path, wal_indexes=wal_indexes)
     binding = restore_store(tmp_path / 'restored', snapshot,
                             bridge.checkpoints.resolve_content(snapshot['content']),
                             owner_ref=snapshot['owner_ref'])
@@ -159,8 +171,11 @@ def test_legacy_adoption_requires_host_proof_and_does_not_rewrite_old_terminal(t
 
 
 def test_restored_generation_needs_new_seal_and_supports_a_second_isolated_restore(tmp_path):
-    _, restored, original, _, request = imported(tmp_path)
+    _, restored, original, _, request = imported(tmp_path, wal_indexes=True)
     result = restored.checkpoints.restore(**request)
+    home = restored.root / 'codex-runtime' / 'instance'
+    assert not list(home.glob('logs_2.sqlite-*'))
+    assert not list(home.glob('queue_1.sqlite-*'))
     restored.checkpoints.release_recovery(expected_generation=result['store_generation'])
     without_new_seal = restored.checkpoints.snapshot_store(
         format_version='1', operation_id=str(uuid4()), params=scope(restored))
@@ -171,6 +186,10 @@ def test_restored_generation_needs_new_seal_and_supports_a_second_isolated_resto
     assert checkpoint['checkpoint_id'] != original['checkpoint_id']
     assert checkpoint['store_generation'] == result['store_generation']
     assert terminal(restored).data == historical
+    for name in ('logs_2.sqlite', 'queue_1.sqlite'):
+        assert (home / (name + '-wal')).stat().st_size == 0
+        with closing(sqlite3.connect((home / name).as_uri() + '?mode=ro', uri=True)) as db:
+            assert db.execute('SELECT value FROM entries').fetchall() == [(name,)]
     snapshot = restored.checkpoints.snapshot_store(format_version='1', operation_id=str(uuid4()),
                                                  params=scope(restored))
     assert snapshot['coverage'][0]['checkpoint_id'] == checkpoint['checkpoint_id']
@@ -194,6 +213,16 @@ def test_restored_generation_needs_new_seal_and_supports_a_second_isolated_resto
         'destination_generation': binding['store_generation']})
     second.checkpoints.release_recovery(expected_generation=binding['store_generation'])
     assert second.get_session('instance')['native_id'] == original['native_id']
+    # Stability must still notice committed WAL data without a change to the main file.
+    second_home = second.root / 'codex-runtime' / 'instance'
+    path = second_home / 'logs_2.sqlite'
+    before, main_before = native.fingerprint(second_home), native.digest(path)
+    with closing(sqlite3.connect(path)) as db:
+        db.execute("INSERT INTO entries VALUES ('changed')")
+        db.commit()
+        assert path.with_name(path.name + '-wal').stat().st_size > 0
+        assert native.digest(path) == main_before
+        assert native.fingerprint(second_home) != before
 
 
 def test_partial_release_keeps_unknown_held_and_later_restores_another_instance(tmp_path):
