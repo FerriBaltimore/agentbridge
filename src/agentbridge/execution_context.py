@@ -1,5 +1,5 @@
 """Private execution inputs and the public MCP descriptor boundary."""
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 import sys
 from uuid import UUID
@@ -112,7 +112,8 @@ def codex_config(*, mcp_enabled=False, execution_mode='normal', selected_context
         config['mcp_servers'] = {'agentbridge_execution': {
             'command': sys.executable,
             'args': ['-P', '-m', 'agentbridge.mcp_bridge'],
-            'env_vars': ['PYTHONPATH', MCP_SOCKET_ENV, MCP_OPERATION_ENV, MCP_CAPABILITY_ENV],
+            'env': {'PYTHONPATH': str(Path(__file__).resolve().parents[1])},
+            'env_vars': [MCP_SOCKET_ENV, MCP_OPERATION_ENV, MCP_CAPABILITY_ENV],
             'required': True,
             'startup_timeout_sec': 10,
             'tool_timeout_sec': 25,

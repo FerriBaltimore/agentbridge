@@ -14,6 +14,7 @@ from .provider_channel import ProviderChannel
 from .native_sandbox import available as isolation_available
 from .security import Redactor
 from .store import Store
+from .subprocess_path import python_path
 from .queueing.steering import Steering
 
 
@@ -58,7 +59,8 @@ def main():
             temporary = TemporaryDirectory(prefix='agentbridge-native-')
             with temporary as temp_dir:
                 native_env = os.environ.copy()
-                native_env.pop('PYTHONPATH', None)
+                # The trusted Python wrapper must boot before the native environment is reduced.
+                native_env['PYTHONPATH'] = python_path()
                 native_env['TMPDIR'] = temp_dir
                 native_env['HOME'] = native_env['CODEX_HOME']
                 with ProviderChannel(payload['command'], cwd=payload['cwd'], env=native_env,

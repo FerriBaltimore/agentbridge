@@ -11,6 +11,12 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.8.3] - 2026-10-01
+
+- The trusted native wrapper starts with the verified SDK bundle before clearing its Python
+  dependency path for Codex. The execution MCP process receives only the SDK source path.
+  Real sandbox coverage verifies wrapper startup and denies access to worker data and drivers.
+
 ## [2.8.2] - 2026-10-01
 
 - Verified restored credentials retain their authenticated login provenance while rebinding

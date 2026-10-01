@@ -205,6 +205,8 @@ def main():
     if selected is None:
         raise SystemExit(1)
     executable = str(Path(selected).resolve(strict=True))
+    # Only this trusted wrapper imports the worker bundle; never forward its dependencies.
+    os.environ.pop('PYTHONPATH', None)
     try:
         if host_isolated and (inputs_only or not full_access):
             raise ValueError('Invalid host-isolated access policy')
