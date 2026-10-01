@@ -55,7 +55,8 @@ def main():
                 mcp_enabled=payload.get('mcp_enabled') is True,
                 execution_mode=package.get('execution_mode', 'normal') if package else 'normal',
                 selected_context=package is not None,
-                host_isolated=payload['options'].get('host_isolated', False))
+                host_isolated=payload['options'].get('host_isolated', False),
+                mcp=payload.get('mcp'))
             temporary = TemporaryDirectory(prefix='agentbridge-native-')
             with temporary as temp_dir:
                 native_env = os.environ.copy()
@@ -69,7 +70,11 @@ def main():
                                      full_access=payload['options']['sandbox'] == 'danger-full-access',
                                      selected_context=package is not None,
                                      host_isolated=payload['options'].get('host_isolated', False),
-                                     mcp_enabled=payload.get('mcp_enabled') is True) as channel:
+                                     read_only_paths=(package or {}).get('read_only_paths', ()),
+                                     native_workspace_write=(package or {}).get('workspace_write'),
+                                     mcp_enabled=(payload.get('mcp_enabled') is True
+                                                  and (payload.get('mcp') or {}).get(
+                                                      'version', 1) == 1)) as channel:
                     steering = Steering(broker.store, payload['turn_id'])
                     CodexControl(channel, payload, emit, approve, steering).execute()
     except BridgeError as error:

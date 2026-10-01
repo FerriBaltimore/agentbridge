@@ -57,7 +57,10 @@ class CodexControl:
         observed = notice(method, params)
         if observed is not None:
             if (observed['kind'] == 'mcp_startup' and self.payload.get('mcp_enabled')
-                    and params.get('name') == 'agentbridge_execution'
+                    and params.get('name') in ({server['name'] for server in
+                        (self.payload.get('mcp') or {}).get('servers', [])}
+                        if (self.payload.get('mcp') or {}).get('version') == 2
+                        else {'agentbridge_execution'})
                     and observed['status'] in {'failed', 'cancelled'}):
                 raise BridgeError('provider_unavailable', 'The selected MCP server could not start.',
                                   phase='execution' if self.turn_id else 'launch',

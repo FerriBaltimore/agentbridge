@@ -153,10 +153,17 @@ def restrict(*, cwd, home, temporary, executable, inputs_only=True,
 
 
 def wrap(command, *, inputs_only=False, workspace_write=False, mcp_enabled=False,
-         full_access=False, selected_context=False, host_isolated=False):
+         full_access=False, selected_context=False, host_isolated=False, read_only_paths=(),
+         native_workspace_write=None):
     """Run Codex through this policy before either native transport starts."""
     if host_isolated and (not full_access or inputs_only):
         raise BridgeError('invalid_execution_policy', 'Invalid host-isolated access policy.')
+    if read_only_paths and (inputs_only or not host_isolated):
+        raise BridgeError('invalid_execution_policy',
+                          'Read-only projections require host-isolated execution.')
+    if native_workspace_write is not None and (
+            type(native_workspace_write) is not bool or not host_isolated or inputs_only):
+        raise BridgeError('invalid_execution_policy', 'Invalid native workspace write policy.')
     if full_access and not host_isolated and (inputs_only or mcp_enabled or selected_context):
         raise BridgeError('invalid_execution_policy',
                           'Full access cannot disable selected input isolation.')
@@ -167,10 +174,14 @@ def wrap(command, *, inputs_only=False, workspace_write=False, mcp_enabled=False
         flags.append('--host-isolated')
     if workspace_write:
         flags.append('--write-workspace')
+    if native_workspace_write is False:
+        flags.append('--read-only-workspace')
     if mcp_enabled:
         flags.append('--mcp')
     if inputs_only or mcp_enabled or selected_context:
         flags.append('--no-native-shell')
+    for path in read_only_paths:
+        flags.extend(('--read-only-path', path))
     return [sys.executable, '-P', '-m', 'agentbridge.native_sandbox',
             *flags, '--', *command]
 
@@ -181,6 +192,8 @@ def main():
         raise SystemExit(2)
     inputs_only = True
     workspace_write = mcp_enabled = full_access = host_isolated = False
+    read_only_paths = []
+    native_workspace_write = True
     native_shell = True
     if arguments[0] in {'--inputs-only', '--normal'}:
         inputs_only = arguments.pop(0) == '--inputs-only'
@@ -196,6 +209,10 @@ def main():
                 full_access = True
             elif flag == '--no-native-shell':
                 native_shell = False
+            elif flag == '--read-only-path' and arguments:
+                read_only_paths.append(arguments.pop(0))
+            elif flag == '--read-only-workspace':
+                native_workspace_write = False
             else:
                 raise SystemExit(2)
         if not arguments or arguments.pop(0) != '--' or not arguments:
@@ -208,13 +225,16 @@ def main():
     # Only this trusted wrapper imports the worker bundle; never forward its dependencies.
     os.environ.pop('PYTHONPATH', None)
     try:
+        if read_only_paths and (inputs_only or not host_isolated):
+            raise ValueError('Read-only projections require host-isolated execution')
         if host_isolated and (inputs_only or not full_access):
             raise ValueError('Invalid host-isolated access policy')
         if host_isolated or (not inputs_only and not full_access and native_shell):
             from .native_namespace import reexec
             reexec(command, home=os.environ['CODEX_HOME'], temporary=os.environ['TMPDIR'],
-                   workspace_write=workspace_write or host_isolated, mcp_enabled=mcp_enabled,
-                   host_isolated=host_isolated)
+                   workspace_write=(native_workspace_write if host_isolated else workspace_write),
+                   mcp_enabled=mcp_enabled,
+                   host_isolated=host_isolated, read_only_paths=read_only_paths)
             raise RuntimeError('The native namespace launcher returned without execution')
         if full_access:
             if inputs_only or mcp_enabled:

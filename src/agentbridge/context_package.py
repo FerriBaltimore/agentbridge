@@ -47,10 +47,24 @@ def validate(package):
         invalid()
     version = package['version']
     allowed = required | ({'tools'} if version == 2 else set())
-    if (set(package) not in (allowed, allowed | {'execution_mode'})
+    optional = {'execution_mode'} | ({'read_only_paths', 'workspace_write'}
+                                    if version == 2 else set())
+    if (not allowed <= set(package) or set(package) - allowed - optional
             or type(version) is not int
             or package.get('execution_mode', 'normal') not in (
                 'normal', 'inputs_only', 'evaluation_inputs_only')):
+        invalid()
+    if 'workspace_write' in package and (type(package['workspace_write']) is not bool
+            or package.get('execution_mode', 'normal') != 'normal'):
+        invalid()
+    paths = package.get('read_only_paths', [])
+    if (not isinstance(paths, list) or len(paths) > 16
+            or any(not isinstance(path, str) or not 1 <= len(path) <= 4096
+                   or not PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts
+                   or str(PurePosixPath(path)) != path or '\0' in path or '\\' in path
+                   for path in paths)
+            or len(set(paths)) != len(paths)
+            or paths and package.get('execution_mode', 'normal') != 'normal'):
         invalid()
     if len(utf8(canonical(package))) > MAX_PACKAGE_BYTES:
         invalid()

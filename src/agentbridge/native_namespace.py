@@ -59,7 +59,7 @@ def _system_mounts():
 
 
 def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False,
-           host_isolated=False):
+           host_isolated=False, read_only_paths=()):
     """Launch ordinary Codex with a projected filesystem and private procfs."""
     home, temporary = _directory(home), _directory(temporary)
     cwd = _directory(Path.cwd())
@@ -72,6 +72,7 @@ def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False
         raise ValueError('Workspace includes private worker state')
     if workspace_write and writable_runtime_in_workspace(cwd):
         raise ValueError('Writable workspace includes the AgentBridge runtime')
+    projections = readonly_projections(read_only_paths, cwd=cwd, home=home, temporary=temporary)
     launcher, executable, package = _launcher(command, home, temporary, host_isolated)
     # Start with bubblewrap's empty filesystem, without host-root or host-proc
     # mounts. Keep the existing network namespace so the proxy stays reachable.
@@ -83,6 +84,8 @@ def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False
             '--bind' if workspace_write else '--ro-bind', str(cwd), str(cwd),
             '--bind', str(home), str(home), '--chdir', str(cwd),
             '--bind', str(temporary), str(temporary)]
+    for path in projections:
+        args.extend(('--ro-bind', str(path), str(path)))
     if host_isolated:
         args.extend(('--add-seccomp-fd', str(namespace_filter_fd())))
         if mcp_enabled:
@@ -102,3 +105,16 @@ def reexec(command, *, home, temporary, workspace_write=False, mcp_enabled=False
                  '--', str(executable), *command[1:]))
     restrict_process_inspection()
     os.execv(str(launcher), args)
+
+
+def readonly_projections(paths, *, cwd, home, temporary):
+    if not isinstance(paths, (list, tuple)) or len(paths) > 16:
+        raise ValueError('Read-only projection bound exceeded')
+    selected = [_directory(path) for path in paths]
+    protected = (cwd, home.parent.parent, temporary, Path('/proc'), Path('/sys'),
+                 Path('/dev'), Path('/usr'), Path('/lib'), Path('/lib64'))
+    for index, path in enumerate(selected):
+        if (any(path.is_relative_to(other) or other.is_relative_to(path)
+                for other in (*protected, *selected[:index]))):
+            raise ValueError('Read-only projection overlaps another execution boundary')
+    return selected

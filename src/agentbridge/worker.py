@@ -132,7 +132,7 @@ def main():
                                    state_root=store.root),
                 'secret_names': [*secrets, *([MCP_CAPABILITY_ENV] if mcp_env else [])],
                 'context_package': execution['context_package'] if execution else None,
-                'mcp_enabled': bool(mcp_env)})
+                'mcp_enabled': bool(mcp_env), 'mcp': execution['mcp'] if execution else None})
         else:
             payload=prompt
             native_temp=tempfile.mkdtemp(prefix='agentbridge-native-')

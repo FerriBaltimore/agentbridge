@@ -85,6 +85,32 @@ any native process starts, whichever engine or provider it names.
 
 ## MCP descriptor
 
+Version 2 accepts `version`, canonical UUID `operation_id`, opaque `capability`,
+and `servers`: 1–100 unique `{name, url}` entries. URLs are bounded HTTP endpoints
+on `127.0.0.1` with an explicit port, no userinfo, query or fragment. The host owns
+that isolated loopback listener and enforces execution scope and revocation.
+This version requires `host_isolated: true`. AgentBridge configures those native
+MCP servers on thread start/resume, with a bearer header and tool approval mode
+`approve`; it does not create a second MCP bridge. Startup failure of any selected
+server fails execution. A new turn can select different connections while keeping
+the native thread. Rebinding the same turn can rotate capability, but cannot change
+the admitted endpoints or execution package. Only digests enter persisted options;
+the capability remains private worker input and is redacted from observations.
+
+Context package version 2 optionally accepts `read_only_paths`, up to 16 unique
+canonical absolute directory paths. They are host-selected projections, independent
+of MCP. The full execution package digest binds them for replay and queue recovery.
+Inputs-only packages reject them. Host-isolated execution mounts each directory read
+only in the existing native namespace; paths overlapping cwd, native state, temporary
+storage or system mounts are rejected. The host must prepare authorized projections
+and hold admission closed while replacing them. Native checkpoints do not capture cwd.
+The same package may set `workspace_write` explicitly to `false` or `true` in
+host-isolated execution. `false` mounts cwd read only even with Codex full access;
+`true` allows local cwd writes. Omission preserves the historical host-isolated
+default. This bound host policy cannot be changed when rebinding the same turn.
+Deterministic fixtures cover configuration and scope rejection; deployed Codex and
+host filesystem acceptance remains the integrator's required check.
+
 `mcp` version 1 contains only `version`, absolute `socket_path`, canonical
 UUID `operation_id` and opaque `capability`. The descriptor is delivered over
 the private worker pipe. The capability goes to the Codex child through a

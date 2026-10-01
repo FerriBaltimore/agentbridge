@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import re
 import sys
 from uuid import UUID
+from urllib.parse import urlsplit
 
 from .context_package import digest, validate as validate_context
 from .errors import BridgeError
@@ -19,16 +20,21 @@ def invalid_mcp():
 
 
 def validate_mcp(value):
-    if not isinstance(value, dict) or set(value) != {
-            'version', 'socket_path', 'operation_id', 'capability'}:
+    if not isinstance(value, dict) or type(value.get('version')) is not int:
         invalid_mcp()
-    if type(value['version']) is not int or value['version'] != 1:
+    version = value['version']
+    endpoint = 'socket_path' if version == 1 else 'servers'
+    if version not in {1, 2} or set(value) != {
+            'version', endpoint, 'operation_id', 'capability'}:
         invalid_mcp()
-    path = value['socket_path']
-    if (not isinstance(path, str) or not 1 <= len(path) <= 4096
-            or '\0' in path or '\\' in path or not PurePosixPath(path).is_absolute()
-            or str(PurePosixPath(path)) != path or '..' in PurePosixPath(path).parts):
-        invalid_mcp()
+    if version == 1:
+        path = value['socket_path']
+        if (not isinstance(path, str) or not 1 <= len(path) <= 4096
+                or '\0' in path or '\\' in path or not PurePosixPath(path).is_absolute()
+                or str(PurePosixPath(path)) != path or '..' in PurePosixPath(path).parts):
+            invalid_mcp()
+    else:
+        validate_http_servers(value['servers'])
     operation = value['operation_id']
     try:
         if not isinstance(operation, str) or str(UUID(operation)) != operation:
@@ -42,6 +48,29 @@ def validate_mcp(value):
     return value
 
 
+def validate_http_servers(servers):
+    if not isinstance(servers, list) or not 1 <= len(servers) <= 100:
+        invalid_mcp()
+    names = set()
+    for server in servers:
+        if (not isinstance(server, dict) or set(server) != {'name', 'url'}
+                or not isinstance(server['name'], str)
+                or re.fullmatch(r'[A-Za-z0-9_-]{1,100}', server['name']) is None
+                or server['name'] in names or not isinstance(server['url'], str)
+                or not 1 <= len(server['url']) <= 2048):
+            invalid_mcp()
+        names.add(server['name'])
+        try:
+            url = urlsplit(server['url'])
+            if (url.scheme != 'http' or url.hostname != '127.0.0.1' or not url.port
+                    or url.username or url.password or url.query or url.fragment
+                    or re.fullmatch(r'/[A-Za-z0-9_/-]+', url.path) is None
+                    or server['url'] != f'http://127.0.0.1:{url.port}{url.path}'):
+                invalid_mcp()
+        except ValueError:
+            invalid_mcp()
+
+
 def prepare(context_package, mcp):
     if context_package is not None:
         validate_context(context_package)
@@ -52,14 +81,15 @@ def prepare(context_package, mcp):
     if mcp is not None:
         validate_mcp(mcp)
     package_digest = digest(context_package) if context_package is not None else None
-    binding_digest = digest({key: mcp[key] for key in (
-        'version', 'socket_path', 'operation_id')}) if mcp is not None else None
+    binding_digest = digest({key: value for key, value in mcp.items()
+                             if key != 'capability'}) if mcp is not None else None
     execution = {'context_package': context_package, 'mcp': mcp}
     return execution, package_digest, binding_digest
 
 
 def mcp_endpoint_digest(mcp):
-    return digest({key: mcp[key] for key in ('version', 'socket_path')}) if mcp else None
+    return digest({key: value for key, value in mcp.items()
+                   if key not in {'operation_id', 'capability'}}) if mcp else None
 
 
 def verify(options, execution):
@@ -75,6 +105,13 @@ def verify(options, execution):
             and options.mcp_endpoint_digest != mcp_endpoint_digest(prepared['mcp'])):
         raise BridgeError('context_mismatch', 'MCP endpoint differs from its admitted boundary.')
     package = prepared['context_package']
+    if (package and (package.get('read_only_paths') or 'workspace_write' in package)
+            and not options.host_isolated):
+        raise BridgeError('invalid_execution_policy',
+                          'Read-only projections require host-isolated execution.')
+    if (prepared['mcp'] and prepared['mcp']['version'] == 2 and not options.host_isolated):
+        raise BridgeError('invalid_execution_policy',
+                          'Local HTTP MCP requires host-isolated execution.')
     if (options.host_isolated and package is not None
             and package.get('execution_mode', 'normal') != 'normal'):
         raise BridgeError('invalid_execution_policy',
@@ -97,13 +134,13 @@ def validate_access(options):
 def mcp_environment(descriptor):
     if descriptor is None:
         return {}
-    return {MCP_SOCKET_ENV: descriptor['socket_path'],
+    return {**({MCP_SOCKET_ENV: descriptor['socket_path']} if descriptor['version'] == 1 else {}),
             MCP_OPERATION_ENV: descriptor['operation_id'],
             MCP_CAPABILITY_ENV: descriptor['capability']}
 
 
 def codex_config(*, mcp_enabled=False, execution_mode='normal', selected_context=False,
-                 host_isolated=False):
+                 host_isolated=False, mcp=None):
     config = {}
     if selected_context:
         config['project_doc_max_bytes'] = 0
@@ -118,6 +155,14 @@ def codex_config(*, mcp_enabled=False, execution_mode='normal', selected_context
             'startup_timeout_sec': 10,
             'tool_timeout_sec': 25,
         }}
+    if mcp is not None and mcp['version'] == 2:
+        validate_mcp(mcp)
+        config['mcp_servers'] = {server['name']: {
+            'url': server['url'],
+            'http_headers': {'Authorization': 'Bearer ' + mcp['capability']},
+            'default_tools_approval_mode': 'approve', 'required': True,
+            'startup_timeout_sec': 10, 'tool_timeout_sec': 25,
+        } for server in mcp['servers']}
     if selected_context:
         config['features'] = {'apps': False, 'multi_agent': False,
                               'skill_mcp_dependency_install': False}
