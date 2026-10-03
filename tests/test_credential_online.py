@@ -337,3 +337,56 @@ def test_aa_auth_legacy_alias_normalization_preserves_identity_and_capture(onlin
     with pytest.raises(BridgeError) as foreign:
         online.credential_snapshots.configuration()
     assert foreign.value.code == 'credential_snapshot_unsupported'
+
+
+def test_bd2_bundled_login_upgrade_preserves_accounts_and_capture(online):
+    from agentbridge.bundle import resolve_binary
+
+    account(online, 'first')
+    account(online, 'second')
+    adapter = resolve_grantbridge_adapter(online.root)
+    cache = online.root / 'bundled-runtimes'
+    missing = cache / ('grantbridge-d60873c999b7ee5215eb8cfa7bb65326175ff2f6-'
+                       'e2eeeaaae72f') / 'scripts/agentbridge-proxy-adapter.mjs'
+    previous = cache / 'grantbridge-previous-123456789abc/scripts/agentbridge-proxy-adapter.mjs'
+    previous.parent.mkdir(parents=True, mode=0o700)
+    previous.write_bytes(adapter.read_bytes())
+    previous.chmod(0o400)
+    original = {'fixture-login-first': {'adapter': str(missing), 'data_dir': None,
+                                       'node': '/old/node', 'timeout': 12},
+                'fixture-login-second': {'adapter': str(previous), 'data_dir': None}}
+    with online.store.connect() as db:
+        for attempt, connection in original.items():
+            db.execute('UPDATE auth_proxy_routes SET connection=? WHERE attempt_id=?',
+                       (json.dumps(connection), attempt))
+        preserved = {table: [dict(row) for row in db.execute(f'SELECT * FROM {table}')]
+                     for table in ('accounts', 'auth_attempts', 'proxy_bindings')}
+        routes = dict(db.execute('SELECT attempt_id,config FROM auth_proxy_routes'))
+    with pytest.raises(BridgeError) as unknown:
+        online.credential_snapshots.configuration()
+    assert unknown.value.code == 'credential_snapshot_unsupported'
+    # One bad cache must prevent changes to the otherwise admissible missing historical route.
+    previous.chmod(0o600)
+    with pytest.raises(BridgeError) as writable:
+        online.credential_snapshots.normalize_login_adapters(bundled=True)
+    assert writable.value.code == 'credential_snapshot_unsupported'
+    with online.store.connect() as db:
+        assert {key: json.loads(value) for key, value in db.execute(
+            'SELECT attempt_id,connection FROM auth_proxy_routes')} == original
+    previous.chmod(0o400)
+    assert online.credential_snapshots.normalize_login_adapters(bundled=True) == {'normalized': 2}
+    assert online.credential_snapshots.normalize_login_adapters(bundled=True) == {'normalized': 0}
+    with online.store.connect() as db:
+        for table, rows in preserved.items():
+            assert [dict(row) for row in db.execute(f'SELECT * FROM {table}')] == rows
+        assert dict(db.execute('SELECT attempt_id,config FROM auth_proxy_routes')) == routes
+        assert {key: json.loads(value) for key, value in db.execute(
+            'SELECT attempt_id,connection FROM auth_proxy_routes')} == {
+                key: {**value, 'adapter': str(adapter),
+                      'node': str(resolve_binary('node', online.root))}
+                for key, value in original.items()}
+    with Bridge(online.root, owner_ref='fixture-owner', durable=True) as restarted:
+        assert restarted.credential_snapshots.configuration()['cliproxyapi']['account_ids'] == [
+            'first', 'second']
+        assert capture(restarted, 'first', 'second')['credential_refs'] == ['first', 'second']
+    assert not missing.parent.parent.exists(), 'Migration must not fabricate historical code'

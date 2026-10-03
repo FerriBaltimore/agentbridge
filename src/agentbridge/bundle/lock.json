@@ -2,20 +2,20 @@
   "cli_proxy_api": {
     "assets": {
       "linux_aarch64": {
-        "sha256": "b5ac44d0e0e4fee43c91441fdb1329921216ad64913bd53c1efed4e0b0df0b09",
-        "url": "https://storage.googleapis.com/ai-npaw-suite-fbv2-releases/cliproxy/CLIProxyAPI_7.3.16-fullbrain.1_linux_aarch64_no-plugin.tar.gz"
+        "sha256": "2599501a7a5a5408d84e5f71af1caaef40ef8d6e2597c8c644f868dac1d2da13",
+        "url": "https://storage.googleapis.com/ai-npaw-suite-fbv2-releases/cliproxy/CLIProxyAPI_7.3.16-fullbrain.2_linux_aarch64_no-plugin.tar.gz"
       },
       "linux_x86_64": {
-        "sha256": "ebe00fedfd593dd59730e04104092f6e9b41fee7c6d6464e51cfdb860f0a5bfb",
-        "url": "https://storage.googleapis.com/ai-npaw-suite-fbv2-releases/cliproxy/CLIProxyAPI_7.3.16-fullbrain.1_linux_amd64_no-plugin.tar.gz"
+        "sha256": "56fc566bc504d16107014f291e3dcd6645e1843c1e728f0d5ef4ea7a2265a4ad",
+        "url": "https://storage.googleapis.com/ai-npaw-suite-fbv2-releases/cliproxy/CLIProxyAPI_7.3.16-fullbrain.2_linux_amd64_no-plugin.tar.gz"
       }
     },
     "credential_snapshot_protocol": "1",
     "source_manifest": {
-      "sha256": "189298eaab4d120f028b28b2bd2f17b202e4a7b6b53c6f1c496c7b8a1c5777e0",
-      "url": "https://storage.googleapis.com/ai-npaw-suite-fbv2-releases/cliproxy/CLIProxyAPI_7.3.16-fullbrain.1.manifest.json"
+      "sha256": "a28d07c3a510f169532c664791199321fe7e2323c172a82d51fba30981532648",
+      "url": "https://storage.googleapis.com/ai-npaw-suite-fbv2-releases/cliproxy/CLIProxyAPI_7.3.16-fullbrain.2.manifest.json"
     },
-    "version": "7.3.16-fullbrain.1"
+    "version": "7.3.16-fullbrain.2"
   },
   "codex": {
     "assets": {

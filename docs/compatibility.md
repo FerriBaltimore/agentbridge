@@ -9,7 +9,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 
 | Number | Current | Where it appears |
 | --- | --- | --- |
-| SDK version | `2.8.3` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
+| SDK version | `2.10.6` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
 | `rpc_contract` | `v2` | manifest `protocols`; `capabilities.get` `contract_version` |
 | `http` | `2` | manifest `protocols`; playground `/api/meta` `api_revision` |
 | `cli` | `1` | manifest `protocols`; `agentbridge --root DIR rpc`, `--version` |
@@ -17,11 +17,10 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 | `grantbridge_min` | `1.0.0-rc.3` | manifest |
 | `python_requires` | `>=3.11` | `pyproject.toml`, manifest |
 | `platform` | `linux_x86_64`, `linux_aarch64` | wheel tag `manylinux_2_28_<arch>`, manifest |
-| `bundle` | CLIProxyAPI 7.3.16-fullbrain.1, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
+| `bundle` | CLIProxyAPI 7.3.16-fullbrain.2, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
 
-The bundled GrantBridge proxy adapter is the dependency-free rc.3 closure (commit `45921c0…`);
-its exact source and artifact digests live in `bundle/lock.json`. The source broker's rc.4
-artifact retains this proxy transport; source vault/snapshot support is outside this closure.
+The bundled GrantBridge runtime is rc.9 (commit `9465bed…`); its exact source and artifact
+digests live in `bundle/lock.json`. The source broker is configured independently by the host.
 Online credentials additionally require CLIProxy credential protocol `1` at runtime, not
 merely the version string. The downstream writer source, patch and signed manifest are
 recorded in the CLIProxy lock entry. The two architectures compile from the same source;

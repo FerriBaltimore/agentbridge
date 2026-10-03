@@ -31,7 +31,13 @@ def authentication(tmp_path, monkeypatch):
     adapter.parent.mkdir(parents=True)
     shutil.copyfile(FIXTURE, adapter)
     monkeypatch.setenv('AGENTBRIDGE_GRANTBRIDGE_ROOT', str(adapter.parent.parent))
-    monkeypatch.setenv('AGENTBRIDGE_NODE', sys.executable)
+    # This Python fixture stands in for Node and verifies its production hardening flag.
+    node = tmp_path / 'fixture-node'
+    node.write_text(f'#!{sys.executable}\nimport os,sys\n'
+                    'assert sys.argv[1] == "--disable-sigusr1"\n'
+                    'os.execv(sys.executable, [sys.executable, *sys.argv[2:]])\n')
+    node.chmod(0o500)
+    monkeypatch.setenv('AGENTBRIDGE_NODE', str(node))
     responses = {
         '/v0/management/auth-files': (200, {'files': []}, {}),
         '/v0/management/config': (200, EMPTY_CONFIG, {}),

@@ -70,11 +70,11 @@ class CredentialSnapshots:
         return capture(self.store, self.managed_proxy, operation_id, account_ids)
 
     @safe
-    def normalize_login_adapters(self, *, aliases):
-        """Normalize only known read-only aliases explicitly supplied by the trusted host."""
+    def normalize_login_adapters(self, *, aliases=(), bundled=False):
+        """Explicit host upgrade of verified aliases and optional state-owned SDK references."""
         from .credential_configuration import normalize_login_adapters
 
-        return normalize_login_adapters(self.store, aliases)
+        return normalize_login_adapters(self.store, aliases, bundled=bundled)
 
     @safe
     def configuration(self):

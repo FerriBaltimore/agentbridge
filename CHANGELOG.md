@@ -1,9 +1,23 @@
 # Changelog
 
+## [2.10.7] - Local candidate
+
+- Bundle GrantBridge rc.10 with verified Google mailbox binding and retryable MCP start.
+- Preserve historical credential recovery and isolated proxy error logs from 2.10.6.
+
+## [2.10.6] - Local candidate
+
+- Keep managed writer logs beside the credential directory so request failures do not
+  block credential snapshots.
+- Bundle CLIProxyAPI `7.3.16-fullbrain.2`, which recognizes historical request error logs
+  while retaining credentials and rejecting unknown files or links in the snapshot.
+
 ## [2.10.5] - Local candidate
 
-- Bundle GrantBridge rc.10 with verified existing Google mailbox binding.
-- Preserve authentication, execution and durability contracts.
+- Add explicit host-only normalization of state-owned bundled login references, including
+  the reviewed stateless source closure whose old cache may have been removed.
+- Preserve account identity, route configuration, authentication and recovery holds while
+  making historical routes eligible for credential capture after an SDK upgrade.
 
 ## [2.10.4] - Local candidate
 

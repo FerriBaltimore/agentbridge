@@ -32,6 +32,7 @@ def managed(tmp_path, monkeypatch):
         #!/usr/bin/env python3
         from http.server import BaseHTTPRequestHandler, HTTPServer
         import json
+        import os
         from pathlib import Path
         import sys
         from urllib.parse import parse_qs, urlsplit
@@ -39,6 +40,9 @@ def managed(tmp_path, monkeypatch):
 
         with open(sys.argv[sys.argv.index('-config') + 1]) as stream:
             config = json.load(stream)
+        logs = Path(os.environ.get('WRITABLE_PATH', config['auth-dir'])) / 'logs'
+        logs.mkdir(exist_ok=True)
+        (logs / 'fixture-error.log').write_text('synthetic request error')
         key = config['remote-management']['secret-key']
         inventory = {name: [] for name in (
             'gemini-api-key', 'interactions-api-key', 'claude-api-key',
@@ -133,6 +137,8 @@ def test_managed_proxy_provisions_reconnects_and_retires_without_persisting_keys
     ManagementClient(proxy, route["management_key_env"]).ensure_empty()
 
     account_dir = root / "managed-proxies" / "accounts" / "fixture-account"
+    assert (account_dir / 'logs/fixture-error.log').read_text() == 'synthetic request error'
+    assert not (account_dir / 'auth/logs').exists()
     (account_dir / "auth" / "fixture-only.json").write_text("synthetic credential marker")
     client_key = os.environ[route["key_env"]].encode()
     management_key = os.environ[route["management_key_env"]].encode()
