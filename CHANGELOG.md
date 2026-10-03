@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.10.4] - Local candidate
+
+- Bundle GrantBridge rc.9 with provider sign-in free of a persistent toolbar.
+- Preserve the current authentication, execution and durability contracts.
+
 ## [2.10.3] - Local candidate
 
 - Bundle GrantBridge rc.8 with consistent hosted authorization expiry.
