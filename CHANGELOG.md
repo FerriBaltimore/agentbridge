@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.10.5] - Local candidate
+
+- Bundle GrantBridge rc.10 with verified existing Google mailbox binding.
+- Preserve authentication, execution and durability contracts.
+
 ## [2.10.4] - Local candidate
 
 - Bundle GrantBridge rc.9 with provider sign-in free of a persistent toolbar.
