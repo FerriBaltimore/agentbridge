@@ -9,9 +9,12 @@ snapshots or change their owner after publication.
 
 ## Online writer capture
 
-The pinned CLIProxyAPI `7.3.16-fullbrain.1` provides credential writer protocol `1`.
+The pinned CLIProxyAPI `7.3.16-fullbrain.2` provides credential writer protocol `1`.
 The SDK requires its authenticated snapshot/revision headers, bounded manifest and file
 hashes at runtime; a version string or a running process alone cannot prove support.
+Managed writers place operational logs beside the credential directory. Historical generated
+request error logs under `auth/logs` are excluded from credential snapshots without deletion.
+JSON and CDS credential files remain covered there; unknown files and links still reject capture.
 
 ```python
 # Optional: a constant read-only adapter alias explicitly approved by this host.

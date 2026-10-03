@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.6] - Local candidate
+
+- Keep managed writer logs beside the credential directory so request failures do not
+  block credential snapshots.
+- Bundle CLIProxyAPI `7.3.16-fullbrain.2`, which recognizes historical request error logs
+  while retaining credentials and rejecting unknown files or links in the snapshot.
+
 ## [2.10.5] - Local candidate
 
 - Add explicit host-only normalization of state-owned bundled login references, including

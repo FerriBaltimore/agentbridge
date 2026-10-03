@@ -228,7 +228,7 @@ def _launch(binary, account_dir, account_id, port):
                 pass_fds=(descriptor, lease_fd), stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True, close_fds=True, cwd=account_dir,
-                env=_proxy_environment())
+                env={**_proxy_environment(), 'WRITABLE_PATH': str(account_dir)})
         except OSError:
             raise BridgeError("managed_proxy_unavailable", "CLIProxyAPI could not start.") from None
     finally:
