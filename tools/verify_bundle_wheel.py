@@ -20,7 +20,6 @@ LICENSES = (
     "licenses/codex-license.txt",
     "licenses/codex-notice.txt",
     "licenses/node-license.txt",
-    "grantbridge/LICENSE",
 )
 PLATFORMS = re.compile(r"-py3-none-manylinux_2_28_(x86_64|aarch64)\.whl\Z")
 
@@ -78,7 +77,7 @@ def verify_wheel(path, *, grantbridge_archive=None, grantbridge_manifest=None):
                 or not re.fullmatch(r'[0-9a-f]{40}', str(grantbridge.get('commit')))
                 or not isinstance(grantbridge.get('version'), str)):
             raise ValueError('The GrantBridge artifact provenance is incomplete.')
-        if grantbridge_archive is not None:
+        if grantbridge_archive is not None and "runtime_sha256" not in grantbridge:
             if __package__:
                 from .import_grantbridge import derive
             else:
@@ -88,14 +87,28 @@ def verify_wheel(path, *, grantbridge_archive=None, grantbridge_manifest=None):
                                 expected_sha256=grantbridge['artifact_sha256'])
             if derived != grantbridge:
                 raise ValueError('The bundled GrantBridge closure differs from its upstream artifact.')
-        combined = sha256()
-        for relative, expected in sorted(grantbridge["files"].items()):
-            member = base + "grantbridge/" + relative
-            if member not in names or sha256(archive.read(member)).hexdigest() != expected:
-                raise ValueError("A GrantBridge source differs from its lock.")
-            combined.update(relative.encode() + b"\0" + expected.encode() + b"\n")
-        if combined.hexdigest() != grantbridge["source_sha256"]:
-            raise ValueError("The GrantBridge source set differs from its lock.")
+        if 'runtime_sha256' in grantbridge:
+            data = archive.read(base + 'assets/grantbridge.tar.gz')
+            if sha256(data).hexdigest() != grantbridge['runtime_sha256']:
+                raise ValueError('The complete browser runtime differs from its lock.')
+            if grantbridge_archive is not None:
+                if sha256(Path(grantbridge_archive).read_bytes()).hexdigest() != sha256(data).hexdigest():
+                    raise ValueError('The browser runtime differs from the supplied artifact.')
+            with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as runtime:
+                required = {'LICENSE', 'scripts/agentbridge-proxy-adapter.mjs',
+                            'src/browser/viewer/browser.html', 'src/browser/viewer/browser.js',
+                            'src/browser/viewer/browser.css', 'node_modules/playwright-core/package.json'}
+                if not required.issubset(runtime.getnames()):
+                    raise ValueError('The browser runtime omits required assets or licenses.')
+        else:
+            combined = sha256()
+            for relative, expected in sorted(grantbridge["files"].items()):
+                member = base + "grantbridge/" + relative
+                if member not in names or sha256(archive.read(member)).hexdigest() != expected:
+                    raise ValueError("A GrantBridge source differs from its lock.")
+                combined.update(relative.encode() + b"\0" + expected.encode() + b"\n")
+            if combined.hexdigest() != grantbridge["source_sha256"]:
+                raise ValueError("The GrantBridge source set differs from its lock.")
         if any(base + relative not in names for relative in LICENSES):
             raise ValueError("The wheel omits a required upstream license or notice.")
         native = _verify_native_launcher(archive, names, base, lock, arch)

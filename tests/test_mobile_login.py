@@ -5,12 +5,9 @@ the CLIProxyAPI Management API is the same local fixture the desktop tests use.
 """
 
 import secrets
-import shutil
-from pathlib import Path
 
 import pytest
 
-import agentbridge
 from agentbridge import Bridge, GrantBridgeClient
 from agentbridge import auth_contract
 from agentbridge.commands.parser import build_parser
@@ -191,31 +188,36 @@ def test_client_sends_the_phone_entry_only_for_phones(monkeypatch):
                           'owner': PHONE_OWNER}
 
 
-def test_bundled_adapter_answers_the_phone_entry_without_a_host(monkeypatch):
-    """The shipped stdio adapter echoes a phone browser login and refuses a hosted one."""
-    if not shutil.which('node'):
-        pytest.skip('Node.js is required for the bundled GrantBridge adapter.')
+def test_bundled_adapter_answers_the_phone_entry_without_a_host(tmp_path, monkeypatch):
+    """The installed runtime supports hosted assets without any host desktop or HTTP server."""
     monkeypatch.setattr('agentbridge.grantbridge.ensure_callback_port_available', lambda provider: None)
-    bundled = Path(agentbridge.__file__).resolve().parent / 'bundle' / 'grantbridge'
+    # This transport test must not navigate even the synthetic provider URL.
+    monkeypatch.setenv('GRANTBRIDGE_CHROME', str(tmp_path / 'no-fixture-browser'))
     secret = secrets.token_hex(16)
     monkeypatch.setenv('LAB_MANAGEMENT_KEY', secret)
     responses = {'/v0/management/anthropic-auth-url?is_webui=true': (
-        200, {'status': 'ok', 'url': 'https://claude.ai/oauth/authorize?fixture=1',
+        200, {'status': 'ok', 'url': 'https://provider.example/authorize?fixture=1',
               'state': 'fixture-oauth-state'}, {})}
     with local_management(responses) as (port, seen):
         base_url = f'http://127.0.0.1:{port}/v1'
-        with GrantBridgeClient(bundled) as grantbridge:
+        with GrantBridgeClient(state_root=tmp_path / 'runtime') as grantbridge:
             started = grantbridge.proxy_start('claude', base_url, 'LAB_MANAGEMENT_KEY',
                                               browser='mobile', mode='browser', owner=PHONE_OWNER)
-            with pytest.raises(BridgeError) as hosted:
-                grantbridge.proxy_start('claude', base_url, 'LAB_MANAGEMENT_KEY',
-                                        browser='mobile', mode='hosted', owner=PHONE_OWNER)
-    assert started == {'id': 'fixture-oauth-state', 'provider': 'claude', 'status': 'awaiting_user',
-                       'authorizationUrl': 'https://claude.ai/oauth/authorize?fixture=1',
-                       'browser': 'mobile', 'mode': 'browser'}
-    assert hosted.value.code == 'hosted_browser_unavailable'
-    assert len(seen) == 1, 'the hosted refusal never reaches the sidecar'
-    assert secret not in repr(started) + repr(hosted.value)
+            hosted = grantbridge.proxy_start('claude', base_url, 'LAB_MANAGEMENT_KEY',
+                                             browser='mobile', mode='hosted', owner=PHONE_OWNER)
+            process = grantbridge.process
+            asset = grantbridge.browser(hosted['id'], PHONE_OWNER,
+                                        action='asset', asset='browser.html')
+            assert 'browser.js' in asset['body']
+            assert grantbridge.process is process
+            with pytest.raises(BridgeError) as denied:
+                grantbridge.browser(hosted['id'], 'other-owner',
+                                    action='asset', asset='browser.html')
+            assert denied.value.code == 'not_found'
+    assert started['browser'] == 'mobile' and started['mode'] == 'browser'
+    assert hosted['viewerUrl'] == 'browser.html' and hosted['browserTransport'] == 'rpc'
+    assert len(seen) == 2
+    assert secret not in repr(started) + repr(hosted) + repr(asset)
 
 
 def test_viewer_url_projection_accepts_https_or_loopback_only():

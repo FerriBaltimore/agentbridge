@@ -196,3 +196,23 @@ def test_missing_archive_never_uses_path_executable(bundle_package, tmp_path, mo
 def test_rejects_unknown_component_without_path_lookup(bundle_package, tmp_path):
     with pytest.raises(ValueError, match="Unknown bundled component"):
         runtime.resolve_binary("unknown", tmp_path, package_root=bundle_package)
+
+
+def test_aa_auth_sdk_complete_browser_runtime_is_verified_before_extraction(bundle_package, tmp_path):
+    archive = bundle_package / 'assets/grantbridge.tar.gz'
+    members = {'scripts/agentbridge-proxy-adapter.mjs': 'fixture adapter',
+               'node_modules/playwright-core/package.json': '{"name":"playwright-core"}',
+               'src/browser/viewer/browser.html': '<html>Sign in</html>'}
+    _write_archive(archive, members)
+    lock_path = bundle_package / 'lock.json'
+    lock = json.loads(lock_path.read_text())
+    lock['grantbridge'] = {'version': '1.0.0-rc.6', 'runtime_sha256': _digest(archive),
+                           'source_sha256': _digest(archive)}
+    lock_path.write_text(json.dumps(lock))
+    adapter = runtime.resolve_grantbridge_adapter(tmp_path / 'state', package_root=bundle_package)
+    assert adapter.read_text() == 'fixture adapter'
+    assert (adapter.parent.parent / 'src/browser/viewer/browser.html').read_text() == members[
+        'src/browser/viewer/browser.html']
+    archive.write_bytes(b'invalid archive')
+    assert _error_code(lambda: runtime.resolve_grantbridge_adapter(
+        tmp_path / 'different-state', package_root=bundle_package)) == 'bundled_runtime_invalid'

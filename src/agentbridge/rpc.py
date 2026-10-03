@@ -108,6 +108,8 @@ def dispatch(bridge,method,params):
         return public_login(bridge.account_login_complete(**params), bridge)
     if method in ('accounts.login.cancel', 'accounts.login_cancel'):
         return bridge.account_login_cancel(**params)
+    if method == 'accounts.login.browser':
+        return bridge.account_login_browser(**params)
     if method=='accounts.login.callback':
         return bridge.account_login_callback(**params)
     if method=='usage.get':

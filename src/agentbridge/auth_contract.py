@@ -12,7 +12,7 @@ from .models import finite_number
 REMOTE_STATES = frozenset(('starting', 'awaiting_user', 'exchanging', 'authorized',
                           'failed', 'cancelled', 'expired', 'interrupted', 'revoked', 'replaced'))
 ERROR_CODES = frozenset(('invalid_request', 'invalid_params', 'invalid_provider', 'invalid_browser',
-    'hosted_browser_unavailable', 'browser_busy', 'browser_closed',
+    'hosted_browser_unavailable', 'browser_busy', 'browser_closed', 'browser_not_ready', 'bad_input',
     'provider_busy', 'not_found', 'already_finished', 'not_ready', 'method_not_found',
     'authentication_required', 'authentication_not_verified', 'credential_unavailable',
     'credential_expired', 'identity_changed', 'activation_unsupported', 'provider_error',
@@ -76,9 +76,13 @@ def projection(remote):
     if 'authorizationUrl' in remote and (remote['authorizationUrl'] is None
                                          or text(remote['authorizationUrl'], 16384)):
         result['authorizationUrl'] = remote.get('authorizationUrl')
-    # The hosted-browser page lives on the GrantBridge origin; a phone opens it directly.
-    if https_url(remote.get('viewerUrl'), loopback=True):
+    # RPC viewers use a fixed asset name; legacy HTTP hosts may return an owned URL.
+    if (https_url(remote.get('viewerUrl'), loopback=True)
+            or (remote.get('browserTransport') == 'rpc'
+                and remote.get('viewerUrl') == 'browser.html')):
         result['viewerUrl'] = remote['viewerUrl']
+    if remote.get('browserTransport') == 'rpc':
+        result['browserTransport'] = 'rpc'
     for key in ('createdAt', 'updatedAt', 'expiresAt'):
         value = remote.get(key)
         if finite_number(value) and value >= 0:

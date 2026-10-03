@@ -11,6 +11,15 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.10.0] - Local candidate
+
+- Add the owned `accounts.login.browser` channel with packaged viewer assets.
+- Keep GrantBridge alive within the SDK worker and clean temporary browser state on exit.
+- Preserve CLIProxyAPI token ownership, account verification and credential capture holds.
+- Admit verified 2.9.1 proxy routes after upgrade; interrupt lost browser hosts without replay.
+- Package the pinned GrantBridge browser runtime; no additional public server is required.
+- Validate browser consent against fixtures; production provider acceptance remains pending.
+
 ## [2.9.1] - 2026-10-01
 
 - Restored native sessions prepare SQLite read journals before sealing a new checkpoint.

@@ -166,6 +166,9 @@ def _extract_archive(component, archive_path, stage, version, machine):
 
 
 def _grantbridge_sources(package_root, stage, entry):
+    if 'runtime_sha256' in entry:
+        from .grantbridge_archive import extract_runtime
+        return extract_runtime(package_root, stage, entry)
     sources = entry.get("files")
     if not isinstance(sources, dict) or not sources:
         raise BridgeError("bundled_runtime_invalid", "The GrantBridge source lock is invalid.")

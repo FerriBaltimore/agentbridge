@@ -8,6 +8,7 @@ OPERATIONS = (
     "accounts.login",
     "accounts.login.list", "accounts.login.start", "accounts.login.status", "accounts.login.check",
     "accounts.login.complete", "accounts.login.cancel", "accounts.login.callback",
+    "accounts.login.browser",
     "models.list", "usage.get", "usage.history", "accounts.quota.reset",
     "instances.create", "instances.get",
     "instances.list", "instances.update", "instances.archive", "instances.delete",
@@ -38,9 +39,12 @@ def proxy_payload(*, include_parameters=True):
         elif operation == 'accounts.login.callback':
             item['limitations'] = ['one_use_remote_browser_redirect',
                                    'codex_and_claude_only', 'live_oauth_acceptance_pending']
+        elif operation == 'accounts.login.browser':
+            item['limitations'] = ['owner_and_attempt_bound', 'fixed_assets_and_bounded_input',
+                                   'host_chrome_required', 'live_oauth_acceptance_pending']
         elif operation.startswith('accounts.login'):
             item['limitations'] = ['same_host_isolated_or_mobile_browser',
-                                   'hosted_browser_requires_grantbridge_host',
+                                   'hosted_browser_requires_persistent_worker_and_chrome',
                                    'live_oauth_acceptance_pending']
         elif operation == 'accounts.delete':
             item['limitations'] = ['local_retirement_only', 'upstream_credential_remains']

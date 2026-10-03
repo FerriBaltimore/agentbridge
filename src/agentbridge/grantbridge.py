@@ -47,6 +47,11 @@ class GrantBridgeClient:
         self._lock = threading.Lock()
         self._buffer = b''
 
+    @property
+    def alive(self):
+        """A hosted session cannot survive loss of its original adapter process."""
+        return self.process is not None and self.process.poll() is None
+
     def configuration(self):
         """Non-secret references sufficient to reconnect from another process."""
         return {'adapter': str(self.adapter), 'data_dir': str(self.data_dir) if self.data_dir else None,
@@ -58,7 +63,8 @@ class GrantBridgeClient:
             command.extend(("--data-dir", str(self.data_dir)))
         env = {name: os.environ[name] for name in (
             "PATH", "HOME", "TMPDIR", "LANG", "GRANTBRIDGE_CODEX", "GRANTBRIDGE_CLAUDE",
-            "GRANTBRIDGE_CHROME", "GRANTBRIDGE_CLIENT_NAME",
+            "GRANTBRIDGE_CHROME", "GRANTBRIDGE_CLIENT_NAME", "GRANTBRIDGE_BROWSER_PROXY",
+            "GRANTBRIDGE_BROWSER_SANDBOX",
         ) if os.environ.get(name)}
         env["NO_COLOR"] = "1"
         try:
@@ -127,7 +133,7 @@ class GrantBridgeClient:
         management_key = self._proxy_key(management_key_env)
         ensure_callback_port_available(provider)
         params = {'provider': provider, 'base_url': base_url, 'management_key': management_key}
-        if browser != 'same_host':
+        if browser != 'same_host' or mode == 'hosted':
             params.update({'browser': browser, 'mode': mode, 'owner': owner})
         return self._request('auth.proxy_start', params)
 
@@ -147,12 +153,16 @@ class GrantBridgeClient:
             'redirect_url': redirect_url,
         })
 
+    def browser(self, attempt_id, owner, **options):
+        """Relay bounded owner-bound actions without retaining frames or typed secrets."""
+        return self._request('auth.browser', {'attempt_id': attempt_id, 'owner': owner, **options})
+
     def close(self):
         process = self.process
         if process is None:
             return
         timeout = self.timeout
-        self.timeout = min(timeout, 2)
+        self.timeout = min(timeout, 10)
         try:
             self._request("auth.close")
         except (BridgeError, OSError):

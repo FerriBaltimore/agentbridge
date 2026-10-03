@@ -18,7 +18,7 @@ for older attempts, but they cannot create a new v2 account or execute a turn.
    public RPC, argv, SQLite, events or logs.
 3. GrantBridge calls CLIProxyAPI's Management API to start OAuth and projects
    only safe authorization URL, status and bounded diagnostic fields. The
-   browser and sidecar currently need to run on the same host.
+   SDK browser and sidecar share the server; the person uses the owned remote viewer.
 4. CLIProxyAPI receives the callback and keeps credential material. GrantBridge
    does not export an upstream OAuth token to AgentBridge.
 5. AgentBridge reads fresh Management API inventory, identity and models.
@@ -50,10 +50,18 @@ Unknown or stale usage remains unknown, not zero.
 
 The host authenticates its user and enforces which account they may connect or
 use. GrantBridge's opaque owner scopes attempt reads and callbacks; it is not
-an email or access token. The current login mode assumes a browser on the
-sidecar host. A browser on a phone needs a separately designed callback or
-hosted-browser route; it is not certified by the local same-host flow.
+an email or access token. The packaged browser channel binds every asset, frame
+and input to that owner and attempt. Its browser and temporary database are
+removed at the terminal state or SDK shutdown. They are excluded from durable
+credential inventory because they never contain the authoritative final tokens.
+The verified runtime and active-login capture checks remain required. See
+[the browser contract](../../docs/interface/mobile-login.md).
 
 Earlier native provider profiles and GrantBridge vault records document the
 previous architecture. Their presence cannot be treated as a v2 proxy
 credential or automatically migrated into CLIProxyAPI.
+
+The exact stateless closure shipped in AgentBridge 2.9.1 remains admissible for stored
+bound routes. All four historical file hashes, the original private runtime path and its
+verification marker must match. This does not admit a custom adapter or a durable data_dir.
+The historical fixture is retained under tests/fixtures/grantbridge_291 with its MIT license.

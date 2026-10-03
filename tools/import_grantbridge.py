@@ -128,7 +128,7 @@ def write_closure(entry, sources, *, root=ROOT):
     lock_path = bundle / 'lock.json'
     lock = json.loads(lock_path.read_text())
     generated = bundle / 'grantbridge'
-    for name in set(lock['grantbridge']['files']) | set(sources):
+    for name in set(lock['grantbridge'].get('files', {})) | set(sources):
         target = generated / safe_path(name)
         if any(parent.is_symlink() for parent in (target, *target.parents)):
             raise ValueError('The generated bundle destination contains a symbolic link.')
@@ -136,7 +136,7 @@ def write_closure(entry, sources, *, root=ROOT):
         target = generated / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    for name in set(lock['grantbridge']['files']) - set(sources):
+    for name in set(lock['grantbridge'].get('files', {})) - set(sources):
         (generated / name).unlink(missing_ok=True)
     lock['grantbridge'] = entry
     lock_path.write_text(json.dumps(lock, indent=2, sort_keys=True) + '\n')

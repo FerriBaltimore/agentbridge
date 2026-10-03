@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 from ..bundle import resolve_grantbridge_adapter
+from ..bundle.grantbridge_legacy import verified_legacy_adapter
 from ..errors import BridgeError
 from .managed import ManagedProxyClient
 
@@ -16,7 +17,8 @@ def unsupported():
 
 def configuration(store):
     accounts = []
-    expected = Path(resolve_grantbridge_adapter(store.root)).read_bytes()
+    expected_path = Path(resolve_grantbridge_adapter(store.root))
+    expected = expected_path.read_bytes()
     expected_digest = hashlib.sha256(expected).digest()
     with store.connect() as db:
         for row in db.execute('SELECT id,config FROM accounts ORDER BY id'):
@@ -32,17 +34,20 @@ def configuration(store):
             if not ManagedProxyClient.is_managed(json.loads(row['config']), row['id']):
                 unsupported()
             accounts.append(row['id'])
-        # The bundled dependency-free GrantBridge transport opens no vault or browser profile.
-        # Historical/custom data directories cannot be asserted absent from filename alone.
+        # The pinned browser runtime keeps login state only in its private temporary directory.
+        # Admit the installed runtime or the exact verified stateless 2.9.1 closure.
         for row in db.execute('SELECT r.connection FROM auth_proxy_routes r WHERE NOT EXISTS '
                 '(SELECT 1 FROM auth_attempts a JOIN retired_accounts t ON t.account_id=a.account_id '
                 'WHERE a.id=r.attempt_id AND t.proxy_retired_at IS NOT NULL)'):
             connection = json.loads(row[0])
             adapter = Path(connection.get('adapter', ''))
-            if (connection.get('data_dir') is not None
-                    or not adapter.is_absolute() or adapter.is_symlink() or not adapter.is_file()
-                    or adapter.stat().st_size != len(expected)
-                    or hashlib.sha256(adapter.read_bytes()).digest() != expected_digest):
+            if connection.get('data_dir') is not None:
+                unsupported()
+            current = (adapter == expected_path and adapter.is_absolute()
+                       and not adapter.is_symlink() and adapter.is_file()
+                       and adapter.stat().st_size == len(expected)
+                       and hashlib.sha256(adapter.read_bytes()).digest() == expected_digest)
+            if not current and not verified_legacy_adapter(adapter, store.root):
                 unsupported()
     for root in (store.root / 'grantbridge', Path.home() / '.local/state/grantbridge'):
         if root.exists():

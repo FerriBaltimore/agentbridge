@@ -1,129 +1,92 @@
-# Mobile login through GrantBridge
+# Provider login from local and remote browsers
 
-Owner requirement: all authentication passes through GrantBridge, and the engine
-login plus consent must be completable from a phone. This document is the single
-cross-repository contract for that case. GrantBridge's README points here; Fullbrain
-reads only the AgentBridge fields below.
+AgentBridge 2.10.0 embeds GrantBridge's browser driver and viewer. The same flow works
+from a desktop or phone while the SDK runs on a server without a desktop. CLIProxyAPI
+owns the provider authorization and final tokens. AgentBridge still verifies the
+account identity and available models before binding the account.
 
-## Why a phone cannot finish the desktop flow
+## Start and ownership
 
-CLIProxyAPI 7.3.16 registers fixed loopback redirect URIs with the providers:
-`http://localhost:1455/auth/callback` (Codex) and `http://localhost:54545/callback`
-(Claude). Neither provider offers a device-code flow through CLIProxyAPI; only Grok
-returns a `user_code`. After consent the provider therefore redirects the phone to a
-loopback address that dials nothing on the phone. The phone never has to reach ports
-1455 or 54545: the redirect is either handed back to the broker origin, or a browser
-hosted next to the sidecar receives it.
+Use `accounts.login.start` with `browser="mobile"`, `mode="hosted"`, a stable
+`request_key` and the application's authenticated `owner_ref`. Here `mobile` is the
+existing transport name; the viewer also works on desktops. Do not derive ownership
+from caller-supplied URL parameters or introduce a GrantBridge session cookie.
 
-```text
-same_host (desktop, unchanged)
-  browser on the sidecar host -> provider -> http://localhost:1455|54545 -> CLIProxyAPI
+A successful start returns `browser_transport="rpc"` and `viewer_url="browser.html"`.
+This is a fixed SDK asset identifier, not a public URL. Fullbrain projects its own
+same-origin, authenticated viewer URL for the owned attempt. Hosted responses omit
+`authorization_url`: the SDK opens the provider page automatically.
 
-isolated (desktop, clean session; same wire request as same_host)
-  host process opens authorization_url in a fresh disposable Chromium profile
-  (agentbridge.auth_browser.IsolatedAuthBrowser) -> provider -> loopback -> CLIProxyAPI
+The application keeps the same `Bridge` instance (or stdio worker) alive through the
+login. Each configuration owns one GrantBridge child. Ending the SDK lifetime cancels
+pending browser interactions and removes temporary state. A restarted worker never
+adopts or reopens an old browser. It reports an interrupted attempt for explicit recovery.
 
-mobile + mode=browser
-  phone -> https authorization_url (provider) -> consent
-  phone lands on dead http://localhost:1455|54545/...?code=&state=
-  phone -> broker origin: Fullbrain UI paste -> accounts.login.callback
-                          or GrantBridge GET|POST /oauth/proxy/callback (owner-bound)
-  broker -> auth.proxy_callback -> CLIProxyAPI /v0/management/oauth-callback
-  AgentBridge status/check/complete as usual
+## Browser channel
 
-mobile + mode=hosted (long-lived GrantBridge host with a coordinator)
-  AgentBridge -> auth.proxy_start{browser:'mobile', mode:'hosted', owner}
-  GrantBridge starts a hosted Chromium at the authorization URL
-  phone -> viewer_url (https, GrantBridge origin, same owner session) -> consent
-  hosted browser -> http://localhost:1455|54545 on the sidecar host -> CLIProxyAPI
-  AgentBridge status/check/complete as usual
-```
+RPC: `accounts.login.browser`. Python: `Bridge.account_login_browser`.
+Every call requires `attempt_id` and `owner_ref`; snapshot account holds still apply.
 
-## AgentBridge request fields (`accounts.login.start`)
+| Action | Additional fields | Result |
+| --- | --- | --- |
+| `view` (default) | `after_sequence` integer, default 0 | State and latest changed frame |
+| `input` | `input` object below | `editable` boolean |
+| `asset` | `asset`: `browser.html`, `browser.js`, `browser.css` | `content_type`, UTF-8 `body` |
 
-| Field | Type | Values | Notes |
-| --- | --- | --- | --- |
-| `browser` | string | `same_host` (default), `isolated`, `mobile` | Any other value fails with `invalid_request`. |
-| `mode` | string | `browser` (default), `hosted` | `hosted` requires `browser: "mobile"`; otherwise `unsupported_operation`. |
-| `owner_ref` | string | identifier, 1-128 chars | For `mobile`, set it to the phone's GrantBridge owner digest (hex sha256 of its `lab_session` token). GrantBridge binds the viewer and the callback route to it. |
+View returns `status`, `ready`, `done`, `expires_at`, `origin`, `viewport`, `sequence`
+and optional `image={mime:"image/jpeg",base64:...}`. Frames stay in memory; JPEGs are
+bounded to 512 KiB and RPC responses remain below 1 MiB. View is short polling.
 
-The same-host request and its GrantBridge wire message are unchanged. `isolated` shares
-that wire message: it only records that the host completes the login in a fresh,
-disposable browser profile with no cookies or provider session, so the person types the
-account they mean instead of silently reusing one already signed in. AgentBridge never
-opens a browser itself; the process that owns the desktop (the playground, a CLI, or the
-Fullbrain API on the brain host) launches `agentbridge.auth_browser.IsolatedAuthBrowser`
-when the attempt is `awaiting_user`, stops it when the attempt leaves that phase, and the
-profile is deleted when the browser exits. `available()` is false without a display or
-Chromium (for example inside Fullbrain's sandboxed worker), so the host falls back to a
-link the person opens elsewhere. For `mobile` AgentBridge adds `browser`, `mode` and
-`owner` to `auth.proxy_start`.
+Inputs are `tap` with normalized `x,y`; `drag` with 2–128 normalized `points`;
+`scroll` with `dy` within ±2000 and optional `x,y`; `text` up to 4096 characters; or
+`key` with Enter, Backspace, Tab, Escape, ArrowLeft, ArrowRight, ArrowUp or ArrowDown.
+Arbitrary navigation, scripts, paths and selectors are not accepted. Never retry input
+automatically when its result is unknown. Recover state through `view` instead.
 
-## AgentBridge response fields
+Serve the three fixed assets in one owned browser directory. The viewer calls relative
+`GET view?after_sequence=N`, `POST input` and `POST cancel`. Map these to the browser
+channel and existing `accounts.login.cancel`. The viewer sends JSON with
+`X-GrantBridge-Browser: 1`. Authenticate and authorize every route, require same-origin
+POSTs/CSRF protection, bound request bodies to 16 KiB, and disable caching and body logs.
 
-Every login attempt projection (`start`, `status`, `check`, `complete.attempt`,
-`cancel`) now carries `browser` and `mode` as sent. In addition:
+Recommended headers: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+`X-Content-Type-Options: nosniff`. CSP allows scripts/styles/connect only from self,
+images from self/data, same-origin frames, no base URI and no form submission.
+The viewer sends a same-origin `grantbridge.browser.done` message to its parent.
+This is a presentation signal; only the SDK's status/check/complete verifies an account.
 
-| Field | Type | Present when | Source |
-| --- | --- | --- | --- |
-| `authorization_url` | https URL ≤ 16384 | `mode: "browser"`; omitted for `hosted` | GrantBridge `authorizationUrl` |
-| `viewer_url` | https URL ≤ 2048 (http only on loopback) | `mode: "hosted"` | GrantBridge `viewerUrl` |
-| `user_code` | string | Grok | GrantBridge `userCode` |
-| `error.code` | string | terminal failures | GrantBridge row `error.code` |
-| `identity.email` | string | `failed` with `error.code: identity_changed` on a new account | The identity the provider returned when it differs from the requested `email`; the credential is retired, never bound |
+## Server runtime and credentials
 
-Start fails before dispatch with `hosted_browser_unavailable` when the GrantBridge in
-use cannot run a hosted browser (the bundled stdio adapter never can), and with
-`invalid_browser` when GrantBridge rejects the location. If GrantBridge answers a
-`mobile` start without echoing `browser`/`mode`, without an https URL (browser mode) or
-without `viewerUrl` (hosted mode), AgentBridge cancels the sidecar session and fails
-the attempt with `provider_protocol_error`. A hosted login that ends on the host
-reports `failed` with `error.code` `browser_busy`, `browser_closed` or
-`hosted_browser_unavailable`.
+The wheel includes pinned Node, GrantBridge JavaScript, playwright-core and viewer
+assets. The host supplies Chrome (`GRANTBRIDGE_CHROME`), Xvfb, xauth, their shared
+libraries, fonts/fontconfig and CA certificates. Provide private writable `/tmp`,
+`/run`, `/dev/shm` and normal `/proc` and `/dev`. No host DISPLAY is used.
 
-## GrantBridge JSON read by AgentBridge
+Set `GRANTBRIDGE_BROWSER_PROXY=http://127.0.0.1:18080` for Fullbrain's egress proxy.
+Chrome receives an explicit proxy argument, with loopback bypass for callback/CDP.
+Chrome's own sandbox is enabled by default. A trusted host already isolating Chrome
+in its worker sandbox may explicitly set `GRANTBRIDGE_BROWSER_SANDBOX=external`.
+This adds `--no-sandbox`; there is no automatic fallback or arbitrary argument API.
 
-`auth.proxy_start` result: `id` (string, the CLIProxyAPI state), `provider`,
-`status`, `authorizationUrl` (string), optional `userCode`, and for `mobile` the
-echoed `browser` (string) and `mode` (string); `viewerUrl` (string) for `hosted`.
-`auth.proxy_status` result: `id`, `provider`, `status`, optional `error.code`
-(string). Additive fields are ignored; nothing else is persisted.
+The proxy adapter stores its temporary database and fresh browser profiles in a private
+job directory. Terminal/cancel/expiry closes the browser and removes its profile;
+shutdown removes the whole job directory. It never creates `store.root/grantbridge`.
+Credential inventory admits only the verified bundled runtime and no custom data root.
+Active login still prevents drained credential capture. No provider credentials move
+out of CLIProxyAPI, and recovery never silently resumes consent.
 
-## GrantBridge phone-facing return
+## Compatibility and acceptance
 
-`GET|POST /oauth/proxy/callback` on the GrantBridge origin (module
-`src/agentbridge-proxy-routes.mjs`, mounted by the host). Input: `code` and `state`
-query fields, or a JSON body `{redirect_url}` holding the pasted loopback URL. The
-state must belong to a login whose `owner` equals the caller's session digest, is
-consumed once, is checked against the provider's fixed port and path, is never used
-as a redirect target (the route only redirects to `/?callback=returned` or
-`/?callback=error`) and is answered with `Cache-Control: no-store`. The code is
-relayed to CLIProxyAPI and never stored; store rows keep only the state hash.
+Existing same-host, isolated-browser and callback APIs remain available for other SDK
+consumers. Fullbrain should use the single hosted flow above, removing its replaced
+manual URL/callback and host-desktop paths. For source connectors whose registered callback
+is loopback, the full GrantBridge SDK accepts `source.mcp.start` with
+`presentation: "embedded"` and exposes `source.mcp.browser` using the same packaged viewer.
+The SDK observes the exact owner-and-attempt-bound callback inside its browser and completes
+its existing OAuth flow. Source credentials remain in GrantBridge's existing vault and
+snapshot custody. Genuine QR pairing and actually public callbacks retain their paths.
 
-## What Fullbrain v2 must change
-
-- `backend/fullbrain/adapters/agentbridge/login.py`: map the default desktop
-  transport to `browser: "isolated"` and launch `agentbridge.auth_browser` from the
-  API process on the brain host (the sandboxed worker has no display), keeping the
-  person's own browser as an explicit fallback (`same_host`); map a phone transport
-  to `browser: "mobile"` with `mode: "browser"` or `"hosted"`; read `viewer_url`
-  (https, GrantBridge origin) when `mode` is `hosted` and stop requiring
-  `authorization_url` in that case; accept `browser_busy`, `browser_closed` and
-  `hosted_browser_unavailable` as login error codes; on a `check` that fails with
-  `identity_changed`, read `status` and show the failed attempt's `identity.email`
-  domain next to the expected one.
-- `backend/fullbrain/adapters/agentbridge/client.py`: `PIN_SHA256` must follow the
-  new immutable artifact built from this AgentBridge revision.
-- `tests/fixtures/agentbridge_protocol.json`: refresh `files[]` digests
-  (`authentication.py`, `auth_contract.py`, `grantbridge.py`, `capabilities.py`,
-  `commands/parser.py`, `bundle/lock.json`, bundled GrantBridge copies),
-  `immutable_artifact_sha256`, `manifest_sha256` and `base_commit`; operations are
-  unchanged.
-- UI: the paste path already exists (`accounts.login.callback`); add the phone
-  entry point that opens `authorization_url` or `viewer_url` and, for browser mode,
-  offers the paste field. Issue the phone's GrantBridge session and pass its digest
-  as `owner_ref` when the hosted viewer or the GrantBridge callback route is used.
-
-Fixture coverage: `tests/test_mobile_login.py`, `tests/test_isolated_login.py` and
-`tests/test_auth_browser.py` here and `test/agentbridge-proxy-mobile.test.mjs` in
-GrantBridge. Live provider acceptance from a phone remains pending.
+Deterministic tests cover ownership, idempotency, input, account verification, admission
+and recovery. Browser/package tests use fixture provider pages. Real provider consent,
+phone hardware and Fullbrain's production bwrap mounts require separate integration
+acceptance; they are not claimed by the fixture tests.

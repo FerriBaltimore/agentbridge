@@ -205,3 +205,34 @@ def test_administrative_client_never_starts_a_fallback_supervisor(tmp_path, monk
     with pytest.raises(BridgeError) as pending:
         client.credential_revision('fixture')
     assert pending.value.code == 'credential_snapshot_pending'
+
+
+def test_aa_auth_upgrade_admits_verified_291_route_and_preserves_capture(online):
+    from agentbridge.bundle.grantbridge_legacy import DIGEST, FILES, VERSION
+
+    account(online, 'first')
+    legacy = online.root / 'bundled-runtimes' / f'grantbridge-{VERSION}-{DIGEST[:12]}'
+    legacy.mkdir(mode=0o700)
+    fixture = Path(__file__).parent / 'fixtures' / 'grantbridge_291'
+    for name in FILES:
+        target = legacy / name
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes((fixture / name).read_bytes())
+    (legacy / '.verified.json').write_text(json.dumps({
+        'component': 'grantbridge', 'digest': DIGEST, 'files': FILES}))
+    with online.store.connect() as db:
+        before = dict(db.execute('SELECT * FROM auth_attempts').fetchone())
+        db.execute('UPDATE auth_proxy_routes SET connection=?', (json.dumps({
+            'adapter': str(legacy / 'scripts/agentbridge-proxy-adapter.mjs'),
+            'data_dir': None}),))
+    configured = online.credential_snapshots.configuration()
+    assert configured['cliproxyapi']['account_ids'] == ['first']
+    descriptor = capture(online, 'first')
+    assert descriptor['credential_refs'] == ['first']
+    with online.store.connect() as db:
+        assert dict(db.execute('SELECT * FROM auth_attempts').fetchone()) == before
+    # A copied adapter alone cannot certify arbitrary dependencies or hidden credential state.
+    (legacy / 'src/agentbridge-proxy.mjs').write_text('modified dependency')
+    with pytest.raises(BridgeError) as rejected:
+        online.credential_snapshots.configuration()
+    assert rejected.value.code == 'credential_snapshot_unsupported'

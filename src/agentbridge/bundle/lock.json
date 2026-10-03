@@ -41,16 +41,12 @@
     "version": "0.153.0"
   },
   "grantbridge": {
-    "artifact_sha256": "4cd59b916c628d626c853e0e2e43bc165f47c2174ade495d9ebc3e435f58ab64",
-    "commit": "45921c0d1b0e9e53b7a641f6362daa1a604214ed",
-    "files": {
-      "LICENSE": "909350af40c822e47840abe9f36dea176c5c8d0feec0bb82a5c6d54cb34763f6",
-      "scripts/agentbridge-proxy-adapter.mjs": "312cd70c6a098bfb9b58e47ae2e78ad8e0367045559d56e3acd556a637b7dd61",
-      "src/agentbridge-proxy-errors.mjs": "dfa63fb95c8b55bab9e328cc143ae8d99e19bca3cd4c92621a37fca52238534a",
-      "src/agentbridge-proxy.mjs": "bd53b3fc98d2e991e486e2923fe741aa4424078c3a75996b17dbd2cbe7faf22f"
-    },
-    "source_sha256": "607a5541f8f08bf4abf021eea891c84e2f830711551ba2f6146209f211f1dfd1",
-    "version": "1.0.0-rc.3"
+    "artifact_sha256": "30c26cd17a6722838ca42d7dbeaf668372231c0429342afef6a95cad71057a0b",
+    "commit": "c13f5b459df87bbfce319aef52a7d1565576981f",
+    "ephemeral_browser_state": true,
+    "runtime_sha256": "30c26cd17a6722838ca42d7dbeaf668372231c0429342afef6a95cad71057a0b",
+    "source_sha256": "30c26cd17a6722838ca42d7dbeaf668372231c0429342afef6a95cad71057a0b",
+    "version": "1.0.0-rc.6"
   },
   "native_bwrap": {
     "assets": {
