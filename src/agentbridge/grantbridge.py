@@ -58,13 +58,16 @@ class GrantBridgeClient:
                 'node': self.node}
 
     def _start(self):
-        command = [self.node, str(self.adapter)]
+        command = [self.node]
+        if self.adapter.suffix in ('.js', '.mjs', '.cjs'):
+            command.append('--disable-sigusr1')
+        command.append(str(self.adapter))
         if self.data_dir:
             command.extend(("--data-dir", str(self.data_dir)))
         env = {name: os.environ[name] for name in (
             "PATH", "HOME", "TMPDIR", "LANG", "GRANTBRIDGE_CODEX", "GRANTBRIDGE_CLAUDE",
             "GRANTBRIDGE_CHROME", "GRANTBRIDGE_CLIENT_NAME", "GRANTBRIDGE_BROWSER_PROXY",
-            "GRANTBRIDGE_BROWSER_SANDBOX",
+            "GRANTBRIDGE_BROWSER_SANDBOX", "GRANTBRIDGE_BROWSER_SOCKET",
         ) if os.environ.get(name)}
         env["NO_COLOR"] = "1"
         try:

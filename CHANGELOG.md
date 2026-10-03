@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.2] - Local candidate
+
+- Pass the private authorization-browser transport to the GrantBridge runtime.
+- Prevent signal-triggered inspector activation in the trusted SDK adapter.
+- Bundle GrantBridge rc.7 with transparent isolated browsing and a simpler viewer.
+
 All notable changes to AgentBridge are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). "Fixture tested" means

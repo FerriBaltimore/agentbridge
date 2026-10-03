@@ -96,6 +96,7 @@ def verify_wheel(path, *, grantbridge_archive=None, grantbridge_manifest=None):
                     raise ValueError('The browser runtime differs from the supplied artifact.')
             with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as runtime:
                 required = {'LICENSE', 'scripts/agentbridge-proxy-adapter.mjs',
+                            'scripts/browser-worker.mjs',
                             'src/browser/viewer/browser.html', 'src/browser/viewer/browser.js',
                             'src/browser/viewer/browser.css', 'node_modules/playwright-core/package.json'}
                 if not required.issubset(runtime.getnames()):

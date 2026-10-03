@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import secrets
+import shutil
 import socket
 import sys
 
@@ -13,6 +14,40 @@ from agentbridge.errors import BridgeError
 
 
 ADAPTER = Path(__file__).parent / 'fixtures' / 'test_grantbridge_adapter.py'
+
+
+def test_aa_auth_proxy_proof_passes_browser_socket_to_protected_node(tmp_path, monkeypatch):
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('A Node runtime is required for the GrantBridge launch regression.')
+    adapter = tmp_path / 'agentbridge-proxy-adapter.mjs'
+    adapter.write_text('''
+import { createInterface } from 'node:readline';
+const input = createInterface({ input: process.stdin });
+for await (const line of input) {
+  const request = JSON.parse(line);
+  const result = {
+    flags: process.execArgv,
+    arguments: process.argv.slice(2),
+    socket: process.env.GRANTBRIDGE_BROWSER_SOCKET,
+    proxy: process.env.GRANTBRIDGE_BROWSER_PROXY,
+    sandbox: process.env.GRANTBRIDGE_BROWSER_SANDBOX,
+  };
+  console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+}
+''')
+    monkeypatch.setenv('GRANTBRIDGE_BROWSER_SOCKET', '/run/fullbrain-browser.sock')
+    monkeypatch.setenv('GRANTBRIDGE_BROWSER_PROXY', 'http://127.0.0.1:18080')
+    monkeypatch.setenv('GRANTBRIDGE_BROWSER_SANDBOX', 'external')
+    data_dir = tmp_path / 'adapter-state'
+    with GrantBridgeClient(adapter=adapter, node=node, data_dir=data_dir) as client:
+        result = client._request('fixture.launch')
+        assert client.alive
+    assert result['flags'] == ['--disable-sigusr1']
+    assert result['arguments'] == ['--data-dir', str(data_dir)]
+    assert result['socket'] == '/run/fullbrain-browser.sock'
+    assert result['proxy'] == 'http://127.0.0.1:18080'
+    assert result['sandbox'] == 'external'
 
 
 def test_proxy_oauth_transport_reconnects_without_persisting_management_key(tmp_path, monkeypatch):
