@@ -13,6 +13,13 @@ from test_credential_snapshots import account, capture, target
 from test_managed_proxy import managed
 
 
+@pytest.fixture(autouse=True)
+def synthetic_callback_port(monkeypatch):
+    # The fixture delivers callbacks by RPC and never binds the provider's host port.
+    monkeypatch.setattr('agentbridge.grantbridge.ensure_callback_port_available',
+                        lambda provider: None)
+
+
 def callback(bridge, started, code='fixture-good', owner=None):
     state = parse_qs(urlsplit(started['authorization_url']).query)['state'][0]
     return bridge.account_login_callback(started['attempt_id'],
