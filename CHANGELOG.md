@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.10.3] - Local candidate
+
+- Bundle GrantBridge rc.8 with consistent hosted authorization expiry.
+- Preserve existing credential ownership, execution and recovery contracts.
+
 ## [2.10.2] - Local candidate
 
 - Pass the private authorization-browser transport to the GrantBridge runtime.
