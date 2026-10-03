@@ -55,3 +55,80 @@ def configuration(store):
     return {'format_version': '1', 'cliproxyapi': {'configured': bool(accounts),
                                                  'account_ids': accounts},
             'grantbridge_login': {'configured': False}}
+
+
+def _alias_digest(alias):
+    """Read a host-approved file without following a link or trusting adjacent modules."""
+    import os
+    import stat
+
+    if (not isinstance(alias, str) or not alias or len(alias) > 4096
+            or '\x00' in alias):
+        unsupported()
+    path = Path(alias)
+    try:
+        if not path.is_absolute() or str(path) != alias or path.resolve(strict=True) != path:
+            unsupported()
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+            details = os.fstat(source.fileno())
+            readonly_mount = os.fstatvfs(source.fileno()).f_flag & os.ST_RDONLY
+            if (not stat.S_ISREG(details.st_mode) or details.st_size > 65536
+                    or (details.st_mode & 0o222 and not readonly_mount)):
+                unsupported()
+            content = source.read(65537)
+            if len(content) > 65536:
+                unsupported()
+            return hashlib.sha256(content).hexdigest()
+    except (OSError, ValueError, RuntimeError):
+        unsupported()
+
+
+def normalize_login_adapters(store, aliases):
+    """Explicit host-only upgrade of known aliases; inventory remains read-only."""
+    from ..bundle import resolve_binary
+    from ..bundle.grantbridge_legacy import FILES
+    from ..checkpoint.state import identity
+    from .credential_barrier import require_account
+
+    if (not isinstance(aliases, (list, tuple)) or len(aliases) > 8
+            or not all(isinstance(alias, str) for alias in aliases)
+            or len(set(aliases)) != len(aliases)):
+        unsupported()
+    if not aliases:
+        return {'normalized': 0}
+    adapter = str(resolve_grantbridge_adapter(store.root))
+    allowed = {hashlib.sha256(Path(adapter).read_bytes()).hexdigest(),
+               FILES['scripts/agentbridge-proxy-adapter.mjs']}
+    for alias in aliases:
+        if _alias_digest(alias) not in allowed:
+            unsupported()
+    node = str(resolve_binary('node', store.root))
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        updates = []
+        rows = db.execute('SELECT r.attempt_id,r.connection,a.account_id '
+                          'FROM auth_proxy_routes r LEFT JOIN auth_attempts a '
+                          'ON a.id=r.attempt_id').fetchall()
+        for row in rows:
+            connection = json.loads(row['connection'])
+            if connection.get('adapter') not in aliases:
+                continue
+            if connection.get('data_dir') is not None or row['account_id'] is None:
+                unsupported()
+            if identity(db)['recovery_held']:
+                raise BridgeError('credential_snapshot_pending', 'Store recovery remains held.')
+            require_account(db, row['account_id'])
+            active = db.execute(
+                "SELECT 1 FROM auth_attempts WHERE account_id=? AND status NOT IN "
+                "('failed','cancelled','expired','interrupted','abandoned','revoked',"
+                "'replaced','bound','usable')", (row['account_id'],)).fetchone()
+            if active:
+                raise BridgeError('credential_snapshot_pending',
+                                  'Finish account authentication before normalizing its adapter.')
+            updated = {**connection, 'adapter': adapter, 'node': node}
+            if updated != connection:
+                updates.append((json.dumps(updated), row['attempt_id']))
+        for connection, attempt_id in updates:
+            db.execute('UPDATE auth_proxy_routes SET connection=? WHERE attempt_id=?',
+                       (connection, attempt_id))
+    return {'normalized': len(updates)}

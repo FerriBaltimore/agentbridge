@@ -11,6 +11,12 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.10.1] - Local candidate
+
+- Add host-only normalization of verified read-only login adapter aliases before credential
+  inventory/capture. Preserve account identity and proxy configuration; refuse active login,
+  held credentials, writable aliases and unknown adapter bytes.
+
 ## [2.10.0] - Local candidate
 
 - Add the owned `accounts.login.browser` channel with packaged viewer assets.

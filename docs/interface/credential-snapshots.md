@@ -14,6 +14,8 @@ The SDK requires its authenticated snapshot/revision headers, bounded manifest a
 hashes at runtime; a version string or a running process alone cannot prove support.
 
 ```python
+# Optional: a constant read-only adapter alias explicitly approved by this host.
+bridge.credential_snapshots.normalize_login_adapters(aliases=[host_login_adapter_alias])
 configuration = bridge.credential_snapshots.configuration()
 account_ids = configuration['cliproxyapi']['account_ids']
 capture = bridge.credential_snapshots.capture_online(
@@ -30,7 +32,7 @@ A changed writer revision makes the historical snapshot stale. Retry the same op
 only to recover its immutable result; use a new operation to capture a newer revision.
 Observation performs no heartbeat SQL writes. No local observation establishes cloud custody.
 
-Configuration checks managed account bindings and the pinned dependency-free login adapter.
+Configuration checks managed account bindings and the pinned login adapter with ephemeral state.
 Unknown legacy/custom credential layouts remain unsupported, never silently absent.
 Completed local account retirement excludes that account from recoverable credentials;
 incomplete retirement stays pending. This is a semantic tombstone, not a process namespace
@@ -158,3 +160,25 @@ An in-progress login copied with SQLite becomes explicitly interrupted with unkn
 its previous status is retained in private recovery evidence. Terminal history stays intact.
 The owner must abandon that interrupted attempt through the existing login-cancel operation
 before creating another login. Import never resumes its old callback or reports it successful.
+
+## Normalizing a historical host alias
+
+`normalize_login_adapters(aliases=[...])` is an explicit administrative SDK operation,
+available from 2.10.1; it is absent from JSON-RPC and the CLI. Supply only constant host
+configuration, never a user-selected path. Inventory does not perform this mutation.
+
+Each alias must be a canonical absolute, non-symlink regular file with no write permission
+bits or on a read-only mount. Its bytes must match the current bundled proxy adapter or
+the known adapter shipped in 2.9.1. Sibling runtime files are not read or executed, so a
+host may mount only the alias file in its snapshot namespace.
+
+The operation replaces only matching stored `connection.adapter` and `connection.node`
+with the verified bundled runtime paths, in one transaction. All other connection fields,
+proxy configuration, account IDs, owner IDs and attempt status remain unchanged. A matching
+route with a durable `data_dir`, unknown bytes, active account authorization or credential/
+recovery hold is rejected without partial updates. Other unknown routes remain unchanged
+and unsupported by inventory. Ordinary online inference need not stop.
+
+The result is `{"normalized": N}`; retrying an already normalized alias returns zero.
+The host calls this before `configuration()` and credential capture. This is a reference
+upgrade only: it does not authorize accounts, launch providers or migrate credentials.

@@ -236,3 +236,104 @@ def test_aa_auth_upgrade_admits_verified_291_route_and_preserves_capture(online)
     with pytest.raises(BridgeError) as rejected:
         online.credential_snapshots.configuration()
     assert rejected.value.code == 'credential_snapshot_unsupported'
+
+
+def test_aa_auth_legacy_alias_normalization_preserves_identity_and_capture(online, tmp_path):
+    from agentbridge.bundle import resolve_binary
+    from agentbridge.proxy.credential_barrier import initialize
+
+    account(online, 'first')
+    account(online, 'second')
+    adapter = resolve_grantbridge_adapter(online.root)
+    alias = tmp_path / 'agentbridge-adapter.mjs'
+    alias.write_bytes(adapter.read_bytes())
+    legacy = tmp_path / 'legacy-adapter.mjs'
+    fixture = Path(__file__).parent / 'fixtures/grantbridge_291/scripts'
+    legacy.write_bytes((fixture / 'agentbridge-proxy-adapter.mjs').read_bytes())
+    alias.chmod(0o400)
+    legacy.chmod(0o400)
+    aliases = [str(alias), str(legacy)]
+    original = {
+        'fixture-login-first': {'adapter': str(alias), 'node': '/historical/node',
+                                'data_dir': None, 'timeout': 12},
+        'fixture-login-second': {'adapter': str(legacy), 'node': '/historical/node'},
+    }
+    with online.store.connect() as db:
+        for attempt_id, connection in original.items():
+            db.execute('UPDATE auth_proxy_routes SET connection=? WHERE attempt_id=?',
+                       (json.dumps(connection), attempt_id))
+        preserved = {table: [dict(row) for row in db.execute(f'SELECT * FROM {table}')]
+                     for table in ('accounts', 'auth_attempts', 'proxy_bindings')}
+        routes = dict(db.execute('SELECT attempt_id,config FROM auth_proxy_routes'))
+
+    def connections():
+        with online.store.connect() as db:
+            return {row['attempt_id']: json.loads(row['connection']) for row in
+                    db.execute('SELECT attempt_id,connection FROM auth_proxy_routes')}
+
+    def refused(code, selected=aliases):
+        with pytest.raises(BridgeError) as rejected:
+            online.credential_snapshots.normalize_login_adapters(aliases=selected)
+        assert rejected.value.code == code
+        assert connections() == original
+
+    with pytest.raises(BridgeError) as unavailable:
+        online.credential_snapshots.configuration()
+    assert unavailable.value.code == 'credential_snapshot_unsupported'
+    assert connections() == original, 'inventory must never normalize implicitly'
+    alias.chmod(0o600)
+    refused('credential_snapshot_unsupported')
+    alias.chmod(0o400)
+    link = tmp_path / 'linked-adapter.mjs'
+    link.symlink_to(alias)
+    refused('credential_snapshot_unsupported', [str(link)])
+    unknown = tmp_path / 'unknown-adapter.mjs'
+    unknown.write_text('// Unknown runtime, even on a read-only host mount.\n')
+    unknown.chmod(0o400)
+    refused('credential_snapshot_unsupported', [str(unknown)])
+    with online.store.connect() as db:
+        db.execute("UPDATE auth_attempts SET status='awaiting_user' WHERE account_id='second'")
+    refused('credential_snapshot_pending')
+    with online.store.connect() as db:
+        db.execute("UPDATE auth_attempts SET status='bound' WHERE account_id='second'")
+        initialize(db)
+        db.execute('INSERT INTO credential_account_holds VALUES (?,?,?)',
+                   ('second', 'fixture-hold', 'capture'))
+    refused('credential_snapshot_pending')
+    with online.store.connect() as db:
+        db.execute('DELETE FROM credential_account_holds')
+        changed = {**original['fixture-login-second'], 'data_dir': '/foreign/private/state'}
+        db.execute("UPDATE auth_proxy_routes SET connection=? WHERE attempt_id='fixture-login-second'",
+                   (json.dumps(changed),))
+    with pytest.raises(BridgeError) as durable:
+        online.credential_snapshots.normalize_login_adapters(aliases=aliases)
+    assert durable.value.code == 'credential_snapshot_unsupported'
+    assert connections()['fixture-login-first'] == original['fixture-login-first']
+    with online.store.connect() as db:
+        db.execute("UPDATE auth_proxy_routes SET connection=? WHERE attempt_id='fixture-login-second'",
+                   (json.dumps(original['fixture-login-second']),))
+    online.store.add_session('active-instance', 'first', str(tmp_path), 'gpt-5')
+    online.store.admit('active-turn', 'active-instance', 'synthetic only', RunOptions(), 'active')
+    assert online.credential_snapshots.normalize_login_adapters(aliases=aliases) == {'normalized': 2}
+    expected = {attempt_id: {**connection, 'adapter': str(adapter),
+                             'node': str(resolve_binary('node', online.root))}
+                for attempt_id, connection in original.items()}
+    assert connections() == expected
+    assert online.credential_snapshots.normalize_login_adapters(aliases=aliases) == {'normalized': 0}
+    with online.store.connect() as db:
+        for table, rows in preserved.items():
+            assert [dict(row) for row in db.execute(f'SELECT * FROM {table}')] == rows
+        assert dict(db.execute('SELECT attempt_id,config FROM auth_proxy_routes')) == routes
+        assert db.execute("SELECT state FROM runs WHERE id='active-turn'").fetchone()[0] == 'starting'
+    with Bridge(online.root, owner_ref='fixture-owner', durable=True) as restarted:
+        configured = restarted.credential_snapshots.configuration()
+        assert configured['cliproxyapi']['account_ids'] == ['first', 'second']
+        assert capture(restarted, 'first', 'second')['credential_refs'] == ['first', 'second']
+    with online.store.connect() as db:
+        db.execute("UPDATE auth_proxy_routes SET connection=? WHERE attempt_id='fixture-login-second'",
+                   (json.dumps({**expected['fixture-login-second'], 'adapter': str(unknown)}),))
+    assert online.credential_snapshots.normalize_login_adapters(aliases=aliases) == {'normalized': 0}
+    assert connections()['fixture-login-second']['adapter'] == str(unknown)
+    with pytest.raises(BridgeError) as foreign:
+        online.credential_snapshots.configuration()
+    assert foreign.value.code == 'credential_snapshot_unsupported'

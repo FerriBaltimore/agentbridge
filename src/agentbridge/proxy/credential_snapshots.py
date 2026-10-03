@@ -70,6 +70,13 @@ class CredentialSnapshots:
         return capture(self.store, self.managed_proxy, operation_id, account_ids)
 
     @safe
+    def normalize_login_adapters(self, *, aliases):
+        """Normalize only known read-only aliases explicitly supplied by the trusted host."""
+        from .credential_configuration import normalize_login_adapters
+
+        return normalize_login_adapters(self.store, aliases)
+
+    @safe
     def configuration(self):
         from .credential_configuration import configuration
 
