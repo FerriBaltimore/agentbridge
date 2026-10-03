@@ -182,3 +182,18 @@ and unsupported by inventory. Ordinary online inference need not stop.
 The result is `{"normalized": N}`; retrying an already normalized alias returns zero.
 The host calls this before `configuration()` and credential capture. This is a reference
 upgrade only: it does not authorize accounts, launch providers or migrate credentials.
+
+From 2.10.5, the host can also call `normalize_login_adapters(bundled=True)` or combine
+`bundled=True` with explicit aliases. This admits canonical, owner-controlled paths under
+this Store's `bundled-runtimes` directory. An existing cache must contain a read-only
+adapter whose bytes pass the same reviewed-byte check; adjacent old code is never run.
+Other paths, symlinks, changed adapters and unmanaged bound accounts remain refused.
+
+The SDK additionally catalogs the stateless source closure at commit
+`d60873c999b7ee5215eb8cfa7bb65326175ff2f6`, full source digest
+`e2eeeaaae72f60171e3365b3c70726adbb5e2fcddddac43ffe746fdce31365f0`.
+That exact SDK cache reference can be normalized after the whole old cache was removed.
+A surviving cache must match all four cataloged source hashes; a partial cache is refused.
+This exception does not apply to other absent runtimes or create replacement files.
+The operation checks at most 1,000 routes and retains the same transactional holds,
+active-login refusal, identity preservation and idempotent result described above.

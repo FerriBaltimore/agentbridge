@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.5] - Local candidate
+
+- Add explicit host-only normalization of state-owned bundled login references, including
+  the reviewed stateless source closure whose old cache may have been removed.
+- Preserve account identity, route configuration, authentication and recovery holds while
+  making historical routes eligible for credential capture after an SDK upgrade.
+
 ## [2.10.4] - Local candidate
 
 - Bundle GrantBridge rc.9 with provider sign-in free of a persistent toolbar.

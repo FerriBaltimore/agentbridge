@@ -312,7 +312,7 @@ def test_browser_shows_sdk_catalog_usage_and_runs_chat(local_playground):
             assert calls[0]['model'] == 'fixture/openai-model'
             assert 'model_context_window=131072' in calls[0]['argv']
             assert calls[0]['effort'] == 'high'
-            page.locator('#toast-region').get_by_text('Turn completed.').wait_for(
+            page.locator('#toast-region').get_by_text('Turn completed.').last.wait_for(
                 timeout=15000)
             page.locator('#toast-region .toast').first.wait_for(
                 state='detached', timeout=10000)

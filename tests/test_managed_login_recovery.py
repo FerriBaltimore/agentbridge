@@ -195,7 +195,11 @@ def test_failed_reauthentication_preserves_bound_account_proxy(tmp_path, monkeyp
     responses = proxy_responses()
 
     class FailedReauthentication(FakeProxyGrantBridge):
+        fail_status = False
+
         def proxy_status(self, state, provider, base_url, management_key_env):
+            if not self.fail_status:
+                return super().proxy_status(state, provider, base_url, management_key_env)
             if status == 'interrupted':
                 raise BridgeError('authentication_outcome_unknown', 'Synthetic lost response.')
             return {'id': state, 'provider': provider, 'status': status}
@@ -204,14 +208,16 @@ def test_failed_reauthentication_preserves_bound_account_proxy(tmp_path, monkeyp
         with Bridge(tmp_path / 'state') as bridge:
             managed = FixtureManagedProxy(port, monkeypatch)
             bridge.authentication.managed_proxy = managed
-            use_fake_grantbridge(monkeypatch, FakeProxyGrantBridge(responses))
+            client = FailedReauthentication(responses)
+            use_fake_grantbridge(monkeypatch, client)
             first = bridge.account_login_start(provider='codex', name='Fixture')
             assert bridge.account_login_check(
                 first['attempt_id'], owner_ref=first['owner_ref'])['status'] == 'verified'
             account = bridge.account_login_complete(
                 first['attempt_id'], owner_ref=first['owner_ref'])['account']
 
-            use_fake_grantbridge(monkeypatch, FailedReauthentication(responses))
+            # The SDK retains its owned transport; change the response on that same client.
+            client.fail_status = True
             second = bridge.account_login_start(provider='codex', name='Fixture')
             assert bridge.account_login_status(
                 second['attempt_id'], owner_ref=second['owner_ref'])['status'] == status

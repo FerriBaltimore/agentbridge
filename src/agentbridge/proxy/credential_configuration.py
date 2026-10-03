@@ -83,18 +83,19 @@ def _alias_digest(alias):
         unsupported()
 
 
-def normalize_login_adapters(store, aliases):
+def normalize_login_adapters(store, aliases, *, bundled=False):
     """Explicit host-only upgrade of known aliases; inventory remains read-only."""
     from ..bundle import resolve_binary
     from ..bundle.grantbridge_legacy import FILES
     from ..checkpoint.state import identity
     from .credential_barrier import require_account
+    from .credential_login_upgrade import bundled_alias
 
-    if (not isinstance(aliases, (list, tuple)) or len(aliases) > 8
+    if (type(bundled) is not bool or not isinstance(aliases, (list, tuple)) or len(aliases) > 8
             or not all(isinstance(alias, str) for alias in aliases)
             or len(set(aliases)) != len(aliases)):
         unsupported()
-    if not aliases:
+    if not aliases and not bundled:
         return {'normalized': 0}
     adapter = str(resolve_grantbridge_adapter(store.root))
     allowed = {hashlib.sha256(Path(adapter).read_bytes()).hexdigest(),
@@ -106,15 +107,29 @@ def normalize_login_adapters(store, aliases):
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         updates = []
-        rows = db.execute('SELECT r.attempt_id,r.connection,a.account_id '
+        rows = db.execute('SELECT r.attempt_id,r.connection,a.account_id,a.status '
                           'FROM auth_proxy_routes r LEFT JOIN auth_attempts a '
-                          'ON a.id=r.attempt_id').fetchall()
+                          'ON a.id=r.attempt_id LIMIT 1001').fetchall()
+        if len(rows) > 1000:
+            unsupported()
         for row in rows:
             connection = json.loads(row['connection'])
-            if connection.get('adapter') not in aliases:
+            previous = connection.get('adapter')
+            if previous == adapter:
+                continue
+            selected_bundle = (bundled and bundled_alias(previous, store.root,
+                                                        allowed, _alias_digest))
+            if previous not in aliases and not selected_bundle:
                 continue
             if connection.get('data_dir') is not None or row['account_id'] is None:
                 unsupported()
+            if selected_bundle:
+                account = db.execute('SELECT config FROM accounts WHERE id=?',
+                                     (row['account_id'],)).fetchone()
+                if ((account is None and row['status'] in {'bound', 'usable'}) or
+                        (account is not None and not ManagedProxyClient.is_managed(
+                            json.loads(account[0]), row['account_id']))):
+                    unsupported()
             if identity(db)['recovery_held']:
                 raise BridgeError('credential_snapshot_pending', 'Store recovery remains held.')
             require_account(db, row['account_id'])
