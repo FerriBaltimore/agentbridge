@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.10.14
+
+- Bundle GrantBridge rc16 bounded tool-call deadlines.
+- Preserve the current authorization runtime and authenticated workspace restoration.
+
 ## 2.10.13
 
 - Bundle GrantBridge rc15 recovery for expired local connector authorization.
