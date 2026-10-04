@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.10.8] - Local candidate
+
+- Bundle GrantBridge rc11 input ordering and safe provider diagnostics.
+- Preserve the existing durability recovery and isolated proxy logging runtime.
+
 ## [2.10.7] - Local candidate
 
 - Bundle GrantBridge rc.10 with verified Google mailbox binding and retryable MCP start.
