@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.10.11
+
+- Bundle GrantBridge rc13 terminal MCP cancellation and preserve durable workspace restoration.
+
 ## [2.10.10] - Local candidate
 
 - Bundle GrantBridge rc12 MCP transport error preservation.
