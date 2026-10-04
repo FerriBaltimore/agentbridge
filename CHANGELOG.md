@@ -1,5 +1,24 @@
 # Changelog
 
+All notable changes to AgentBridge are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). "Fixture tested" means
+deterministic subprocess coverage; live provider acceptance is recorded separately in
+`docs/development/*-acceptance.md` and `docs/interface/provider-acceptance.md`.
+
+Release procedure: [docs/release.md](docs/release.md). Compatibility numbers and the
+AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/compatibility.md).
+
+## [Unreleased]
+
+## [2.10.15] - 2026-10-05
+
+- Bundle GrantBridge rc.17: the hosted authorization browser renders in software only, so
+  provider sign-in starts the same way on hosts with or without a GPU or graphics driver.
+- A display or browser that stops before it is ready now fails at once with a safe
+  `display_unavailable` or `browser_launch_failed` reason instead of hanging. The RPC
+  protocol, the recipe contract and the login error set are unchanged.
+
 ## 2.10.14
 
 - Bundle GrantBridge rc16 bounded tool-call deadlines.
@@ -64,17 +83,6 @@
 - Pass the private authorization-browser transport to the GrantBridge runtime.
 - Prevent signal-triggered inspector activation in the trusted SDK adapter.
 - Bundle GrantBridge rc.7 with transparent isolated browsing and a simpler viewer.
-
-All notable changes to AgentBridge are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html). "Fixture tested" means
-deterministic subprocess coverage; live provider acceptance is recorded separately in
-`docs/development/*-acceptance.md` and `docs/interface/provider-acceptance.md`.
-
-Release procedure: [docs/release.md](docs/release.md). Compatibility numbers and the
-AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/compatibility.md).
-
-## [Unreleased]
 
 ## [2.10.1] - Local candidate
 
@@ -318,7 +326,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.9.1...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.15...HEAD
+[2.10.15]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.15
 [2.8.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.8.0
 [2.7.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.7.0
 [2.5.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.5.0

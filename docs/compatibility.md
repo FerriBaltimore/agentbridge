@@ -9,7 +9,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 
 | Number | Current | Where it appears |
 | --- | --- | --- |
-| SDK version | `2.10.6` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
+| SDK version | `2.10.15` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
 | `rpc_contract` | `v2` | manifest `protocols`; `capabilities.get` `contract_version` |
 | `http` | `2` | manifest `protocols`; playground `/api/meta` `api_revision` |
 | `cli` | `1` | manifest `protocols`; `agentbridge --root DIR rpc`, `--version` |
@@ -19,7 +19,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 | `platform` | `linux_x86_64`, `linux_aarch64` | wheel tag `manylinux_2_28_<arch>`, manifest |
 | `bundle` | CLIProxyAPI 7.3.16-fullbrain.2, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
 
-The bundled GrantBridge runtime is rc.9 (commit `9465bed…`); its exact source and artifact
+The bundled GrantBridge runtime is rc.17 (commit `62e3238…`); its exact source and artifact
 digests live in `bundle/lock.json`. The source broker is configured independently by the host.
 Online credentials additionally require CLIProxy credential protocol `1` at runtime, not
 merely the version string. The downstream writer source, patch and signed manifest are
