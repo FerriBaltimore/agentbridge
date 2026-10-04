@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.10.9] - Local candidate
+
+- Prepare held native restores from the authenticated original workspace when a session
+  has since moved, preserving the private destination and strict auxiliary-thread scope.
+- Keep historical checkpoint capsules and exact runtime verification unchanged.
+
 ## [2.10.8] - Local candidate
 
 - Bundle GrantBridge rc11 input ordering and safe provider diagnostics.
