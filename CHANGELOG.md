@@ -1,9 +1,10 @@
 # Changelog
 
-## [2.10.9] - Local candidate
+## [2.10.10] - Local candidate
 
 - Bundle GrantBridge rc12 MCP transport error preservation.
-- Keep existing durability recovery and provider runtime pins unchanged.
+- Restore held workspaces from the authenticated native checkpoint origin when the session
+  working directory has changed, preserving scope checks and explicit recovery release.
 
 ## [2.10.8] - Local candidate
 
