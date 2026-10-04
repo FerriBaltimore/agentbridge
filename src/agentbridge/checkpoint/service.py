@@ -169,6 +169,14 @@ class Checkpoints:
         return restore(self.store, format_version=format_version,
                        operation_id=operation_id, params=params)
 
+    @checkpoint_operation
+    def prepare_restore_workspace(self, *, format_version, operation_id, params):
+        """Host-only workspace preparation using the registered authenticated native capsule."""
+        from .workspace_restore import prepare
+
+        return prepare(self.store, format_version=format_version,
+                       operation_id=operation_id, params=params)
+
     def release_recovery(self, *, expected_generation, ready_instances=None):
         from .activation import release_recovery
 

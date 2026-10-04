@@ -120,7 +120,20 @@ destination directories and rebinds Store/native index workspace paths. It prese
 transcript text and queue versions; no path mapping is accepted from checkpoint RPC requests.
 Interrupted publication can retry using the same operation; changed installed bytes fail.
 
-`resolve_content`, `register_content`, `restore_store`, `adopt_drained` and `release_recovery`
+After registering a native capsule, the host calls
+`checkpoints.prepare_restore_workspace(format_version='1', operation_id=restore_operation,
+params=restore_params)` with the same parameters as native restore. A session's current workspace
+may differ from its native index's original workspace after a legitimate move. This operation
+verifies the complete capsule, its historical descriptor and principal native ID, then updates
+only the held source binding to that authenticated origin. The private destination remains unchanged.
+Every auxiliary thread must remain within that origin; foreign paths are refused. Repeat calls are
+idempotent, never release execution and never rewrite the capsule or historical transcripts.
+The existing restore method, including a reviewed historical SDK, consumes that binding and still
+verifies exact runtime compatibility. The result is `workspace_prepared`, with `format_version`,
+`instance_id`, `checkpoint_id` and destination `store_generation`.
+
+`resolve_content`, `register_content`, `restore_store`, `prepare_restore_workspace`,
+`adopt_drained` and `release_recovery`
 are host SDK operations, absent from RPC. They never fetch credentials or start a provider.
 After the required native histories are restored, the host reconciles external effects, authenticates
 fresh provider bindings and establishes exclusive execution authority. Only then it calls
