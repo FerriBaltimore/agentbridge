@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.10.9] - Local candidate
+
+- Bundle GrantBridge rc12 MCP transport error preservation.
+- Keep existing durability recovery and provider runtime pins unchanged.
+
 ## [2.10.8] - Local candidate
 
 - Bundle GrantBridge rc11 input ordering and safe provider diagnostics.
