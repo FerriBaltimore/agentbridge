@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.10.13
+
+- Bundle GrantBridge rc15 recovery for expired local connector authorization.
+- Preserve the current authorization runtime and authenticated workspace restoration.
+
 ## 2.10.12
 
 - Bundle GrantBridge rc14 process cleanup and recoverable cancellation.
