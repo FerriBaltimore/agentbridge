@@ -354,3 +354,82 @@ def test_new_private_directory_entries_sync_all_new_parents(tmp_path, monkeypatc
     observed.clear()
     native.private_directory(folder)
     assert observed == []
+
+
+@pytest.mark.parametrize('outside_auxiliary', [False, True])
+def test_bd2_restore_uses_authenticated_native_origin_after_session_workspace_changes(
+        tmp_path, outside_auxiliary):
+    bridge = prepared(tmp_path)
+    home = execution(bridge)
+    origin = '/historical/native-workspace'
+    latest = tmp_path / 'latest-workspace'
+    latest.mkdir(mode=0o700)
+    with bridge.store.connect() as db:
+        db.execute('UPDATE sessions SET cwd=? WHERE id=?', (str(latest), 'instance'))
+    with closing(sqlite3.connect(home / 'state_5.sqlite')) as db, db:
+        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('ALTER TABLE threads ADD COLUMN cwd TEXT')
+        db.execute('UPDATE threads SET cwd=?', (origin,))
+        if outside_auxiliary:
+            auxiliary = str(uuid4())
+            rollout = home / 'sessions' / ('rollout-auxiliary-' + auxiliary + '.jsonl')
+            rollout.write_text(json.dumps({'type': 'session_meta', 'payload': {
+                'id': auxiliary, 'cli_version': '0.153.0'}}) + '\n')
+            db.execute('INSERT INTO threads VALUES (?,?,?)',
+                       (auxiliary, str(rollout), '/unrelated-workspace'))
+    bridge.store.finish('turn-1', 'completed', process_verified=True)
+    checkpoint = terminal(bridge).data['durability']['checkpoint']
+    original = deepcopy(checkpoint)
+    snapshot = bridge.checkpoints.snapshot_store(format_version='1', operation_id=str(uuid4()),
+                                                params=scope(bridge))
+    destination = tmp_path / 'protected-workspace'
+    destination.mkdir(mode=0o500)
+    binding = restore_store(tmp_path / 'restored', snapshot,
+                            bridge.checkpoints.resolve_content(snapshot['content']),
+                            owner_ref=snapshot['owner_ref'],
+                            workspace_paths={'instance': destination})
+    restored = Bridge(tmp_path / 'restored')
+    restored.checkpoints.register_content(checkpoint['content'],
+                                          bridge.checkpoints.resolve_content(checkpoint['content']))
+    request = {'format_version': '1', 'operation_id': str(uuid4()), 'params': {
+        'checkpoint': checkpoint, 'content': checkpoint['content'],
+        'destination_generation': binding['store_generation']}}
+    with pytest.raises(BridgeError) as caught:
+        restored.checkpoints.restore(**request)
+    assert caught.value.code == 'scope_mismatch'
+    if outside_auxiliary:
+        with pytest.raises(BridgeError) as caught:
+            restored.checkpoints.prepare_restore_workspace(**request)
+        assert caught.value.code == 'scope_mismatch'
+        with restored.store.connect() as db:
+            row = db.execute('SELECT source_path FROM recovery_workspaces').fetchone()
+            assert row[0] == str(latest)
+        assert restored.checkpoints.identity()['recovery_held']
+        assert not (restored.root / 'codex-runtime/instance').exists()
+        return
+    prepared_workspace = restored.checkpoints.prepare_restore_workspace(**request)
+    assert prepared_workspace == {'format_version': '1', 'state': 'workspace_prepared',
+        'instance_id': 'instance', 'checkpoint_id': checkpoint['checkpoint_id'],
+        'store_generation': binding['store_generation']}
+    assert restored.checkpoints.prepare_restore_workspace(**request) == prepared_workspace
+    assert checkpoint == original
+    assert restored.checkpoints.identity()['recovery_held']
+    with restored.store.connect() as db:
+        row = db.execute('SELECT source_path,target_path FROM recovery_workspaces').fetchone()
+        assert tuple(row) == (origin, str(destination))
+        assert db.execute('SELECT cwd FROM sessions').fetchone()[0] == str(destination)
+    bad = deepcopy(request)
+    bad['params']['checkpoint']['owner_ref'] = 'different-owner'
+    with pytest.raises(BridgeError) as caught:
+        restored.checkpoints.prepare_restore_workspace(**bad)
+    assert caught.value.code == 'scope_mismatch'
+    result = restored.checkpoints.restore(**request)
+    assert result['state'] == 'restored_held'
+    assert restored.checkpoints.restore(**request) == result
+    with closing(sqlite3.connect(restored.root / 'codex-runtime/instance/state_5.sqlite')) as db:
+        assert db.execute('SELECT cwd FROM threads').fetchone()[0] == str(destination)
+    assert destination.stat().st_mode & 0o777 == 0o500
+    restored.checkpoints.release_recovery(expected_generation=result['store_generation'])
+    with pytest.raises(BridgeError) as caught:
+        restored.checkpoints.prepare_restore_workspace(**request)
+    assert caught.value.code == 'scope_mismatch'
