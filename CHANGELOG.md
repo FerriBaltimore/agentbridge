@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.10.12
+
+- Bundle GrantBridge rc14 process cleanup and recoverable cancellation.
+- Retain authenticated native workspace restoration and existing durability components.
+
 ## 2.10.11
 
 - Bundle GrantBridge rc13 terminal MCP cancellation and preserve durable workspace restoration.
