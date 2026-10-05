@@ -11,6 +11,12 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.10.17] - 2026-10-05
+
+- Bundle GrantBridge rc.19: the hosted authorization viewer clears its "connection was
+  interrupted" notice on the next successful screen poll instead of keeping it over a working
+  sign-in until the page changes. Protocol, recipe contract and login error set are unchanged.
+
 ## [2.10.16] - 2026-10-05
 
 - Bundle GrantBridge rc.18: the hosted authorization browser no longer reports itself as
@@ -333,7 +339,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.16...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.17...HEAD
+[2.10.17]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.17
 [2.10.16]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.16
 [2.10.15]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.15
 [2.8.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.8.0
