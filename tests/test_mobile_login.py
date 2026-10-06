@@ -93,6 +93,7 @@ def test_hosted_login_exposes_only_the_viewer_and_reports_browser_failures(tmp_p
             use_fake_grantbridge(monkeypatch, fake)
             started = login(bridge, port, browser='mobile', mode='hosted', owner_ref=PHONE_OWNER)
             assert fake.starts[0]['mode'] == 'hosted'
+            assert 'viewport' not in fake.starts[0]  # absent: GrantBridge keeps its default
             assert started['viewer_url'] == VIEWER
             assert started['mode'] == 'hosted'
             assert 'authorization_url' not in started
@@ -129,6 +130,59 @@ def test_arbitrary_entries_are_rejected_before_grantbridge(tmp_path, monkeypatch
             with pytest.raises(BridgeError) as error:
                 login(bridge, port, **entry)
             assert error.value.code == code
+            assert bridge.account_login_attempts() == []
+
+
+@pytest.mark.parametrize('viewport', [
+    {'width': 390, 'height': 760, 'scale': 3},  # a 3x phone
+    {'width': 1280, 'height': 800, 'scale': 1},  # a desktop window
+    {'width': 320, 'height': 480, 'scale': 2.625},  # the smallest screen, fractional ratio
+])
+def test_hosted_login_forwards_the_client_viewport_verbatim(tmp_path, monkeypatch, keys, viewport):
+    responses = proxy_responses()
+    with local_management(responses) as (port, _):
+        with Bridge(tmp_path / 'state') as bridge:
+            fake = FakeMobileGrantBridge(responses)
+            use_fake_grantbridge(monkeypatch, fake)
+            started = login(bridge, port, browser='mobile', mode='hosted', owner_ref=PHONE_OWNER,
+                            viewport=dict(viewport))
+            assert fake.starts == [{'browser': 'mobile', 'mode': 'hosted', 'owner': PHONE_OWNER,
+                                    'viewport': viewport}]
+            assert started['viewer_url'] == VIEWER
+
+
+@pytest.mark.parametrize('entry', [
+    {'viewport': [390, 760, 1]},
+    {'viewport': {'width': 390, 'height': 760}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': 1, 'dpr': 1}},
+    {'viewport': {'width': 319, 'height': 760, 'scale': 1}},
+    {'viewport': {'width': 1281, 'height': 760, 'scale': 1}},
+    {'viewport': {'width': 390, 'height': 479, 'scale': 1}},
+    {'viewport': {'width': 390, 'height': 1281, 'scale': 1}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': 0.99}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': 3.01}},
+    {'viewport': {'width': 390.0, 'height': 760, 'scale': 1}},
+    {'viewport': {'width': True, 'height': 760, 'scale': 1}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': '2'}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': float('inf')}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': float('nan')}},
+    {'viewport': {'width': 390, 'height': 760, 'scale': 1}, 'mode': 'browser'},
+    {'viewport': {'width': 390, 'height': 760, 'scale': 1}, 'browser': 'same_host',
+     'mode': 'browser'},
+])
+def test_invalid_viewports_are_rejected_before_grantbridge(tmp_path, monkeypatch, keys, entry):
+    class Untouched:
+        def __getattr__(self, name):
+            raise AssertionError(f'GrantBridge must not be used: {name}')
+
+    options = {'browser': 'mobile', 'mode': 'hosted', 'owner_ref': PHONE_OWNER, **entry}
+    with local_management(proxy_responses()) as (port, _):
+        with Bridge(tmp_path / 'state') as bridge:
+            use_fake_grantbridge(monkeypatch, Untouched())
+            with pytest.raises(BridgeError) as error:
+                login(bridge, port, **options)
+            assert error.value.code == 'invalid_params'
+            assert str(error.value).startswith('viewport')
             assert bridge.account_login_attempts() == []
 
 
@@ -181,11 +235,15 @@ def test_client_sends_the_phone_entry_only_for_phones(monkeypatch):
     client.proxy_start('codex', 'http://127.0.0.1:9/v1', 'KEY')
     client.proxy_start('claude', 'http://127.0.0.1:9/v1', 'KEY', browser='mobile', mode='hosted',
                        owner=PHONE_OWNER)
+    viewport = {'width': 1280, 'height': 1024, 'scale': 2}
+    client.proxy_start('claude', 'http://127.0.0.1:9/v1', 'KEY', browser='mobile', mode='hosted',
+                       owner=PHONE_OWNER, viewport=viewport)
     assert sent[0][1] == {'provider': 'codex', 'base_url': 'http://127.0.0.1:9/v1',
                           'management_key': 'secret-value'}
     assert sent[1][1] == {'provider': 'claude', 'base_url': 'http://127.0.0.1:9/v1',
                           'management_key': 'secret-value', 'browser': 'mobile', 'mode': 'hosted',
                           'owner': PHONE_OWNER}
+    assert sent[2][1] == {**sent[1][1], 'viewport': viewport}
 
 
 def test_bundled_adapter_answers_the_phone_entry_without_a_host(tmp_path, monkeypatch):

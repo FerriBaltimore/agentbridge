@@ -127,17 +127,20 @@ class GrantBridgeClient:
         return value
 
     def proxy_start(self, provider, base_url, management_key_env, *,
-                    browser='same_host', mode='browser', owner=None):
+                    browser='same_host', mode='browser', owner=None, viewport=None):
         """Ask GrantBridge to start OAuth in a dedicated local proxy.
 
         The same-host request is unchanged. A phone login adds `browser`, `mode` and the
-        `owner` GrantBridge binds its viewer and callback route to (docs/interface/mobile-login.md).
+        `owner` GrantBridge binds its viewer and callback route to; a hosted login may add
+        the client's validated `viewport` verbatim (docs/interface/mobile-login.md).
         """
         management_key = self._proxy_key(management_key_env)
         ensure_callback_port_available(provider)
         params = {'provider': provider, 'base_url': base_url, 'management_key': management_key}
         if browser != 'same_host' or mode == 'hosted':
             params.update({'browser': browser, 'mode': mode, 'owner': owner})
+        if viewport is not None:
+            params['viewport'] = viewport
         return self._request('auth.proxy_start', params)
 
     def proxy_status(self, state, provider, base_url, management_key_env):

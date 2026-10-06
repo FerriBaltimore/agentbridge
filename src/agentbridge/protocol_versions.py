@@ -14,7 +14,8 @@ HTTP_API_REVISION = 2
 CLI = 1
 # `accounts.login.start` shape. 1: same_host only (2.0.0). 2: `browser`
 # same_host|isolated|mobile, `mode` browser|hosted, `viewer_url`, attempt projections echo
-# `browser` and `mode`, `identity.email` on `identity_changed` (2.5.0).
+# `browser` and `mode`, `identity.email` on `identity_changed` (2.5.0). The optional hosted
+# `viewport` {width, height, scale} request key is additive and keeps 2.
 LOGIN_START = 2
 # Oldest GrantBridge release whose engine surface (`auth.proxy_*`) serves every login entry
 # when AgentBridge is pointed at an external GrantBridge instead of its bundled adapter.

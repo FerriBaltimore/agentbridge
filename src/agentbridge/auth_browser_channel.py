@@ -65,8 +65,11 @@ class AuthBrowserChannel:
         if action != 'asset' and terminal:
             if action == 'input':
                 raise BridgeError('authentication_attempt_not_ready', 'This login has ended.')
+            # Placeholder for an ended login; a live `view` relays GrantBridge's own
+            # viewport (width, height and scale) untouched.
             return {'status': row['status'], 'done': True, 'ready': False,
-                    'sequence': 0, 'origin': '', 'viewport': {'width': 390, 'height': 760},
+                    'sequence': 0, 'origin': '',
+                    'viewport': {'width': 390, 'height': 760, 'scale': 1},
                     'expires_at': row['data'].get('expiresAt')}
         if row['id'] not in self._browser_attempts:
             raise BridgeError('authentication_interrupted', 'The browser session has ended.')

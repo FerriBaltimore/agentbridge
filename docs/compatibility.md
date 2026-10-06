@@ -9,7 +9,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 
 | Number | Current | Where it appears |
 | --- | --- | --- |
-| SDK version | `2.10.17` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
+| SDK version | `2.10.18` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
 | `rpc_contract` | `v2` | manifest `protocols`; `capabilities.get` `contract_version` |
 | `http` | `2` | manifest `protocols`; playground `/api/meta` `api_revision` |
 | `cli` | `1` | manifest `protocols`; `agentbridge --root DIR rpc`, `--version` |
@@ -19,7 +19,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 | `platform` | `linux_x86_64`, `linux_aarch64` | wheel tag `manylinux_2_28_<arch>`, manifest |
 | `bundle` | CLIProxyAPI 7.3.16-fullbrain.2, Codex 0.153.0, Node v24.21.0 | `bundle/lock.json`, manifest |
 
-The bundled GrantBridge runtime is rc.19 (commit `2276bfe…`); its exact source and artifact
+The bundled GrantBridge runtime is rc.20 (commit `f7c645f…`); its exact source and artifact
 digests live in `bundle/lock.json`. The source broker is configured independently by the host.
 Online credentials additionally require CLIProxy credential protocol `1` at runtime, not
 merely the version string. The downstream writer source, patch and signed manifest are
@@ -69,6 +69,9 @@ the version a consumer records is the manifest `version`, nothing else.
   `viewer_url` for hosted logins, `browser` and `mode` echoed on every projection,
   `identity.email` on `identity_changed`. A consumer that needs a phone entry requires
   `login_start >= 2`; a consumer that sends only the 2.0.0 fields works with either.
+  Still `2`: the optional `viewport` `{width, height, scale}` of a hosted start
+  ([mobile-login.md](interface/mobile-login.md)) is an additive request key; a consumer
+  that omits it gets the former fixed hosted page, and the projection is unchanged.
 
 ## GrantBridge minimum
 
@@ -81,6 +84,8 @@ of this AgentBridge when a host points it at an external GrantBridge (`--grantbr
 For `2.5.0` it is `1.0.0-rc.1`, the first GrantBridge release. The reason is the mobile
 entry, not the source broker: `browser: "mobile"` sends `browser`, `mode` and `owner` in
 `auth.proxy_start` and needs `browser`/`mode` echoed and `viewerUrl` for hosted logins.
+A hosted start that carries `viewport` additionally needs a GrantBridge that accepts that
+key in `auth.proxy_start`; older releases keep their fixed 390×760 page or reject the start.
 Those fields exist from GrantBridge commit `ddaa3698…` (`agentbridge-phone-callback`), which
 is an ancestor of the `1.0.0-rc.1` manifest commit `95f5307…`; no earlier GrantBridge was
 ever released (`package.json` `0.1.0`, untagged). A GrantBridge without that entry makes a

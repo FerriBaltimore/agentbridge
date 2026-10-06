@@ -69,8 +69,10 @@ fresh disposable profile (`agentbridge.auth_browser`) so no signed-in session is
 reused; a phone sends `browser: "mobile"` with `mode: "browser"` (opens
 `authorization_url`, returns the loopback redirect through
 `accounts.login.callback` or GrantBridge's owner-bound callback route) or
-`mode: "hosted"` (opens `viewer_url` on the GrantBridge origin). Details and
-the fields Fullbrain must read are in [mobile-login.md](mobile-login.md). The
+`mode: "hosted"` (opens `viewer_url` on the GrantBridge origin; may add the
+client's `viewport` `{width, height, scale}` so the hosted page matches the
+person's screen). Details and the fields Fullbrain must read are in
+[mobile-login.md](mobile-login.md). The
 explicit callback method relays a remote Codex or Claude redirect into
 that same pending login.
 

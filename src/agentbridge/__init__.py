@@ -6,5 +6,5 @@ from .models import Account, Event, RunOptions
 from .grantbridge import GrantBridgeClient
 from .storage.configuration import PostgresConfiguration
 
-__version__='2.10.17'
+__version__='2.10.18'
 __all__=['PostgresConfiguration','Bridge','Run','GrantBridgeClient','Account','RunOptions','Event','ContextBundle','BridgeError','BusyError','UnsupportedError']

@@ -34,7 +34,9 @@ class BrowserGrantBridge(FakeMobileGrantBridge):
             return {'content_type': 'text/html; charset=utf-8', 'body': '<html></html>'}
         if options['action'] == 'input':
             return {'editable': True}
-        return {'status': 'awaiting_user', 'ready': True, 'done': False, 'sequence': 1}
+        return {'status': 'awaiting_user', 'ready': True, 'done': False, 'sequence': 1,
+                'origin': 'https://auth.example.test',
+                'viewport': {'width': 1280, 'height': 800, 'scale': 2}}
 
 
 def test_aa_auth_sdk_browser_lifetime_admission_verification_and_recovery(tmp_path, monkeypatch):
@@ -54,7 +56,10 @@ def test_aa_auth_sdk_browser_lifetime_admission_verification_and_recovery(tmp_pa
             assert login(bridge, port, browser='mobile', mode='hosted',
                          owner_ref='owner-a', request_key='browser-login') == start
             assert len(fake.starts) == 1
-            assert dispatch(bridge, 'accounts.login.browser', params)['ready']
+            view = dispatch(bridge, 'accounts.login.browser', params)
+            assert view['ready']
+            # GrantBridge's viewport, including the device scale, reaches the viewer untouched.
+            assert view['viewport'] == {'width': 1280, 'height': 800, 'scale': 2}
             with pytest.raises(BridgeError):
                 dispatch(bridge, 'accounts.login.browser', {**params, 'owner_ref': 'owner-b'})
             with pytest.raises(BridgeError):
@@ -89,8 +94,9 @@ def test_aa_auth_sdk_browser_lifetime_admission_verification_and_recovery(tmp_pa
         with Bridge(tmp_path / 'restart') as recovered:
             result = recovered.account_login_status(start['attempt_id'], owner_ref='owner-a')
             assert result['status'] == 'interrupted'
-            assert recovered.account_login_browser(start['attempt_id'],
-                                                   owner_ref='owner-a')['done']
+            ended = recovered.account_login_browser(start['attempt_id'], owner_ref='owner-a')
+            assert ended['done']
+            assert ended['viewport'] == {'width': 390, 'height': 760, 'scale': 1}
 
 
 def test_aa_auth_dead_browser_drains_without_reopening_and_close_continues(tmp_path, monkeypatch):

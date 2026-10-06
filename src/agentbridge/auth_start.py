@@ -4,7 +4,7 @@ import time
 from uuid import uuid4
 
 from . import auth_contract
-from .auth_entry import entry_failure, entry_params, validate_entry
+from .auth_entry import entry_failure, entry_params, validate_entry, validate_viewport
 from .auth_identity import check_existing
 from .auth_proxy_retirement import retire_managed_proxy, retire_terminal_proxy
 from .errors import BridgeError
@@ -25,7 +25,8 @@ KNOWN_START_FAILURES = frozenset({
 class AuthStartMixin:
     def start(self, *, provider, name, proxy_base_url=None, key_env=None,
               management_key_env=None, email=None, grantbridge_root=None, data_dir=None,
-              mode='browser', browser='same_host', request_key=None, owner_ref=None):
+              mode='browser', browser='same_host', request_key=None, owner_ref=None,
+              viewport=None):
         from .authentication import GrantBridgeClient
 
         if provider not in PROVIDERS:
@@ -39,6 +40,7 @@ class AuthStartMixin:
             raise BridgeError('invalid_request',
                               'email must be a valid account email when supplied.')
         validate_entry(mode, browser)
+        viewport = validate_viewport(viewport, mode)
         if request_key is not None and (not isinstance(request_key, str)
                                         or not 1 <= len(request_key) <= 256):
             raise BridgeError('invalid_request', 'request_key must contain 1-256 characters.')
@@ -126,7 +128,7 @@ class AuthStartMixin:
         try:
             client = self._client(connection)
             remote = client.proxy_start(provider, proxy_base_url, management_key_env,
-                                        **entry_params(browser, mode, owner))
+                                        **entry_params(browser, mode, owner, viewport))
             remote = auth_contract.attempt(remote, engine=provider)
             rejected = entry_failure(remote, browser, mode)
             if rejected:

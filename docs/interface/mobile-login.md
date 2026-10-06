@@ -17,6 +17,15 @@ This is a fixed SDK asset identifier, not a public URL. Fullbrain projects its o
 same-origin, authenticated viewer URL for the owned attempt. Hosted responses omit
 `authorization_url`: the SDK opens the provider page automatically.
 
+A hosted start may add the client's screen as `viewport`, an object with exactly
+`width` (whole number, 320–1280 CSS pixels), `height` (whole number, 480–1280) and
+`scale` (number, 1–3, the device pixel ratio). AgentBridge validates it and forwards it
+verbatim in the GrantBridge start request, which renders the hosted page at that size and
+density. Anything else, including a `viewport` on a non-hosted login, fails with
+`invalid_params` before GrantBridge is contacted. Without `viewport` the request carries
+no such key and GrantBridge keeps its default (390×760 at scale 1). Replaying a
+`request_key` with a different `viewport` returns the existing attempt unchanged.
+
 The application keeps the same `Bridge` instance (or stdio worker) alive through the
 login. Each configuration owns one GrantBridge child. Ending the SDK lifetime cancels
 pending browser interactions and removes temporary state. A restarted worker never
@@ -34,8 +43,11 @@ Every call requires `attempt_id` and `owner_ref`; snapshot account holds still a
 | `asset` | `asset`: `browser.html`, `browser.js`, `browser.css` | `content_type`, UTF-8 `body` |
 
 View returns `status`, `ready`, `done`, `expires_at`, `origin`, `viewport`, `sequence`
-and optional `image={mime:"image/jpeg",base64:...}`. Frames stay in memory; JPEGs are
-bounded to 512 KiB and RPC responses remain below 1 MiB. View is short polling.
+and optional `image={mime:"image/jpeg",base64:...}`. `viewport` is GrantBridge's own
+`{width, height, scale}`, relayed untouched; the viewer sizes and sharpens its frames from
+it. After the login has ended, view answers a fixed placeholder (`390×760`, `scale` 1).
+Frames stay in memory; JPEGs are bounded to 512 KiB and RPC responses remain below 1 MiB.
+View is short polling.
 
 Inputs are `tap` with normalized `x,y`; `drag` with 2–128 normalized `points`;
 `scroll` with `dy` within ±2000 and optional `x,y`; `text` up to 4096 characters; or

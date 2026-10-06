@@ -11,6 +11,20 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.10.18] - 2026-10-06
+
+- Bundles GrantBridge 1.0.0-rc.20: hosted frames at the device density of the given
+  `viewport`, adaptive viewer poll, flicker-free painting with a tap mark, English and
+  Spanish viewer copy, and the sidecar status check at most once per second per attempt.
+- `accounts.login.start` (Python `start(...)`) accepts an optional `viewport`
+  `{width, height, scale}` for hosted logins: the client's CSS size (320–1280 × 480–1280)
+  and device pixel ratio (1–3). AgentBridge validates it (`invalid_params` otherwise, also
+  on a non-hosted login) and forwards it verbatim to GrantBridge, which renders the hosted
+  sign-in page at the person's real size and density instead of a fixed 390×760 phone page.
+  Omitting it keeps the previous behaviour and the previous wire request.
+- `accounts.login.browser` `view` relays GrantBridge's `viewport.scale`; the placeholder
+  answered after a login has ended now carries `scale: 1`. `login_start` stays `2`.
+
 ## [2.10.17] - 2026-10-05
 
 - Bundle GrantBridge rc.19: the hosted authorization viewer clears its "connection was
@@ -339,7 +353,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.17...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.18...HEAD
+[2.10.18]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.18
 [2.10.17]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.17
 [2.10.16]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.16
 [2.10.15]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.15
