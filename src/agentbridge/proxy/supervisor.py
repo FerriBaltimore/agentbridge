@@ -134,6 +134,17 @@ def _proxy_config(port, auth_dir, client_key, management_key, environment=os.env
     return config
 
 
+def _proxy_command(binary, config_path):
+    """Sidecar command line: the config above plus the flags the config cannot express.
+
+    `-local-model` keeps the sidecar on its embedded model catalogues. Without it the
+    sidecar fetches three remote catalogues (each with a fallback host) at start and
+    every three hours, which a worker egress policy denies. The bundled build still
+    checks one remote version manifest at start; only a new pinned build can stop it.
+    """
+    return [str(binary), "-config", str(config_path), "-local-model"]
+
+
 def _ready(port, key, process):
     deadline = time.monotonic() + READY_SECONDS
     while time.monotonic() < deadline:
@@ -224,7 +235,7 @@ def _launch(binary, account_dir, account_id, port):
                     fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
         try:
             process = subprocess.Popen(
-                [str(binary), "-config", f"/proc/self/fd/{descriptor}"],
+                _proxy_command(binary, f"/proc/self/fd/{descriptor}"),
                 pass_fds=(descriptor, lease_fd), stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True, close_fds=True, cwd=account_dir,

@@ -73,7 +73,11 @@ those executables from `PATH` in the normal managed flow.
 
 Keep the wheel installation and private state root outside any project
 workspace that Codex can modify. Managed sidecars also need Linux `memfd`,
-loopback communication and provider network access. A host sandbox must allow
+loopback communication and provider network access. The sidecar starts with
+`-local-model` and its panel updates disabled, so it uses its embedded model
+catalogues and makes no remote catalogue or panel fetches of its own; the
+current pinned build still checks one remote version manifest at start, which an
+egress policy may deny without affecting login. A host sandbox must allow
 the bundled files and private state root. Overrides such as
 `AGENTBRIDGE_CLIPROXY_BIN`, `AGENTBRIDGE_GRANTBRIDGE_ROOT` or
 `AGENTBRIDGE_NODE` are advanced development or integration choices; their

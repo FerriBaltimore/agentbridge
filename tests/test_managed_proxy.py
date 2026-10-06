@@ -20,7 +20,7 @@ from agentbridge.proxy.management import ManagementClient
 from agentbridge.proxy.route import ProxyRoute
 from agentbridge.native_sandbox import wrap
 from agentbridge.proxy.supervisor import (
-    Supervisor, _account_dir, _pid_start, _proxy_config, _write_record)
+    Supervisor, _account_dir, _pid_start, _proxy_command, _proxy_config, _write_record)
 
 
 @pytest.fixture
@@ -413,3 +413,17 @@ def test_sidecar_config_routes_upstream_traffic_through_the_host_proxy(tmp_path)
         'HTTPS_PROXY': 'http://127.0.0.1:18080', 'NO_PROXY': '127.0.0.1,localhost'})
     assert proxied['proxy-url'] == 'http://127.0.0.1:18080'
     assert {key: value for key, value in proxied.items() if key != 'proxy-url'} == direct
+
+
+def test_av11_sidecar_launch_disables_remote_catalog_and_panel_updates(tmp_path):
+    """AV-11: the sidecar's own background fetches stay off, not merely denied."""
+    config = _proxy_config(18080, tmp_path, 'client', 'management', environment={})
+    management = config['remote-management']
+    assert management['allow-remote'] is False
+    assert management['disable-control-panel'] is True
+    assert management['disable-auto-update-panel'] is True
+    assert config['plugins'] == {'enabled': False}
+    assert config['discovery'] == {'enabled': False}
+    command = _proxy_command(Path('/opt/cli-proxy-api'), '/proc/self/fd/7')
+    assert command[:3] == ['/opt/cli-proxy-api', '-config', '/proc/self/fd/7']
+    assert '-local-model' in command[3:]

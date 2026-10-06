@@ -11,6 +11,16 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+- The managed CLIProxyAPI sidecar starts with `-local-model`, so it keeps its embedded
+  model catalogues instead of fetching three remote catalogues (each with a fallback host)
+  at start and every three hours. Behind a worker egress proxy those fetches were denied
+  on every login start and produced six policy errors each time; the login itself was
+  never affected. The control panel and its auto-update were already disabled. The bundled
+  7.3.16-fullbrain.2 build still checks one remote version manifest at start,
+  unconditionally; removing that last outbound attempt needs a new pinned build.
+  Fixture tested on the generated command and, when the bundle archive is prepared, on the
+  real sidecar behind a loopback CONNECT recorder (seven attempts before, one after).
+
 ## [2.10.18] - 2026-10-06
 
 - Bundles GrantBridge 1.0.0-rc.20: hosted frames at the device density of the given
