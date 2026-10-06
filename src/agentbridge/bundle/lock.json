@@ -41,12 +41,12 @@
     "version": "0.153.0"
   },
   "grantbridge": {
-    "artifact_sha256": "17279ff69df583c55b6d5ceedd474f5ec052a3daa4b75f7c2dc500ecfeecfd01",
-    "commit": "f7c645fb6928646bae0e56d483708e11802c30b9",
+    "artifact_sha256": "1e7608a715da1baffbf23cfeb9452165504fe5247bc317ec08a7796267e0d1b0",
+    "commit": "ed8edb705fda21fc82660a8eabd7bb7ebf98c2c6",
     "ephemeral_browser_state": true,
-    "runtime_sha256": "17279ff69df583c55b6d5ceedd474f5ec052a3daa4b75f7c2dc500ecfeecfd01",
-    "source_sha256": "17279ff69df583c55b6d5ceedd474f5ec052a3daa4b75f7c2dc500ecfeecfd01",
-    "version": "1.0.0-rc.20"
+    "runtime_sha256": "1e7608a715da1baffbf23cfeb9452165504fe5247bc317ec08a7796267e0d1b0",
+    "source_sha256": "1e7608a715da1baffbf23cfeb9452165504fe5247bc317ec08a7796267e0d1b0",
+    "version": "1.0.0-rc.21"
   },
   "native_bwrap": {
     "assets": {

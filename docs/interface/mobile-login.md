@@ -40,7 +40,8 @@ Every call requires `attempt_id` and `owner_ref`; snapshot account holds still a
 | --- | --- | --- |
 | `view` (default) | `after_sequence` integer, default 0 | State and latest changed frame |
 | `input` | `input` object below | `editable` boolean |
-| `asset` | `asset`: `browser.html`, `browser.js`, `browser.css` | `content_type`, UTF-8 `body` |
+| `asset` | `asset`: one of the viewer files below | `content_type`, UTF-8 `body` |
+| `stream` | none | `socket`, `token`, `expires_at` (below) |
 
 View returns `status`, `ready`, `done`, `expires_at`, `origin`, `viewport`, `sequence`
 and optional `image={mime:"image/jpeg",base64:...}`. `viewport` is GrantBridge's own
@@ -49,6 +50,23 @@ it. After the login has ended, view answers a fixed placeholder (`390×760`, `sc
 Frames stay in memory; JPEGs are bounded to 512 KiB and RPC responses remain below 1 MiB.
 View is short polling.
 
+Asset serves the GrantBridge viewer files by name: `browser.html`, `browser.js`,
+`transport.js`, `words.js` (rc.21: the script is a module with the transport and the copy
+beside it) and `browser.css`. Any other name is `invalid_params`.
+
+Stream (GrantBridge rc.21 or later) opens GrantBridge's frame stream for a live attempt.
+It is relayed like `view` and returns GrantBridge's answer untouched: `socket`, the
+attempt's Unix socket path inside the worker sandbox
+(`/tmp/grantbridge-stream-<x>/<attempt>.sock`); `token`, a fresh single-use 32-byte hex
+token valid for 30 seconds; and `expires_at`. The host translates the sandbox path,
+connects to that socket, presents the token in its first message and relays frames and
+inputs over its own WebSocket. Frames and inputs then bypass this RPC entirely; each new
+`stream` call mints a new token and supersedes the previous socket peer. AgentBridge never
+logs or stores the token. After the login has ended, `stream` fails with
+`authentication_attempt_not_ready`, like `input`; a lost GrantBridge child reports
+`authentication_outcome_unknown`, like `view`. An older GrantBridge answers
+`invalid_params` ("Unknown browser action."); the host then keeps polling `view`.
+
 Inputs are `tap` with normalized `x,y`; `drag` with 2–128 normalized `points`;
 `scroll` with `dy` within ±2000 and optional `x,y`; `text` up to 4096 characters; or
 `key` with Enter, Backspace, Tab, Escape, ArrowLeft, ArrowRight, ArrowUp or ArrowDown.
@@ -56,8 +74,10 @@ Arbitrary navigation, scripts, paths and selectors are not accepted. Never retry
 automatically when its result is unknown. Recover state through `view` instead.
 
 Serve the three fixed assets in one owned browser directory. The viewer calls relative
-`GET view?after_sequence=N`, `POST input` and `POST cancel`. Map these to the browser
-channel and existing `accounts.login.cancel`. The viewer sends JSON with
+`GET view?after_sequence=N`, `POST input` and `POST cancel`, and the rc.21 viewer first
+tries a same-origin WebSocket at relative `stream`, falling back to polling when it does
+not open. Map these to the browser channel and existing `accounts.login.cancel`; the
+WebSocket is the host's own relay of the `stream` socket above. The viewer sends JSON with
 `X-GrantBridge-Browser: 1`. Authenticate and authorize every route, require same-origin
 POSTs/CSRF protection, bound request bodies to 16 KiB, and disable caching and body logs.
 

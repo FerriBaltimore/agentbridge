@@ -11,6 +11,14 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.10.19] - 2026-10-06
+
+- Bundles GrantBridge 1.0.0-rc.21: the hosted viewer streams frames over a per-attempt
+  Unix socket the host relays as a WebSocket (polling stays as the fallback), taps and keys
+  leave without waiting for a result, JPEG quality adapts to motion (50 while moving, one
+  sharp 85 capture once still) and Chrome no longer fetches component updates or hints.
+  The viewer script is now a module with `transport.js` and `words.js` beside it; both are
+  served by the `asset` action.
 - The managed CLIProxyAPI sidecar starts with `-local-model`, so it keeps its embedded
   model catalogues instead of fetching three remote catalogues (each with a fallback host)
   at start and every three hours. Behind a worker egress proxy those fetches were denied
@@ -20,6 +28,14 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
   unconditionally; removing that last outbound attempt needs a new pinned build.
   Fixture tested on the generated command and, when the bundle archive is prepared, on the
   real sidecar behind a loopback CONNECT recorder (seven attempts before, one after).
+- AV-03: `accounts.login.browser` accepts `action: "stream"`. It is relayed to GrantBridge
+  exactly like `view` and returns GrantBridge's `{socket, token, expires_at}` untouched; the
+  host connects to that per-attempt sandbox socket and relays frames over its own WebSocket,
+  so frames no longer travel through this RPC. After the login has ended `stream` fails with
+  `authentication_attempt_not_ready` like `input`; a lost GrantBridge child reports
+  `authentication_outcome_unknown` like `view`. The token is never logged or stored. The
+  action needs GrantBridge rc.21; an older GrantBridge answers `invalid_params`. `view`,
+  `input` and `asset` are unchanged (docs/interface/mobile-login.md).
 
 ## [2.10.18] - 2026-10-06
 
@@ -363,7 +379,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.18...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.19...HEAD
+[2.10.19]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.19
 [2.10.18]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.18
 [2.10.17]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.17
 [2.10.16]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.16

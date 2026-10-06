@@ -6,6 +6,11 @@ import threading
 from .errors import BridgeError
 from .proxy.credential_barrier import require_account
 
+# The GrantBridge viewer files relayed by name (rc.21: the script is a module with
+# `transport.js` and `words.js` beside it).
+VIEWER_ASSETS = frozenset({'browser.html', 'browser.js', 'transport.js', 'words.js',
+                           'browser.css'})
+
 
 class AuthBrowserChannel:
     def _init_browser_channel(self):
@@ -45,17 +50,18 @@ class AuthBrowserChannel:
 
     def browser(self, attempt_id, *, owner_ref, action='view', after_sequence=0,
                 input=None, asset=None):
+        # `stream` (AV-03) is relayed exactly like `view`; GrantBridge answers the attempt's
+        # socket path and a single-use token, returned untouched and never logged or stored.
         row = self._owned(attempt_id, owner_ref, None)
         with self.store.connect() as db:
             require_account(db, row['account_id'], login=True)
         if row['mode'] != 'hosted' or row['data'].get('browserTransport') != 'rpc':
             raise BridgeError('unsupported_operation', 'This login has no embedded browser.')
-        if not isinstance(action, str) or action not in {'view', 'input', 'asset'}:
+        if not isinstance(action, str) or action not in {'view', 'input', 'asset', 'stream'}:
             raise BridgeError('invalid_params', 'Unknown browser action.')
         if type(after_sequence) is not int or not 0 <= after_sequence <= 2**53 - 1:
             raise BridgeError('invalid_params', 'Invalid frame sequence.')
-        if action == 'asset' and (not isinstance(asset, str)
-                                  or asset not in {'browser.html', 'browser.js', 'browser.css'}):
+        if action == 'asset' and (not isinstance(asset, str) or asset not in VIEWER_ASSETS):
             raise BridgeError('invalid_params', 'Unknown browser asset.')
         if action == 'input' and (not isinstance(input, dict)
                                   or len(json.dumps(input)) > 16384):
@@ -63,7 +69,7 @@ class AuthBrowserChannel:
         row = self._browser_recovery(row)
         terminal = row['status'] not in {'starting', 'awaiting_user', 'exchanging'}
         if action != 'asset' and terminal:
-            if action == 'input':
+            if action in {'input', 'stream'}:
                 raise BridgeError('authentication_attempt_not_ready', 'This login has ended.')
             # Placeholder for an ended login; a live `view` relays GrantBridge's own
             # viewport (width, height and scale) untouched.
