@@ -16,6 +16,7 @@ from .security import Redactor
 from .store import Store
 from .subprocess_path import python_path
 from .queueing.steering import Steering
+from .native_control import NativeControl
 
 
 def main():
@@ -26,7 +27,12 @@ def main():
             return
         permission_id = broker.request(payload['turn_id'], redactor.clean(details),
                                        timeout=payload['options']['timeout'])
-        decision = broker.wait(payload['turn_id'], permission_id)
+        def poll():
+            control.native_control.poll()
+            return not control.done
+        decision = broker.wait(payload['turn_id'], permission_id, poll=poll)
+        if control.done:
+            return
         deliver(decision)
         broker.delivered(payload['turn_id'], permission_id, decision)
     try:
@@ -76,7 +82,10 @@ def main():
                                                   and (payload.get('mcp') or {}).get(
                                                       'version', 1) == 1)) as channel:
                     steering = Steering(broker.store, payload['turn_id'])
-                    CodexControl(channel, payload, emit, approve, steering).execute()
+                    control = CodexControl(channel, payload, emit, approve, steering)
+                    with NativeControl(broker.store, payload['turn_id'], control, redactor) as live:
+                        control.native_control = live
+                        control.execute()
     except BridgeError as error:
         emit({'type': 'bridge_error', 'error': error.safe_data(),
               'outcome': 'not_started' if error.phase == 'launch' else 'unknown'})

@@ -11,13 +11,15 @@ OPERATIONS = (
     "accounts.login.browser",
     "models.list", "usage.get", "usage.history", "accounts.quota.reset",
     "instances.create", "instances.get",
+    "instances.read", "instances.reopen",
     "instances.list", "instances.update", "instances.archive", "instances.delete",
     "instances.discard_evaluation",
     "instances.events", "messages.create",
-    "messages.get", "queues.list", "queues.add", "queues.move", "queues.delete",
+    "messages.get", "messages.lookup", "queues.list", "queues.add", "queues.move", "queues.delete",
     "queues.dispatch", "queues.pause", "queues.resume",
     "messages.list", "turns.list", "turns.get", "turns.events", "turns.stop",
-    "turns.resume", "permissions.respond", "instances.transfer", "instances.export", "recover",
+    "turns.resume", "turns.interrupt", "turns.recover", "permissions.respond",
+    "instances.transfer", "instances.export", "recover",
     "error_cases.list", "error_cases.get", "error_cases.diagnose", "error_diagnoses.get",
     "error_proposals.create", "error_proposals.get", "error_proposals.validate",
     "error_rules.get", "error_rules.activate", "error_rules.deactivate",
@@ -58,6 +60,14 @@ def proxy_payload(*, include_parameters=True):
         elif operation.startswith('queues.'):
             item['limitations'] = ['conversation_local_order', 'private_context_rebind_after_dispatcher_loss',
                                    'live_provider_acceptance_pending']
+        elif operation in {'instances.read', 'instances.reopen', 'turns.interrupt'}:
+            item['limitations'] = ['live_reads_require_duplex_owner', 'native_snapshot_requires_item_replay',
+                                   'live_provider_acceptance_pending']
+        elif operation == 'turns.recover':
+            item['limitations'] = ['explicit_scoped_process_recovery', 'not_native_completion',
+                                   'unverified_stop_blocks_rebind']
+        elif operation == 'turns.stop':
+            item['limitations'] = ['legacy_process_cancellation', 'use_turns_interrupt_for_native_stop']
         elif operation == 'instances.transfer':
             item['support'] = 'portable'
             item['limitations'] = ['bounded_context', 'explicit_omissions']

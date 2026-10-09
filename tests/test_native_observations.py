@@ -1,0 +1,199 @@
+"""SC AB-1: reconnect reads native history and live items before completion."""
+
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+
+import pytest
+
+from agentbridge import Bridge, BridgeError
+from agentbridge.process import alive
+from agentbridge.rpc import dispatch
+from test_interactive_inputs import setup_proxy
+from test_message_queues import until
+
+
+FIXTURE = Path(__file__).parent / 'fixtures/test_native_observation_provider.py'
+
+
+def test_ab1_native_read_and_stream_survive_client_detach(setup_proxy):
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    started = bridge.message_create(instance, 'hold', permission_mode='default',
+                                    idempotency_key='native-first')
+    turn_id = started['turn_id']
+    until(lambda: any(event['kind'] == 'item.delta' and event['data'].get('item_id') == 'tool'
+                      for event in bridge.turn_events(turn_id)))
+    original = bridge.run(turn_id).snapshot
+    bridge.close()
+    client = Bridge(bridge.root)
+    live = dispatch(client, 'instances.read', {'instance_id': instance})
+    assert live['status'] == {'type': 'active', 'active_flags': []}
+    assert live['native_session_id'] == 'native-thread'
+    assert live['owner'] == {'turn_id': turn_id, 'native_turn_id': 'native-turn-1'}
+    assert live['turns'][0]['native_turn_id'] == 'native-turn-1'
+    items = live['turns'][0]['items']
+    assert next(item for item in items if item['item_id'] == 'native-only')['text'] == 'Native history only'
+    assert not any(item['type'] == 'reasoning' for item in items)
+    assert alive(original['worker_pid'], original['worker_identity'])
+    assert len(client.runs()) == 1
+    stream = client.turn_events(turn_id)
+    assert any(event['kind'] == 'item.started' and event['data']['item'].get('phase') == 'commentary'
+               for event in stream)
+    assert any(event['kind'] == 'item.delta' and event['data'].get('field') == 'output'
+               and event['data'].get('delta') == 'partial output' for event in stream)
+    assert not any(event['kind'] == 'turn.completed' for event in stream)
+    until(lambda: any(event['data'].get('delta') == ' during read'
+                      for event in client.turn_events(turn_id)))
+    replayed = {}
+    for event in client.instance_events(instance, after_seq=live['after_seq']):
+        data = event['data']
+        if event['kind'] in {'item.started', 'item.completed'}:
+            replayed[data['item_id']] = data['item'].copy()
+        elif event['kind'] == 'item.delta':
+            target = replayed[data['item_id']]
+            target[data['field']] = target.get(data['field'], '') + data['delta']
+    merged = {item['item_id']: item for item in items} | replayed
+    assert merged['answer']['text'] == 'partial answer during read'
+    assert merged['native-only']['text'] == 'Native history only'
+    client.message_create(instance, 'finish', delivery='steer')
+    until(lambda: client.run(turn_id).status == 'completed')
+    until(lambda: not alive(original['worker_pid'], original['worker_identity']))
+    completed = dispatch(client, 'instances.reopen', {'instance_id': instance})
+    assert completed['status'] == {'type': 'idle'}
+    assert 'owner' not in completed
+    assert completed['turns'][0]['status'] == 'completed'
+    assert len(completed['turns']) == len(client.runs()) == 1
+    assert {item['item_id'] for item in completed['turns'][0]['items']} == {
+        'user', 'answer', 'tool', 'native-only'}
+
+
+def test_ab2_interrupt_is_native_and_scoped_and_lookup_never_replays(setup_proxy):
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    details = bridge.instance_get(instance)
+    other = bridge.instance_create(account_ref=details['account_ref'], model=details['model'],
+                                    workspace_path=details['workspace_path'])['instance_id']
+    first = bridge.message_create(instance, 'hold', delivery='queue', idempotency_key='first')
+    second = bridge.message_create(other, 'hold', delivery='queue', idempotency_key='second')
+    until(lambda: bridge.message_get(first['message_id']).get('turn_id'))
+    until(lambda: bridge.message_get(second['message_id']).get('turn_id'))
+    first_id = bridge.message_get(first['message_id'])['turn_id']
+    second_id = bridge.message_get(second['message_id'])['turn_id']
+    until(lambda: any(e['kind'] == 'item.delta' for e in bridge.turn_events(first_id)))
+    until(lambda: any(e['kind'] == 'item.delta' for e in bridge.turn_events(second_id)))
+    ack = dispatch(bridge, 'turns.interrupt', {'turn_id': first_id})
+    assert ack == {'instance_id': instance, 'turn_id': first_id,
+                   'native_session_id': 'native-thread', 'native_turn_id': 'native-turn-1',
+                   'acknowledged': True}
+    until(lambda: any(e['kind'] == 'turn.completed' and
+                      e['data']['turn']['status'] == 'interrupted'
+                      for e in bridge.turn_events(first_id)))
+    assert bridge.queue_list(instance)['paused']
+    assert bridge.instance_read(other)['status']['type'] == 'active'
+    receipt = dispatch(bridge, 'messages.lookup', {'instance_id': instance,
+                                                  'idempotency_key': 'first'})
+    assert receipt['found'] and receipt['message']['message_id'] == first['message_id']
+    assert not bridge.message_lookup(instance, 'never-admitted')['found']
+    with pytest.raises(BridgeError, match='another instance'):
+        bridge.message_lookup(other, 'first')
+    assert len(bridge.runs()) == 2
+    bridge.turn_interrupt(second_id)
+    until(lambda: bridge.run(second_id).status in {'interrupted', 'completed'})
+
+
+def test_native_idle_read_excludes_concurrent_admission(setup_proxy, monkeypatch):
+    from agentbridge import native_reads
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    started = bridge.message_create(instance, 'hold', permission_mode='default')
+    until(lambda: any(e['kind'] == 'item.delta' for e in bridge.turn_events(started['turn_id'])))
+    bridge.message_create(instance, 'finish', delivery='steer')
+    original = bridge.run(started['turn_id']).snapshot
+    until(lambda: not alive(original['worker_pid'], original['worker_identity']))
+    entered, release = Event(), Event()
+    read = native_reads._disconnected_read
+    def held(*args):
+        entered.set()
+        assert release.wait(5)
+        return read(*args)
+    monkeypatch.setattr(native_reads, '_disconnected_read', held)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(bridge.instance_read, instance)
+        assert entered.wait(5)
+        try:
+            with pytest.raises(BridgeError) as failure:
+                bridge.message_create(instance, 'next', permission_mode='default')
+            assert failure.value.code == 'busy'
+            assert len(bridge.runs()) == 1
+        finally:
+            release.set()
+        assert pending.result(timeout=5)['status']['type'] == 'idle'
+
+
+def test_ab2_recovery_stops_only_bound_execution_and_preserves_pending_input(setup_proxy):
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    details = bridge.instance_get(instance)
+    other = bridge.instance_create(account_ref=details['account_ref'], model=details['model'],
+                                    workspace_path=details['workspace_path'])['instance_id']
+    first = bridge.message_create(instance, 'hold', permission_mode='default')['turn_id']
+    second = bridge.message_create(other, 'hold', permission_mode='default')['turn_id']
+    for turn_id in (first, second):
+        until(lambda: any(e['kind'] == 'item.delta' for e in bridge.turn_events(turn_id)))
+    queued = bridge.message_create(instance, 'pending input', delivery='queue',
+                                    idempotency_key='pending-input')
+    stopped = dispatch(bridge, 'turns.recover', {'turn_id': first})
+    assert stopped == {'instance_id': instance, 'turn_id': first,
+                       'native_session_id': 'native-thread', 'execution_stopped': True}
+    assert bridge.queue_list(instance)['paused']
+    assert bridge.message_get(queued['message_id'])['queue_state'] == 'queued'
+    assert bridge.instance_read(other)['status']['type'] == 'active'
+    assert len(bridge.runs()) == 2
+    bridge.queue_delete(instance, queued['message_id'])
+    newer = bridge.message_create(instance, 'new explicit action', permission_mode='default')['turn_id']
+    until(lambda: any(e['kind'] == 'item.delta' for e in bridge.turn_events(newer)))
+    with pytest.raises(BridgeError) as failure:
+        bridge.turn_recover(first)
+    assert failure.value.code == 'turn_conflict'
+    assert bridge.instance_read(instance)['status']['type'] == 'active'
+    bridge.turn_recover(newer)
+    bridge.turn_recover(second)
+
+
+def test_ab2_reopen_original_native_id_after_instance_metadata_loss(setup_proxy):
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    details = bridge.instance_get(instance)
+    started = bridge.message_create(instance, 'hold', permission_mode='default')['turn_id']
+    until(lambda: any(e['kind'] == 'item.delta' for e in bridge.turn_events(started)))
+    bridge.message_create(instance, 'finish', delivery='steer')
+    original = bridge.run(started).snapshot
+    until(lambda: not alive(original['worker_pid'], original['worker_identity']))
+    with bridge.store.connect() as db:
+        db.execute('UPDATE sessions SET native_id=NULL WHERE id=?', (instance,))
+    assert bridge.instance_reopen(instance, native_session_id='native-thread')['native_session_id'] == 'native-thread'
+    with bridge.store.connect() as db:
+        for table, column in (('sessions', 'id'), ('instance_metadata', 'session_id'),
+                              ('session_routing', 'session_id'),
+                              ('instance_execution_policies', 'session_id')):
+            db.execute(f'DELETE FROM {table} WHERE {column}=?', (instance,))
+    with pytest.raises(BridgeError) as missing:
+        bridge.instance_reopen(instance)
+    assert missing.value.code == 'native_binding_required'
+    restored = dispatch(bridge, 'instances.reopen', {
+        'instance_id': instance, 'native_session_id': 'native-thread',
+        'account_ref': details['account_ref'], 'workspace_path': details['workspace_path'],
+        'model': details['model']})
+    assert restored['native_session_id'] == 'native-thread'
+    assert len(restored['turns']) == len(bridge.runs()) == 1
+    with pytest.raises(BridgeError) as mismatch:
+        bridge.instance_reopen(instance, native_session_id='another-thread')
+    assert mismatch.value.code == 'native_session_diverged'
+    history = bridge.root / 'codex-runtime' / instance / 'fixture-native-thread.json'
+    history.unlink()
+    with pytest.raises(BridgeError) as absent:
+        bridge.instance_reopen(instance)
+    assert absent.value.code == 'native_thread_missing'
+    assert len(bridge.runs()) == 1
+    home = history.parent
+    home.rename(home.with_name(home.name + '-unavailable'))
+    with pytest.raises(BridgeError) as unavailable:
+        bridge.instance_read(instance)
+    assert unavailable.value.code == 'native_history_unavailable'
+    assert not home.exists()

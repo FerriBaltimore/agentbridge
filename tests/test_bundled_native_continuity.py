@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from agentbridge import Account, Bridge, RunOptions
+from agentbridge import Account, Bridge, BridgeError, RunOptions
 from agentbridge.bundle.runtime import PACKAGE_ROOT
 from agentbridge.codex_control import CodexControl
 from agentbridge.native_sandbox import available
@@ -157,7 +157,22 @@ def test_real_codex_preserves_indexed_history_across_proxy_changes(tmp_path, mon
         assert [item['id'] for item in listing['data']] == [native_ids[0]]
         assert history['thread']['id'] == native_ids[0]
         assert len(history['thread']['turns']) == 3
+        public = bridge.instance_read(instance_id)
+        assert public['source'] == 'native'
+        assert public['native_session_id'] == native_ids[0]
+        assert len(public['turns']) == 3
+        assert all(turn['status'] == 'completed' for turn in public['turns'])
+        assert {item['text'] for turn in public['turns'] for item in turn['items']
+                if item['type'] == 'agent_message'} == {
+                    'fixture answer 1 via alpha', 'fixture answer 2 via alpha',
+                    'fixture answer 3 via beta'}
+        reopened = bridge.instance_reopen(instance_id, native_session_id=native_ids[0])
+        assert reopened['turns'] == public['turns']
+        assert len(all_observations[0]) + len(all_observations[1]) == 3
         rollouts[0].unlink()
+        with pytest.raises(BridgeError) as absent:
+            bridge.instance_reopen(instance_id)
+        assert absent.value.code == 'native_thread_missing'
         accepted = bridge.message_create(instance_id, 'fixture request missing history',
                                           permission_mode=permission_mode, timeout_ms=10000)
         missing = bridge.run(accepted['turn_id'])

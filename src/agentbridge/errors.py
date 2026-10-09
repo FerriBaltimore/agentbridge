@@ -37,6 +37,11 @@ ACTION = {
     "provider_contract_invalid": "inspect",
     "native_session_missing": "inspect",
     "native_session_diverged": "inspect",
+    "native_connection_unavailable": "reconnect",
+    "native_owner_changed": "reconnect",
+    "native_stop_unverified": "inspect",
+    "native_thread_missing": "inspect",
+    "native_history_unavailable": "inspect",
 }
 
 
@@ -71,7 +76,10 @@ class BridgeError(Exception):
                            'budget_exhausted', 'max_turns_exceeded', 'structured_output_failed'}:
             category = 'limit'
         elif self.code in {'unknown_outcome', 'managed_proxy_stop_unverified',
-                           'native_session_missing', 'native_session_diverged'}:
+                           'native_session_missing', 'native_session_diverged',
+                           'native_connection_unavailable', 'native_owner_changed',
+                           'native_stop_unverified', 'native_thread_missing',
+                           'native_history_unavailable'}:
             category = 'execution'
         elif self.code == 'provider_catalog_unsupported':
             category = 'capability'

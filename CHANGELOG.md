@@ -11,6 +11,20 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-10-09
+
+- Read and reopen native Codex history with stable thread, turn and item identities.
+  Forward native status, streamed text, tool activity and user-facing plans as emitted;
+  exclude private reasoning and preserve safe notices for unsupported events.
+- Interrupt through the active native connection; explicit scoped recovery proves the
+  previous execution stopped without terminating another conversation on the account.
+- Look up message admission by its original request key without dispatching it again.
+  Restore missing instance metadata only after verifying the original native identity.
+- Keep native observation and admission from racing; waiting for a completed run also
+  waits for its owned process cleanup before another execution can start.
+- Verified with deterministic subprocess tests and bundled Codex using a synthetic local
+  provider. Live provider acceptance is separate; no new provider compatibility claim.
+
 ## [2.10.19] - 2026-10-06
 
 - Bundles GrantBridge 1.0.0-rc.21: the hosted viewer streams frames over a per-attempt
@@ -379,7 +393,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.10.19...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.0
 [2.10.19]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.19
 [2.10.18]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.18
 [2.10.17]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.17

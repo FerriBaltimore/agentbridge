@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
@@ -111,17 +113,20 @@ def test_permission_persistence_failure_closes_codex_channel_and_reports_unknown
             if operation == 'request':
                 raise sqlite3.OperationalError('PRIVATE REQUEST BODY')
             return 'fixture-permission'
-        def wait(self, *_): return 'allow'
+        def wait(self, *_, **kwargs): return 'allow'
         def delivered(self, *_):
             raise sqlite3.OperationalError('PRIVATE DELIVERY BODY')
     class Control:
         def __init__(self, channel, value, emit, approve, steering=None):
             self.approve = approve
+            self.done = False
         def execute(self):
             self.approve({'operation': 'fixture'}, lambda value: delivered.append(value))
     monkeypatch.setattr(interactive_worker, 'ProviderChannel', Channel)
     monkeypatch.setattr(interactive_worker, 'Permissions', Broker)
     monkeypatch.setattr(interactive_worker, 'CodexControl', Control)
+    monkeypatch.setattr(interactive_worker, 'NativeControl',
+                        lambda *_: nullcontext(SimpleNamespace(poll=lambda: None)))
     with pytest.raises(SystemExit):
         interactive_worker.main()
     output = capsys.readouterr()

@@ -27,6 +27,14 @@ EVENT_KINDS = {
     "provider_notice": "provider.notice",
     "checkpoint_ready": "checkpoint.ready",
     "checkpoint_pending": "checkpoint.pending",
+    "native_thread_status": "thread.status",
+    "native_turn_started": "turn.started",
+    "native_turn_completed": "turn.completed",
+    "native_item_started": "item.started",
+    "native_item_completed": "item.completed",
+    "native_item_delta": "item.delta",
+    "native_item_progress": "item.progress",
+    "native_plan_updated": "turn.plan",
 }
 
 
@@ -46,5 +54,6 @@ def public_event(event, engine=None):
         "kind": kind,
         "at": event.at,
         "data": data,
-        "final": kind == 'run.finished' or (kind == 'message.completed' and not data.get('incomplete')),
+        "final": kind in {'run.finished', 'turn.completed'} or (
+            kind == 'message.completed' and not data.get('incomplete')),
     }

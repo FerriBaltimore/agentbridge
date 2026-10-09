@@ -1,4 +1,5 @@
 """Codex app-server execution and one-request approvals over its native protocol."""
+import time
 from .attachments import images
 from .errors import BridgeError
 from .provider_errors import normalize
@@ -6,6 +7,7 @@ from .session_events import routing
 from .codex_skills import selected_config
 from .codex_notices import notice
 from .native_sessions import validate_native_id
+from .native_observations import event as native_event
 
 
 class CodexControl:
@@ -13,15 +15,29 @@ class CodexControl:
         self.channel, self.payload, self.emit, self.approve = channel, payload, emit, approve
         self.next_id, self.done, self.thread_id, self.turn_id = 0, False, None, None
         self.steering, self.pending_input = steering, None
+        self.native_control = None
 
-    def rpc(self, method, params):
+    def rpc(self, method, params, *, timeout=None):
         self.next_id += 1
         request_id = self.next_id
         self.channel.send({'id': request_id, 'method': method, 'params': params})
+        deadline = time.monotonic() + (timeout if timeout is not None
+                                        else self.payload['options']['timeout'])
         while True:
-            value = self.channel.receive(self.payload['options']['timeout'])
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BridgeError('provider_timeout', 'The native provider did not answer in time.',
+                                  phase='execution', outcome='unknown')
+            value = self.channel.receive(remaining)
             if value.get('id') == request_id and 'method' not in value:
                 if 'error' in value:
+                    error = value['error']
+                    if (method == 'thread/resume' and isinstance(error, dict)
+                            and error.get('code') == -32600
+                            and error.get('message') == 'no rollout found for thread id '
+                            + str(params.get('threadId'))):
+                        raise BridgeError('native_thread_missing',
+                                          'The native runtime confirmed this thread is absent.')
                     issue = normalize('codex', value['error'], phase='launch', outcome='not_started')
                     raise BridgeError(issue['code'], 'Codex rejected the native operation.',
                                       phase='launch', outcome='not_started', retryable=False,
@@ -34,6 +50,19 @@ class CodexControl:
             self.event(value)
 
     def event(self, value):
+        if 'method' not in value and 'id' in value:
+            if self.pending_input and value['id'] == self.pending_input[0]:
+                _, message_id = self.pending_input
+                if 'error' in value:
+                    self.steering.acknowledge(message_id, accepted=False, code='steering_rejected')
+                elif isinstance(value.get('result'), dict) and value['result'].get('turnId') == self.turn_id:
+                    self.steering.acknowledge(message_id, accepted=True)
+                else:
+                    self.steering.acknowledge(message_id, accepted=None, code='unknown_outcome')
+                self.pending_input = None
+            # A query whose caller timed out can still reply. It is not a native
+            # notification and cannot change the observed execution state.
+            return
         method, params = value.get('method'), value.get('params', {})
         if not isinstance(method, str) or not isinstance(params, dict):
             raise BridgeError('provider_protocol_error', 'Invalid native notification parameters.',
@@ -54,6 +83,9 @@ class CodexControl:
             return
         if self.turn_id and params.get('turnId') not in (None, self.turn_id):
             return
+        native = native_event(method, params)
+        if native is not None:
+            self.emit(native)
         observed = notice(method, params)
         if observed is not None:
             if (observed['kind'] == 'mcp_startup' and self.payload.get('mcp_enabled')
@@ -142,7 +174,7 @@ class CodexControl:
                 if tokens:
                     self.emit({'type': 'bridge_usage', 'scope': scope, 'tokens': tokens,
                                'aggregation': aggregation, 'context_window': context_window})
-        elif method and not (method.startswith('item/reasoning/') or method in {
+        elif native is None and method and not (method.startswith('item/reasoning/') or method in {
             'thread/started', 'thread/status/changed', 'turn/started', 'item/started',
         }):
             self.emit({'type': 'bridge_gap'})
@@ -194,6 +226,10 @@ class CodexControl:
         result = self.rpc('turn/start', params)
         self.turn_id = result['turn']['id']
         while not self.done:
+            if self.native_control is not None:
+                self.native_control.poll()
+                if self.done:
+                    break
             if self.steering is None:
                 self.event(self.channel.receive(options['timeout']))
                 continue
@@ -204,17 +240,7 @@ class CodexControl:
                 if error.code == 'provider_timeout':
                     continue
                 raise
-            if self.pending_input and value.get('id') == self.pending_input[0] and 'method' not in value:
-                _, message_id = self.pending_input
-                if 'error' in value:
-                    self.steering.acknowledge(message_id, accepted=False, code='steering_rejected')
-                elif isinstance(value.get('result'), dict) and value['result'].get('turnId') == self.turn_id:
-                    self.steering.acknowledge(message_id, accepted=True)
-                else:
-                    self.steering.acknowledge(message_id, accepted=None, code='unknown_outcome')
-                self.pending_input = None
-            else:
-                self.event(value)
+            self.event(value)
 
     def live_input(self):
         if self.pending_input:

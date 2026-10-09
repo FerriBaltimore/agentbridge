@@ -71,8 +71,10 @@ class Permissions:
                         {'permission_id': permission_id, 'decision': decision, 'state': 'queued'})
         return {'permission_id': permission_id, 'decision': decision, 'state': 'queued', 'replayed': False}
 
-    def wait(self, turn_id, permission_id):
+    def wait(self, turn_id, permission_id, *, poll=None):
         while True:
+            if poll is not None and poll() is False:
+                return 'deny'
             with self.store.connect() as db:
                 row = db.execute('SELECT * FROM permission_requests WHERE id=? AND run_id=?',
                                  (permission_id, turn_id)).fetchone()

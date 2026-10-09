@@ -10,6 +10,7 @@ from .errors import BridgeError, BusyError
 from .models import RunOptions, TERMINAL, page_values
 from .store import dumps
 from .message_projection import text as project_text
+from .process import alive
 
 
 def _timeout(value):
@@ -115,7 +116,12 @@ class Run:
     def wait(self, timeout=None):
         _timeout(timeout)
         started = time.monotonic()
-        while self.status not in TERMINAL:
+        while True:
+            snapshot = self.snapshot
+            if snapshot['state'] in TERMINAL and not any(
+                    alive(snapshot[p + '_pid'], snapshot[p + '_identity'])
+                    for p in ('worker', 'child')):
+                break
             if timeout is not None and time.monotonic() - started >= timeout:
                 raise TimeoutError('Wait timed out; the run remains active.')
             self.bridge.recover(turn_id=self.id)

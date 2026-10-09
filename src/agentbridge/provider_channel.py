@@ -30,7 +30,11 @@ class ProviderChannel:
             raise BridgeError('provider_unavailable', 'The native provider could not be started.',
                               phase='launch', outcome='not_started') from None
         self.buffer = b''
-        os.set_blocking(self.process.stdout.fileno(), False)
+        try:
+            os.set_blocking(self.process.stdout.fileno(), False)
+        except BaseException:
+            self.close()
+            raise
 
     def send(self, value):
         try:
@@ -78,15 +82,20 @@ class ProviderChannel:
         except OSError:
             pass
         try:
-            self.process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            self.process.terminate()
             try:
-                self.process.wait(timeout=2)
+                self.process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
-        self.process.stdout.close()
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            raise BridgeError('native_stop_unverified', 'The native process did not stop.',
+                              phase='execution', outcome='unknown') from None
+        finally:
+            self.process.stdout.close()
 
     def __enter__(self):
         return self

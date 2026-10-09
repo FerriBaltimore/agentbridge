@@ -276,6 +276,11 @@ def main():
             for pipe in (child.stdin,child.stdout,child.stderr):
                 try:pipe.close()
                 except OSError:pass
+            try:
+                from .native_control import cleanup
+                cleanup(store, store.get('runs', run_id))
+            except (BridgeError, OSError):
+                store.emit(run_id, 'diagnostic', {'native_endpoint_cleanup_failed': True})
         if native_temp is not None and (child is None or child.poll() is not None):
             shutil.rmtree(native_temp, ignore_errors=True)
 

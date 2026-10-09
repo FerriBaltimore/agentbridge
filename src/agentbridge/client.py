@@ -102,6 +102,29 @@ class Bridge(ClientAccountsMixin, InstanceRoutingMixin, QueueMixin, EventStreamM
                               'observed': False, 'reason': 'run_usage_available_per_turn'}
         return value
 
+    def instance_read(self, instance_id, *, include_turns=True):
+        from .native_reads import read
+        return read(self, instance_id, include_turns=include_turns)
+
+    def instance_reopen(self, instance_id, *, include_turns=True, native_session_id=None,
+                        account_ref=None, workspace_path=None, model=None):
+        from .native_reopen import reopen
+        return reopen(self, instance_id, include_turns=include_turns,
+                      native_session_id=native_session_id, account_ref=account_ref,
+                      workspace_path=workspace_path, model=model)
+
+    def message_lookup(self, instance_id, idempotency_key):
+        from .native_actions import lookup
+        return lookup(self, instance_id, idempotency_key)
+
+    def turn_interrupt(self, turn_id):
+        from .native_actions import interrupt
+        return interrupt(self, turn_id)
+
+    def turn_recover(self, turn_id):
+        from .native_recovery import recover
+        return recover(self, turn_id)
+
     def instances(self, *, engine=None, account_ref=None, state=None, limit=100, cursor=0, include_last_turn=False):
         if engine is not None:
             raise BridgeError('unsupported_parameter', 'Instances are selected by model and account.')

@@ -53,6 +53,9 @@ class Parser:
             self.event('gap', {'reason':'non_object_event'})
             self.error({'code': 'provider_protocol_error'}, outcome='unknown')
             return
+        if event.get('type') == 'bridge_native':
+            self.event(event['kind'], event['data'])
+            return
         if event.get('type') == 'bridge_error':
             value = event.get('error') or event
             phase = value.get('phase') if isinstance(value, dict) else None

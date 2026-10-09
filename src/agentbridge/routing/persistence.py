@@ -10,8 +10,10 @@ import time
 from ..errors import BridgeError, BusyError
 from ..execution_policy import policy_payload, validate_policy, write_policy
 from ..models import Account, RunOptions, TERMINAL, identifier, model_id
+from ..process import alive
 from ..native_sessions import bind_native_session, require_native_session
 from ..checkpoint import persistence as checkpoints
+from ..checkpoint.content import instance_lock
 from ..checkpoint.state import require_admission
 from ..proxy.credential_barrier import require_account
 from .binding import has_bound_proxy_login
@@ -254,7 +256,7 @@ class RoutingStoreMixin:
               account_id=None, route_decision=None, route_context=None, route_omissions=0,
               route_event_seq=None, excluded_account_refs=(), expected_instance_version=None):
         message_id = message_id or id
-        with self.connect() as db:
+        with instance_lock(self, session_id, busy_code='busy', shared=True), self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if key:
                 old = db.execute("SELECT * FROM runs WHERE request_key=?", (key,)).fetchone()
@@ -283,6 +285,11 @@ class RoutingStoreMixin:
                     raise BridgeError("version_conflict", "Instance changed before turn admission.")
             if metadata and metadata["state"] == "archived":
                 raise BridgeError("instance_archived", "Archived instances cannot accept new messages.")
+            previous = db.execute('SELECT * FROM runs WHERE session_id=? ORDER BY rowid DESC LIMIT 1',
+                                  (session_id,)).fetchone()
+            if previous and any(alive(previous[k + '_pid'], previous[k + '_identity'])
+                                for k in ('worker', 'child')):
+                raise BusyError()
             evaluation = db.execute('SELECT status FROM evaluation_instances WHERE session_id=?',
                                     (session_id,)).fetchone()
             if evaluation is not None:

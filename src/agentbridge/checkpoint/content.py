@@ -43,7 +43,7 @@ def object_path(store, content_id):
 
 
 @contextmanager
-def instance_lock(store, instance_id):
+def instance_lock(store, instance_id, *, busy_code='checkpoint_busy', shared=False):
     if not isinstance(instance_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}',
                                                          instance_id):
         fail('checkpoint_invalid')
@@ -51,9 +51,9 @@ def instance_lock(store, instance_id):
     descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
         except BlockingIOError:
-            fail('checkpoint_busy')
+            fail(busy_code)
         yield
     finally:
         os.close(descriptor)
