@@ -75,6 +75,12 @@ def dispatch(store, instance_id, message_id, mode, *, expected_version=None, exp
                        "target_turn_id=?,updated=?,error=NULL WHERE id=?",
                        (target, time.time(), message_id))
             if run:
-                db.execute('UPDATE runs SET stop_requested=1,updated=? WHERE id=?', (time.time(), target))
+                account = db.execute('SELECT config FROM accounts WHERE id=?',
+                                     (run['account_id'],)).fetchone()
+                native = duplex(Account(**json.loads(account['config'])),
+                                RunOptions(**json.loads(run['options'])))
+                if not native:
+                    db.execute('UPDATE runs SET stop_requested=1,updated=? WHERE id=?',
+                               (time.time(), target))
             set_paused(store, db, instance_id, False)
             changed(store, db, instance_id, 'interrupt_requested', message_id, target)

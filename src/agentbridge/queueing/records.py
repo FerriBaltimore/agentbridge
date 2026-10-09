@@ -131,8 +131,11 @@ def finished(store, db, run, state):
     replacement = db.execute("SELECT 1 FROM queued_messages WHERE session_id=? "
                              "AND state='queued' AND delivery='interrupt' AND target_turn_id=?",
                              (run['session_id'], run['id'])).fetchone()
+    from .interruption import observed_interruption
+    replaced = replacement and (state == 'cancelled' or
+                                state == 'interrupted' and observed_interruption(db, run['id']))
     if any(row['state'] == 'delivering' for row in rows):
         set_paused(store, db, run['session_id'], True, 'unknown_outcome')
-    elif state != 'completed' and not (state == 'cancelled' and replacement):
+    elif state != 'completed' and not replaced:
         if occupied(db, run['session_id']):
             set_paused(store, db, run['session_id'], True, 'previous_turn_' + state)

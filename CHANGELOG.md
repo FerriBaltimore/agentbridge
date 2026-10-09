@@ -11,6 +11,15 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.11.2] - 2026-10-09
+
+- Immediate queued replacement interrupts the exact native turn through its existing
+  connection, preserving atomic owner/version checks before queue reordering.
+- Retain durable dispatch evidence before native interruption. Lost acknowledgement and
+  process recovery never repeat the interruption or duplicate the selected replacement.
+- Advance the selected replacement only after verified native completion and cleanup;
+  uncertain outcomes remain visible and paused under the existing queue contract.
+
 ## [2.11.1] - 2026-10-09
 
 - Add host-selected on-demand native checkpoints: retain terminal and process evidence

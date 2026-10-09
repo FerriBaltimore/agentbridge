@@ -46,6 +46,18 @@ def main():
         if not select.select([sys.stdin], [], [], .02)[0]:
             continue
         steer = json.loads(sys.stdin.readline())
+        if steer['method'] == 'turn/interrupt':
+            assert steer['params'] == {'threadId': 'fixture-thread', 'turnId': 'fixture-turn'}
+            interrupts = history_path.with_name('fixture-interrupts.json')
+            observed = json.loads(interrupts.read_text()) if interrupts.exists() else []
+            observed.append(steer['params'])
+            interrupts.write_text(json.dumps(observed))
+            if prompt == 'hold:interrupt-drop-ack':
+                continue
+            send({'id': steer['id'], 'result': {}})
+            send({'method': 'turn/completed', 'params': {'threadId': 'fixture-thread',
+                  'turn': {'id': 'fixture-turn', 'status': 'interrupted'}}})
+            return
         assert steer['method'] == 'turn/steer'
         assert steer['params']['expectedTurnId'] == 'fixture-turn'
         text = steer['params']['input'][0]['text']

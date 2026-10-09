@@ -12,6 +12,7 @@ from .models import identifier
 from .native_observations import thread
 from .process import alive
 from .queueing.connection import directory
+from .queueing.interruption import QueuedInterruption
 
 
 MAX_REPLY = 8 * 1024 * 1024
@@ -87,6 +88,7 @@ class NativeControl:
         self.store, self.run_id = store, run_id
         self.control, self.redactor = control, redactor
         self.instance_id = store.get('runs', run_id)['session_id']
+        self.queued_interruption = QueuedInterruption(store, run_id, control)
         self.server, self.path, self.file_identity = None, None, None
 
     def __enter__(self):
@@ -116,6 +118,7 @@ class NativeControl:
                 pass
 
     def poll(self):
+        self.queued_interruption.poll()
         try:
             channel, _ = self.server.accept()
         except BlockingIOError:

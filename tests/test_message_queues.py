@@ -167,16 +167,32 @@ def test_interrupt_stops_exact_turn_and_promotes_requested_message(queued):
     bridge, instance = queued
     first = bridge.queue_add(instance, 'hold:never')
     turn = running(bridge, first)
+    details = bridge.instance_get(instance)
+    other = bridge.instance_create(account_ref=details['account_ref'], model=details['model'],
+                                   workspace_path=details['workspace_path'])['instance_id']
+    other_turn = running(bridge, bridge.queue_add(other, 'hold:never'))
     later = bridge.queue_add(instance, 'later')
     priority = bridge.queue_add(instance, 'priority')
+    before = bridge.queue_list(instance)
     with pytest.raises(BridgeError) as error:
-        bridge.queue_dispatch(instance, priority['message_id'], mode='interrupt', expected_turn_id='wrong')
+        bridge.queue_dispatch(instance, priority['message_id'], mode='interrupt',
+                              expected_turn_id=other_turn)
     assert error.value.code == 'turn_conflict'
+    assert bridge.queue_list(instance) == before
     assert not bridge.run(turn).snapshot['stop_requested']
-    bridge.queue_dispatch(instance, priority['message_id'], mode='interrupt', expected_turn_id=turn)
+    bridge.queue_dispatch(instance, priority['message_id'], mode='interrupt', expected_turn_id=turn,
+                          expected_version=before['version'])
     completed(bridge, later)
-    assert bridge.run(turn).status == 'cancelled'
-    assert [row['prompt'] for row in bridge.runs()] == ['hold:never', 'priority', 'later']
+    assert bridge.run(turn).status == 'interrupted'
+    assert not bridge.run(turn).snapshot['stop_requested']
+    assert any(event['kind'] == 'turn.completed' and
+               event['data']['turn']['status'] == 'interrupted' for event in bridge.turn_events(turn))
+    interrupts = bridge.root / 'codex-runtime' / instance / 'fixture-interrupts.json'
+    assert json.loads(interrupts.read_text()) == [
+        {'threadId': 'fixture-thread', 'turnId': 'fixture-turn'}]
+    assert bridge.run(other_turn).status == 'running'
+    assert [row['prompt'] for row in bridge.runs() if row['session_id'] == instance] == [
+        'hold:never', 'priority', 'later']
     assert native_history(bridge, instance) == {
         'methods': ['thread/start', 'thread/resume', 'thread/resume'],
         'prompts': ['hold:never', 'priority', 'later'],

@@ -60,7 +60,16 @@ Use `queues.dispatch(mode="steer" or "interrupt")` to promote an existing
 pending message. It keeps its original `message_id`. `expected_turn_id` fences
 the operation to the turn the caller observed. Steering requires a live turn;
 interruption on an idle instance moves the input to the front for execution.
-There is never more than one executing turn for a conversation or account.
+There is never more than one executing turn for a conversation.
+
+For an interactive native owner, interruption calls Codex `turn/interrupt` on
+that exact turn. Queue reordering and target/version checks commit together;
+the existing owner records one durable interruption attempt before sending it.
+It does not kill the process or replay an interruption after a lost response.
+The replacement waits for native interruption evidence and old process cleanup.
+An unknown response pauses the queue and retains the original pending input;
+inspect the turn and explicitly resume once appropriate. Legacy one-shot turns
+retain their existing process cancellation behavior.
 
 Queue admission returns a durable `message_id` immediately. Its `turn_id` and
 `account_ref` may be null until actual execution admission. Poll
