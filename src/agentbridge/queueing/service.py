@@ -55,16 +55,23 @@ class QueueMixin:
         return QueueStore(self.store).resume(instance_id, expected_version=expected_version)
 
     def queue_dispatch(self, instance_id, message_id, *, mode, expected_version=None,
-                       expected_turn_id=None):
+                       expected_turn_id=None, use_active_context=False):
         identifier(instance_id)
         identifier(message_id)
         if mode not in ('steer', 'interrupt'):
             raise BridgeError('invalid_delivery', 'Immediate delivery must be steer or interrupt.')
+        if (type(use_active_context) is not bool or use_active_context
+                and (mode != 'steer' or not isinstance(expected_turn_id, str)
+                     or not expected_turn_id)):
+            raise BridgeError('invalid_request',
+                              'Active context requires steering with an explicit expected turn.')
+        if use_active_context:
+            identifier(expected_turn_id)
         if mode == 'interrupt':
             request(self.root, instance_id, {'action': 'check', 'message_id': message_id,
                                             'secrets': referenced_secrets(self)})
         dispatch(self.store, instance_id, message_id, mode, expected_version=expected_version,
-                 expected_turn_id=expected_turn_id)
+                 expected_turn_id=expected_turn_id, use_active_context=use_active_context)
         return self.message_get(message_id)
 
     def message_get(self, message_id):

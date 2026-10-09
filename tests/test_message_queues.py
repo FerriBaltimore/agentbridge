@@ -222,10 +222,15 @@ def test_native_rejection_and_lost_ack_are_not_replayed(queued, lost_input):
     until(lambda: bridge.message_get(rejected['message_id'])['state'] == 'rejected')
     assert bridge.run(turn).status == 'running'
     later = bridge.queue_add(instance, 'later')
-    lost = bridge.message_create(instance, lost_input, delivery='steer', idempotency_key='drop')
+    lost = bridge.queue_add(instance, lost_input, idempotency_key='drop')
+    bridge.queue_dispatch(instance, lost['message_id'], mode='steer',
+                          expected_turn_id=turn, use_active_context=True)
     until(lambda: bridge.message_get(lost['message_id'])['state'] == 'unknown')
     assert bridge.queue_list(instance)['paused']
-    replay = bridge.message_create(instance, lost_input, delivery='steer', idempotency_key='drop')
+    promoted = bridge.queue_dispatch(instance, lost['message_id'], mode='steer',
+                                     expected_turn_id=turn, use_active_context=True)
+    assert promoted['message_id'] == lost['message_id'] and promoted['state'] == 'unknown'
+    replay = bridge.queue_add(instance, lost_input, idempotency_key='drop')
     assert replay['replayed'] and replay['state'] == 'unknown'
     assert len(bridge.runs()) == 1
     assert bridge.message_get(later['message_id'])['turn_id'] is None

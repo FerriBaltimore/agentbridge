@@ -11,7 +11,7 @@ from .records import (PENDING, active, changed, item_record, pending, queue_reco
                       reorder, set_paused)
 
 
-def validate_steering(db, row, run):
+def validate_steering(db, row, run, *, use_active_context=False):
     if run is None or run['stop_requested']:
         raise BridgeError('turn_not_active', 'Steering requires an active turn that is not stopping.')
     options = RunOptions(**json.loads(run['options']))
@@ -19,7 +19,8 @@ def validate_steering(db, row, run):
     if not duplex(Account(**json.loads(account['config'])), options):
         raise BridgeError('steering_unsupported', 'This turn does not accept live input; use interrupt delivery.')
     queued = json.loads(row['options'])
-    if queued.get('context_package_digest') or queued.get('mcp_binding_digest'):
+    if not use_active_context and (queued.get('context_package_digest')
+                                   or queued.get('mcp_binding_digest')):
         same_context = queued.get('context_package_digest') == options.context_package_digest
         same_mcp = (not queued.get('mcp_binding_digest') and not options.mcp_binding_digest
                     or queued.get('mcp_endpoint_digest') is not None
@@ -38,7 +39,8 @@ def validate_steering(db, row, run):
         raise BridgeError('steering_options_conflict', 'Live input cannot change account exclusions.')
 
 
-def dispatch(store, instance_id, message_id, mode, *, expected_version=None, expected_turn_id=None):
+def dispatch(store, instance_id, message_id, mode, *, expected_version=None,
+             expected_turn_id=None, use_active_context=False):
     if mode not in ('steer', 'interrupt'):
         raise BridgeError('invalid_delivery', 'Immediate delivery must be steer or interrupt.')
     with store.connect() as db:
@@ -57,7 +59,7 @@ def dispatch(store, instance_id, message_id, mode, *, expected_version=None, exp
         if expected_turn_id is not None and target != expected_turn_id:
             raise BridgeError('turn_conflict', 'The active turn changed before immediate delivery.')
         if mode == 'steer':
-            validate_steering(db, row, run)
+            validate_steering(db, row, run, use_active_context=use_active_context)
             db.execute("UPDATE queued_messages SET state='steering',delivery='steer',"
                        "target_turn_id=?,turn_id=?,updated=?,error=NULL WHERE id=?",
                        (target, target, time.time(), message_id))

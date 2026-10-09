@@ -13,7 +13,8 @@ queues.add(instance_id, content, position?, expected_version?, idempotency_key?,
            ...messages.create input controls)
 queues.move(instance_id, message_id, position, expected_version?)
 queues.delete(instance_id, message_id, expected_version?)
-queues.dispatch(instance_id, message_id, mode, expected_version?, expected_turn_id?)
+queues.dispatch(instance_id, message_id, mode, expected_version?, expected_turn_id?,
+                use_active_context=false)
 queues.pause(instance_id, expected_version?)
 queues.resume(instance_id, expected_version?, message_id?, context_package?, mcp?)
 messages.get(message_id)
@@ -92,6 +93,15 @@ Selected-context steering requires the exact active context package and the same
 MCP endpoint (version and socket path). A fresh operation capability may differ;
 the active turn keeps its original authorization. Changed context or endpoint is
 rejected with `steering_context_unsupported`, without dropping the queued input.
+An explicit `queues.dispatch(mode="steer", use_active_context=true, expected_turn_id=...)`
+promotes only the chosen message's text and attachments into that exact active turn.
+It retains the active immutable context and MCP authorization rather than applying the
+queued message's context or endpoint. The original queued ID, request key, options and
+request digest remain unchanged. Conflicting settings or account exclusions still fail;
+owner and queue-version checks remain atomic. This option requires an explicit turn ID
+and is invalid for other delivery modes. Its default is false; new direct steering input
+and ordinary queue promotion retain the strict context checks above. No queued input is
+deleted or resubmitted, and a lost acknowledgement remains unknown without replay.
 An outstanding tool approval can delay delivery until that interaction ends.
 
 ## Observation and recovery
