@@ -11,6 +11,13 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.11.4] - 2026-10-09
+
+- Native turn reads retain the original queued request key through the exact message,
+  instance and execution binding. Clients can reconcile admitted input with native items.
+- Keep direct request identity and queue evidence unchanged; this read-only projection
+  neither dispatches input nor creates another request record.
+
 ## [2.11.3] - 2026-10-09
 
 - Give runnable queued input priority over disconnected native-history reads, releasing

@@ -123,6 +123,12 @@ from existing admission evidence, with `message=null` when absent. It never admi
 An absent receipt cannot establish no prior external effect, especially after restore.
 Existing duplicate keys retain their original instance, input and account binding.
 
+`turns.get(turn_id).request_key` retains the original message idempotency key, including
+queued input after admission and completion. When the run has no direct key, this read
+uses only its exact queued message, instance and turn binding in one read transaction.
+An absent or mismatched queue binding leaves the key null; it cannot borrow another
+input's key. This correlation read never submits, replays or changes the message.
+
 ## Missing instance metadata
 
 `instances.reopen` optionally accepts `native_session_id`, `account_ref`, `workspace_path`

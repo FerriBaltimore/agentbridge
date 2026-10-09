@@ -147,7 +147,9 @@ def test_native_polling_yields_idle_lock_to_one_queued_followup(setup_proxy, mon
                            for name in ('worker', 'child')):
                         bridge.turn_recover(row['id'])
     request.addfinalizer(cleanup)
-    first = bridge.message_create(instance, 'hold', permission_mode='default')['turn_id']
+    first = bridge.message_create(instance, 'hold', permission_mode='default',
+                                  idempotency_key='read-first')['turn_id']
+    assert dispatch(bridge, 'turns.get', {'turn_id': first})['request_key'] == 'read-first'
     until(lambda: any(event['kind'] == 'item.delta' for event in bridge.turn_events(first)))
     bridge.message_create(instance, 'finish', delivery='steer')
     original = bridge.run(first).snapshot
@@ -188,6 +190,7 @@ def test_native_polling_yields_idle_lock_to_one_queued_followup(setup_proxy, mon
     observed = until(next_owner)
     next_id = bridge.message_get(waiting['message_id'])['turn_id']
     assert observed['owner']['turn_id'] == next_id
+    assert dispatch(bridge, 'turns.get', {'turn_id': next_id})['request_key'] == 'read-followup'
     assert observed['status']['type'] == 'active'
     assert len(bridge.runs()) == 2
     replay = bridge.message_create(instance, 'followup', delivery='queue',
@@ -195,6 +198,21 @@ def test_native_polling_yields_idle_lock_to_one_queued_followup(setup_proxy, mon
     assert replay['message_id'] == waiting['message_id'] and len(bridge.runs()) == 2
     bridge.message_create(instance, 'finish', delivery='steer')
     until(lambda: bridge.run(next_id).status == 'completed')
+
+    assert dispatch(bridge, 'turns.get', {'turn_id': next_id})['request_key'] == 'read-followup'
+    # A corrupt/stale queue association cannot borrow another instance or turn's key.
+    for field, invalid, original in (('session_id', 'other-instance', instance),
+                                     ('turn_id', first, next_id)):
+        with bridge.store.connect() as db:
+            db.execute(f'UPDATE queued_messages SET {field}=? WHERE id=?',
+                       (invalid, waiting['message_id']))
+        try:
+            assert dispatch(bridge, 'turns.get', {'turn_id': next_id})['request_key'] is None
+            assert dispatch(bridge, 'turns.get', {'turn_id': first})['request_key'] == 'read-first'
+        finally:
+            with bridge.store.connect() as db:
+                db.execute(f'UPDATE queued_messages SET {field}=? WHERE id=?',
+                           (original, waiting['message_id']))
 
 
 def test_ab2_recovery_stops_only_bound_execution_and_preserves_pending_input(setup_proxy):

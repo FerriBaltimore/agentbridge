@@ -150,16 +150,25 @@ class Bridge(ClientAccountsMixin, InstanceRoutingMixin, QueueMixin, EventStreamM
 
     def turn(self, turn_id, *, include_usage=False, include_error=False):
         run = self.run(turn_id)
-        value = dict(run.snapshot)
+        from .turn_outcome import detail
+        with self.store.connect() as db:
+            db.execute('BEGIN')
+            row = db.execute('SELECT r.*,q.request_key AS queued_request_key FROM runs r '
+                'LEFT JOIN queued_messages q ON q.id=r.message_id AND q.session_id=r.session_id '
+                'AND q.turn_id=r.id WHERE r.id=?', (turn_id,)).fetchone()
+            if row is None:
+                raise BridgeError('not_found', 'runs record does not exist.')
+            value = dict(row)
+            queued_key = value.pop('queued_request_key')
+            if value['request_key'] is None:
+                value['request_key'] = queued_key
+            issue = detail(db, turn_id, value['state'], value.get('error'))
         value['turn_id'] = value['id']
         value['instance_id'] = value['session_id']
         value['message_id'] = value.get('message_id', value['id'])
         value['created_at'] = value['created']
         value['updated_at'] = value['updated']
         value['account_ref'] = self.account_reference(value['account_id'])
-        from .turn_outcome import detail
-        with self.store.connect() as db:
-            issue = detail(db, turn_id, value['state'], value.get('error'))
         value['outcome'] = issue['outcome'] if issue else value['state']
         value['provider_compatibility'] = ContractRegistry(self.store).run(turn_id)
         if include_usage:
