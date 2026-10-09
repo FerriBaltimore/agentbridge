@@ -42,6 +42,12 @@ execution. When no execution owner is alive, a temporary read-only native connec
 reads the existing thread. Reopen resumes an unloaded thread without starting a turn.
 Both methods retain the native identity and never resend previous input.
 
+An idle read yields with the existing `busy` error while an unpaused, runnable queued
+input awaits admission. It releases the instance lock without opening a temporary native
+connection, so repeated observation cannot starve that input. Active-owner reads and
+history reads for paused or held queues remain available. `busy` is not a native turn
+status and never authorizes replay; keep confirmed history visible while observing again.
+
 `after_seq` is immediately before the first saved event of the latest SDK turn. Follow
 existing `instances.events` from that value. Native reads and notifications have no shared
 cursor, so **never append replay deltas to snapshot text**. Rebuild each covered item from

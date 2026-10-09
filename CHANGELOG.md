@@ -11,6 +11,14 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.11.3] - 2026-10-09
+
+- Give runnable queued input priority over disconnected native-history reads, releasing
+  the existing instance lock before opening a reader. Repeated polling no longer delays
+  the next message indefinitely; active execution and paused history remain readable.
+- Preserve queue identity, existing recovery holds and exactly-once admission. Reads never
+  dispatch input, mutate the queue or add another execution process.
+
 ## [2.11.2] - 2026-10-09
 
 - Immediate queued replacement interrupts the exact native turn through its existing

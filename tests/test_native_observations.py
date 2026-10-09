@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from threading import Event
 
 import pytest
@@ -126,6 +127,74 @@ def test_native_idle_read_excludes_concurrent_admission(setup_proxy, monkeypatch
         finally:
             release.set()
         assert pending.result(timeout=5)['status']['type'] == 'idle'
+
+
+def test_native_polling_yields_idle_lock_to_one_queued_followup(setup_proxy, monkeypatch, request):
+    from agentbridge import native_reads
+    from agentbridge.queueing.connection import request as queue_control
+
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    def cleanup():
+        try:
+            bridge.queue_pause(instance)
+        finally:
+            try:
+                queue_control(bridge.root, instance, {'action': 'shutdown'}, start=False)
+                until(lambda: not bridge.queue_list(instance)['dispatcher_running'], timeout=3)
+            finally:
+                for row in bridge.runs():
+                    if any(alive(row[name + '_pid'], row[name + '_identity'])
+                           for name in ('worker', 'child')):
+                        bridge.turn_recover(row['id'])
+    request.addfinalizer(cleanup)
+    first = bridge.message_create(instance, 'hold', permission_mode='default')['turn_id']
+    until(lambda: any(event['kind'] == 'item.delta' for event in bridge.turn_events(first)))
+    bridge.message_create(instance, 'finish', delivery='steer')
+    original = bridge.run(first).snapshot
+    until(lambda: not alive(original['worker_pid'], original['worker_identity']))
+    bridge.queue_pause(instance)
+    waiting = bridge.message_create(instance, 'followup', delivery='queue',
+                                    idempotency_key='read-followup')
+    assert bridge.instance_read(instance)['status']['type'] == 'idle'
+    assert bridge.message_lookup(instance, 'read-followup')['message']['message_id'] == (
+        waiting['message_id'])
+    instance_lock, resumed = native_reads.instance_lock, False
+
+    @contextmanager
+    def read_lock(*args, **kwargs):
+        nonlocal resumed
+        with instance_lock(*args, **kwargs):
+            if not resumed:
+                # Queue activation is real; this read already owns exclusion, so the
+                # dispatcher cannot win the race before the read checks its pending input.
+                resumed = True
+                bridge.queue_resume(instance)
+            yield
+
+    monkeypatch.setattr(native_reads, 'instance_lock', read_lock)
+    with pytest.raises(BridgeError) as yielded:
+        bridge.instance_read(instance)
+    assert yielded.value.code == 'busy'
+
+    def next_owner():
+        try:
+            observed = bridge.instance_read(instance)
+        except BridgeError as error:
+            assert error.code in {'busy', 'native_connection_unavailable'}
+            return None
+        owner = observed.get('owner')
+        return observed if owner and owner['turn_id'] != first else None
+
+    observed = until(next_owner)
+    next_id = bridge.message_get(waiting['message_id'])['turn_id']
+    assert observed['owner']['turn_id'] == next_id
+    assert observed['status']['type'] == 'active'
+    assert len(bridge.runs()) == 2
+    replay = bridge.message_create(instance, 'followup', delivery='queue',
+                                   idempotency_key='read-followup')
+    assert replay['message_id'] == waiting['message_id'] and len(bridge.runs()) == 2
+    bridge.message_create(instance, 'finish', delivery='steer')
+    until(lambda: bridge.run(next_id).status == 'completed')
 
 
 def test_ab2_recovery_stops_only_bound_execution_and_preserves_pending_input(setup_proxy):

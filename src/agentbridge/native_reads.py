@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 from .codex_control import CodexControl
 from .checkpoint.content import instance_lock
-from .errors import BridgeError
+from .errors import BridgeError, BusyError
 from .execution_context import codex_config
 from .models import RunOptions
 from .native_control import request
@@ -51,6 +51,19 @@ def _read(bridge, instance_id, include_turns, reopen):
         observed = request(bridge.store, previous, 'reopen' if reopen else 'read',
                            include_turns=include_turns)
     else:
+        from .checkpoint.state import blocked
+        from .queueing.records import pending, queue_record
+
+        # This read owns the exclusive instance lock; admission cannot begin until it
+        # releases. A runnable queued input gets that next opportunity before another
+        # read-only app-server can occupy the lock for its complete lifecycle.
+        with bridge.store.connect() as db:
+            db.execute('BEGIN')
+            rows = pending(db, instance_id)
+            if (rows and rows[0]['state'] == 'queued'
+                    and not queue_record(db, instance_id)['paused']
+                    and not blocked(db, instance_id)):
+                raise BusyError()
         observed = _disconnected_read(bridge, session, include_turns, reopen)
     if observed['native_session_id'] != native_id:
         raise BridgeError('native_session_diverged', 'The native thread identity changed.')
@@ -87,7 +100,7 @@ def _disconnected_read(bridge, session, include_turns, reopen):
             payload = {'options': asdict(options)}
             control = CodexControl(channel, payload, lambda _: None, None)
             control.thread_id = session['native_id']
-            control.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.11.2'}})
+            control.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.11.3'}})
             channel.send({'method': 'initialized', 'params': {}})
             # A fresh app-server has no loaded thread. Resume is a non-executing
             # load of this exact ID, and distinguishes absence from "not loaded".
