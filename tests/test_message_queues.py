@@ -145,22 +145,31 @@ def test_simultaneous_idempotent_add_only_schedules_once(queued):
     assert len(bridge.runs()) == 1
 
 
-def test_queued_message_can_steer_active_turn_without_starting_another(queued):
+def test_queued_message_can_steer_active_turn_without_starting_another(queued, tmp_path):
     bridge, instance = queued
+    assert dispatch(bridge, 'queues.list', {'instance_id': instance})['active_turn_id'] is None
     first = bridge.queue_add(instance, 'hold:never')
     turn = running(bridge, first)
-    later = bridge.queue_add(instance, 'later')
+    later = bridge.queue_add(instance, 'hold:release-next')
     immediate = bridge.queue_add(instance, 'finish')
-    result = bridge.queue_dispatch(instance, immediate['message_id'], mode='steer', expected_turn_id=turn)
+    snapshot = dispatch(bridge, 'queues.list', {'instance_id': instance})
+    assert snapshot['active_turn_id'] == turn
+    result = bridge.queue_dispatch(instance, immediate['message_id'], mode='steer',
+        expected_turn_id=snapshot['active_turn_id'], expected_version=snapshot['version'])
     assert result['turn_id'] == turn
     until(lambda: bridge.message_get(immediate['message_id'])['state'] == 'delivered')
-    completed(bridge, later)
+    next_turn = running(bridge, later)
+    assert next_turn != turn
+    assert dispatch(bridge, 'queues.list', {'instance_id': instance})['active_turn_id'] == next_turn
     assert len(bridge.runs()) == 2
     assert bridge.run(turn).text.endswith('|steer=finish')
     assert sum(event['kind'] == 'message.created' and event['message_id'] == immediate['message_id']
                for event in bridge.turn_events(turn)) == 1
     bridge.queue_dispatch(instance, immediate['message_id'], mode='steer', expected_turn_id=turn)
     assert len(bridge.runs()) == 2
+    (tmp_path / 'release-next').touch()
+    completed(bridge, later)
+    assert dispatch(bridge, 'queues.list', {'instance_id': instance})['active_turn_id'] is None
 
 
 def test_interrupt_stops_exact_turn_and_promotes_requested_message(queued):

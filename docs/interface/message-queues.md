@@ -32,11 +32,17 @@ Deleting removes an unstarted item from the queue and records it as cancelled;
 it does not stop an already dispatched turn or erase its audit evidence.
 
 `queues.list` returns `items`, `total`, `next_cursor`, `has_more`, `version`,
-`paused`, `reason`, `dispatcher_running` and `in_flight`. `in_flight` contains
+`paused`, `reason`, `dispatcher_running`, `active_turn_id` and `in_flight`. `in_flight` contains
 live inputs awaiting provider acknowledgement. Each item exposes `message_id`,
 `instance_id`, `content`, attachment descriptors, `position`, `state`,
 `delivery`, `turn_id`, `target_turn_id`, `error` and source timestamps.
 `context_required` identifies input with an ephemeral private binding.
+
+`active_turn_id` is the SDK execution owner used by `queues.dispatch.expected_turn_id`,
+read in the same transaction as the queue snapshot. It is null when no starting, running
+or stopping execution owns the instance. The field targets queue actions; it is not a
+native execution status or proof that provider execution has stopped. Always pass the
+observed ID back as `expected_turn_id`; dispatch checks it again atomically.
 
 Queue changes are transactional. `expected_version` rejects competing edits
 with `version_conflict`. Dispatch checks the head again in the same transaction

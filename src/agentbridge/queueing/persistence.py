@@ -11,7 +11,7 @@ from ..checkpoint.state import require_admission
 from ..models import identifier, page_values
 from ..process import alive
 from ..store import dumps
-from .records import (PENDING, changed, insert_position, item_record, pending,
+from .records import (PENDING, active, changed, insert_position, item_record, pending,
                       queue_record, reorder, require_pending, set_paused)
 
 
@@ -37,12 +37,14 @@ class QueueStore:
         with self.store.connect() as db:
             db.execute('BEGIN')
             queue = queue_record(db, instance_id)
+            owner = active(db, instance_id)
             rows = pending(db, instance_id)
             inflight = db.execute("SELECT * FROM queued_messages WHERE session_id=? "
                                   "AND state IN ('steering','delivering') ORDER BY created,id",
                                   (instance_id,)).fetchall()
         selected = rows[cursor:cursor + limit]
         return {'instance_id': instance_id, 'version': queue['version'],
+                'active_turn_id': owner['id'] if owner is not None else None,
                 'dispatcher_running': alive(queue.get('dispatcher_pid'), queue.get('dispatcher_identity')),
                 'paused': bool(queue['paused']), 'reason': queue['reason'],
                 'items': [dict(public_item(row), position=cursor + index)

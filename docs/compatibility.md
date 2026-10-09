@@ -9,7 +9,7 @@ Fullbrain v2 triples are known to work. The machine-readable copy of the numbers
 
 | Number | Current | Where it appears |
 | --- | --- | --- |
-| SDK version | `2.11.5` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
+| SDK version | `2.11.6` | `pyproject.toml`, `__version__`, `--version`, tag, manifest |
 | `rpc_contract` | `v2` | manifest `protocols`; `capabilities.get` `contract_version` |
 | `http` | `2` | manifest `protocols`; playground `/api/meta` `api_revision` |
 | `cli` | `1` | manifest `protocols`; `agentbridge --root DIR rpc`, `--version` |

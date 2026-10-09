@@ -13,6 +13,12 @@ Earlier releases: [archive through 2.9.1](docs/changelog-archive.md).
 
 ## [Unreleased]
 
+## [2.11.6] - 2026-10-09
+
+- Queue reads expose the exact active execution targeted by queue controls, using the
+  existing queue transaction. Clients no longer need a separate native-history reader
+  to display or confirm queue actions; native status remains a separate observation.
+
 ## [2.11.5] - 2026-10-09
 
 - Explicit queued steering can retain the active turn's original context and tool grants.
@@ -209,7 +215,8 @@ Earlier releases: [archive through 2.9.1](docs/changelog-archive.md).
 - Package the pinned GrantBridge browser runtime; no additional public server is required.
 - Validate browser consent against fixtures; production provider acceptance remains pending.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.11.5...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.11.6...HEAD
+[2.11.6]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.6
 [2.11.5]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.5
 [2.11.4]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.4
 [2.11.3]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.3
