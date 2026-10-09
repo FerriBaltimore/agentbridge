@@ -1,4 +1,4 @@
-"""Seal one stopped instance under its durable admission fence, without remote I/O."""
+"""Seal one stopped native instance under its exclusive lock, without remote I/O."""
 
 from functools import wraps
 import json
@@ -29,18 +29,22 @@ def checkpoint_operation(function):
 def seal(store, turn_id):
     with store.connect() as db:
         attempt = persistence.record(db, turn_id)
-        binding = state.identity(db)
     if not attempt:
         native.fail('checkpoint_incomplete')
     with content.instance_lock(store, attempt['instance_id']):
         with store.connect() as db:
             attempt = persistence.record(db, turn_id)
+            binding = state.identity(db)
+            latest = db.execute('SELECT id FROM runs WHERE session_id=? ORDER BY rowid DESC LIMIT 1',
+                                (attempt['instance_id'],)).fetchone()
         if attempt['generation'] != binding['store_generation']:
             native.fail('checkpoint_scope_mismatch')
         if attempt['state'] in {'sealed_local', 'ready'}:
             descriptor = json.loads(attempt['descriptor'])
             content.resolve(store, descriptor['content'])
             return descriptor
+        if not latest or latest['id'] != turn_id:
+            native.fail('checkpoint_incomplete')
         if not attempt['process_verified']:
             native.fail('checkpoint_busy')
         run = store.get('runs', turn_id)
@@ -104,6 +108,7 @@ class Checkpoints:
             value = state.identity(db)
             return {'format_version': '1', **{key: value[key] for key in state.IDENTITY_KEYS},
                     'enabled': bool(value['enabled']), 'recovery_held': bool(value['recovery_held']),
+                    'checkpoint_mode': value['checkpoint_mode'],
                     'continuity_holds': [dict(row) for row in db.execute(
                         'SELECT instance_id,reason FROM continuity_holds ORDER BY instance_id')],
                     'cursor': state.cursor(db),

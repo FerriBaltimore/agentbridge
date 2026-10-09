@@ -10,6 +10,7 @@ from .errors import BridgeError
 from .evaluation.persistence import _process_may_run, _table_exists
 from .models import identifier
 from .checkpoint.state import require_admission
+from .checkpoint.content import instance_lock
 from .proxy.home import remove_session_home
 
 
@@ -64,7 +65,7 @@ class InstanceDeletionStoreMixin:
     def delete_instance(self, instance_id, *, expected_version=None):
         """Purge a conversation after its turn and owned processes have ended."""
         identifier(instance_id)
-        with self.connect() as db:
+        with instance_lock(self, instance_id, busy_code='busy', shared=True), self.connect() as db:
             prepare_deletion(db)
             db.execute('BEGIN IMMEDIATE')
             require_admission(db, instance_id)

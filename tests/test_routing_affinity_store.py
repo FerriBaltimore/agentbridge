@@ -125,7 +125,7 @@ def test_v10_migration_recovers_last_admitted_route_after_failure(tmp_path):
     assert upgraded.routing("untouched")["affinity_account_id"] == "b"
     assert upgraded.routing("pinned")["affinity_account_id"] is None
     with upgraded.connect() as db:
-        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 15
+        assert db.execute("SELECT version FROM metadata").fetchone()[0] == 16
 
 
 def test_v11_migration_rechecks_a_stale_version_argument(tmp_path):

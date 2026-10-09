@@ -41,7 +41,7 @@ def test_committed_event_cursor_never_skips_a_delayed_writer(tmp_path):
         second = executor.submit(later)
         # An unrelated Store remains usable while this Store holds its writer barrier.
         with other.store.connect() as connection:
-            assert connection.execute('SELECT version FROM metadata').fetchone()[0] == 15
+            assert connection.execute('SELECT version FROM metadata').fetchone()[0] == 16
         assert later_entered.wait(3)
         with pytest.raises(TimeoutError):
             second.result(timeout=.1)

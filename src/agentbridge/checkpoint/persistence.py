@@ -72,6 +72,8 @@ def prepare_terminal(store, turn_id, state, code, exit_code, *, process_verified
                 VALUES (?,?,?,?,?,?,'pending',?,?,?,?)''',
                        (turn_id, run['session_id'], barrier, str(uuid4()), barrier,
                         binding['store_generation'], boundary, int(process_verified), intent, now()))
+    if binding['checkpoint_mode'] == 'on_demand':
+        return
     # Native copying must not hold the Store writer transaction or any Fullbrain transaction.
     from .service import seal
     try:

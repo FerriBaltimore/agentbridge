@@ -33,7 +33,9 @@ def migrate(db, version):
         enabled INTEGER NOT NULL DEFAULT 0, recovery_held INTEGER NOT NULL DEFAULT 0,
         source_generation TEXT, source_seq INTEGER NOT NULL DEFAULT 0)''')
     store_id, generation = str(uuid4()), str(uuid4())
-    db.execute('INSERT OR IGNORE INTO store_identity VALUES (1,?,?,?,0,0,NULL,0)',
+    db.execute('INSERT OR IGNORE INTO store_identity '
+               '(singleton,store_id,owner_ref,store_generation,enabled,recovery_held,'
+               'source_generation,source_seq) VALUES (1,?,?,?,0,0,NULL,0)',
                (store_id, 'owner-' + store_id, generation))
     db.execute('''CREATE TABLE IF NOT EXISTS native_checkpoints(
         turn_id TEXT PRIMARY KEY, instance_id TEXT NOT NULL,
@@ -64,13 +66,31 @@ def identity(db):
     return dict(row)
 
 
-def configure(store, *, owner_ref=None, durable=None):
+def migrate_mode(db, version):
+    if version != 15:
+        return version
+    if not db.in_transaction:
+        db.execute('BEGIN IMMEDIATE')
+    current = db.execute('SELECT version FROM metadata').fetchone()[0]
+    if current != 15:
+        return current
+    columns = {row['name'] for row in db.execute('PRAGMA table_info(store_identity)')}
+    if 'checkpoint_mode' not in columns:
+        db.execute("ALTER TABLE store_identity ADD COLUMN checkpoint_mode TEXT NOT NULL "
+                   "DEFAULT 'required' CHECK(checkpoint_mode IN ('required','on_demand'))")
+    db.execute('UPDATE metadata SET version=16')
+    return 16
+
+
+def configure(store, *, owner_ref=None, durable=None, checkpoint_mode=None):
     """Local-host configuration, never accepted from an administrative RPC request body."""
     if owner_ref is not None and (not isinstance(owner_ref, str)
                                  or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}', owner_ref)):
         raise BridgeError('checkpoint_owner_invalid', 'Choose a stable private owner reference.')
     if durable is not None and type(durable) is not bool:
         raise BridgeError('checkpoint_invalid', 'Durable mode must be a boolean.')
+    if checkpoint_mode is not None and checkpoint_mode not in ('required', 'on_demand'):
+        raise BridgeError('checkpoint_invalid', 'Choose required or on_demand checkpoint capture.')
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         current = identity(db)
@@ -79,7 +99,10 @@ def configure(store, *, owner_ref=None, durable=None):
             raise BridgeError('checkpoint_owner_mismatch', 'This Store belongs to another owner.')
         if current['enabled'] and durable is False:
             raise BridgeError('checkpoint_required', 'An enabled durable Store cannot downgrade.')
-        if changed or durable is True and not current['enabled']:
+        mode_changed = checkpoint_mode is not None and checkpoint_mode != current['checkpoint_mode']
+        if checkpoint_mode == 'on_demand' and not (current['enabled'] or durable is True):
+            raise BridgeError('checkpoint_disabled', 'On-demand capture requires durable identity.')
+        if changed or mode_changed or durable is True and not current['enabled']:
             active = db.execute(
                 "SELECT 1 FROM runs WHERE state IN ('starting','running','stopping')").fetchone()
             if active:
@@ -88,6 +111,9 @@ def configure(store, *, owner_ref=None, durable=None):
             db.execute('UPDATE store_identity SET owner_ref=? WHERE singleton=1', (owner_ref,))
         if durable is True:
             db.execute('UPDATE store_identity SET enabled=1 WHERE singleton=1')
+        if mode_changed:
+            db.execute('UPDATE store_identity SET checkpoint_mode=? WHERE singleton=1',
+                       (checkpoint_mode,))
 
 
 def recovery_held(db, instance_id):
@@ -103,9 +129,11 @@ def blocked(db, instance_id):
         return True
     if recovery_held(db, instance_id):
         return True
-    return identity(db)['enabled'] and db.execute(
-        "SELECT 1 FROM native_checkpoints WHERE instance_id=? AND state<>'ready'",
-        (instance_id,)).fetchone() is not None
+    binding = identity(db)
+    return binding['enabled'] and db.execute(
+        "SELECT 1 FROM native_checkpoints WHERE instance_id=? AND state<>'ready' "
+        "AND (?='required' OR process_verified=0)",
+        (instance_id, binding['checkpoint_mode'])).fetchone() is not None
 
 
 def require_admission(db, instance_id):

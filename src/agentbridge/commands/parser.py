@@ -28,6 +28,8 @@ def build_parser():
     parser.add_argument('--owner-ref', help='Trusted host configuration for the persistent owner')
     parser.add_argument('--durability', choices=('legacy', 'required'),
                         help='Require durable continuity; existing legacy history needs host upgrade')
+    parser.add_argument('--checkpoint-mode', choices=('required', 'on-demand'),
+                        help='Host capture policy; on-demand retains identity and recovery holds')
     parser.add_argument('--store-backend', choices=('sqlite', 'postgresql'),
                         help='Explicit host Store selection; defaults to the saved backend')
     parser.add_argument('--postgres-schema', help='Dedicated host-provisioned ab_ schema')

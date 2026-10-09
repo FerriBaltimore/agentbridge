@@ -26,7 +26,7 @@ def restore_postgres(destination, snapshot, *, postgres, owner_ref, operation_id
     """
     state.canonical_uuid(operation_id)
     if (snapshot.get('format_version') != '1' or snapshot.get('backend') != 'postgresql'
-            or snapshot.get('owner_ref') != owner_ref or snapshot.get('store_schema') != 15
+            or snapshot.get('owner_ref') != owner_ref or snapshot.get('store_schema') not in {15, 16}
             or 'sqlite_backup' in snapshot or 'content' in snapshot
             or not isinstance(postgres, PostgresConfiguration)):
         native.fail('checkpoint_incompatible')
@@ -78,6 +78,8 @@ def restore_postgres(destination, snapshot, *, postgres, owner_ref, operation_id
                 if any(observed[key] != snapshot[key] for key in
                        (*state.IDENTITY_KEYS, 'backend', 'store_schema', 'cursor', 'coverage')):
                     native.fail('checkpoint_corrupt')
+                if state.migrate_mode(connection, snapshot['store_schema']) != 16:
+                    native.fail('checkpoint_incompatible')
                 hold_import(connection, destination, snapshot, record['generation'], workspace_paths)
                 result = {'store_id': snapshot['store_id'], 'owner_ref': owner_ref,
                           'store_generation': record['generation'], 'recovery_held': True,

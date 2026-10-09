@@ -133,7 +133,7 @@ def migrate_postgres(root, *, operation_id, owner_ref, postgres, verify_quiescen
                 recorded_owners(source)
                 if source.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                     raise BridgeError('store_migration_corrupt', 'The source Store is corrupt.')
-                if source.execute('SELECT version FROM metadata').fetchone()[0] != 15:
+                if source.execute('SELECT version FROM metadata').fetchone()[0] != 16:
                     raise BridgeError('store_migration_incompatible', 'Upgrade the Store schema first.')
                 identity = state.identity(source)
                 if identity['owner_ref'] != owner_ref or not identity['enabled']:

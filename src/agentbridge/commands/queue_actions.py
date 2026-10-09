@@ -42,6 +42,7 @@ def queue_command(bridge, args):
     values.pop('root')
     values.pop('owner_ref')
     values.pop('durability')
+    values.pop('checkpoint_mode')
     for name in ('store_backend', 'postgres_schema', 'postgres_conninfo_file',
                  'postgres_physical_guard'):
         values.pop(name)

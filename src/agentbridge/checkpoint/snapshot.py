@@ -124,7 +124,7 @@ def restore_store(destination, snapshot, source, *, owner_ref, workspace_paths=N
         native.fail('checkpoint_corrupt')
     observed = inspect(source, expected=snapshot)
     if (any(observed[key] != snapshot[key] for key in observed)
-            or snapshot['store_schema'] not in {14, 15} or snapshot['backend'] != 'sqlite'):
+            or snapshot['store_schema'] not in {14, 15, 16} or snapshot['backend'] != 'sqlite'):
         native.fail('checkpoint_incompatible')
     parent = destination.parent
     if any(path.is_symlink() for path in (parent, *parent.parents)):
@@ -143,10 +143,9 @@ def restore_store(destination, snapshot, source, *, owner_ref, workspace_paths=N
             db.row_factory = sqlite3.Row
             from .upgrade import migrate
 
-            # Only the reviewed 14 -> 15 table addition is allowed. Store identity and
-            # replay positions are unchanged by this migration; restore changes generation
-            # separately below, invalidating every imported upgrade proof.
-            if migrate(db, snapshot['store_schema']) != 15:
+            # Reviewed schema additions preserve identity and replay positions. Restore
+            # changes generation separately, invalidating every imported upgrade proof.
+            if state.migrate_mode(db, migrate(db, snapshot['store_schema'])) != 16:
                 native.fail('checkpoint_incompatible')
             from .recovery import hold_import
 

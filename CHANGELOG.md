@@ -11,6 +11,16 @@ AgentBridge × GrantBridge × Fullbrain v2 matrix: [docs/compatibility.md](docs/
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-10-09
+
+- Add host-selected on-demand native checkpoints: retain terminal and process evidence
+  without copying native files or waiting for a backup before the next input.
+- Keep existing required capture as the default. Credential, recovery, continuity and
+  unverified-process holds remain active in both modes; request evidence is never replayed.
+- Explicit capture seals only the latest stopped execution under the existing instance
+  lock. Old pending attempts cannot capture newer bytes or advertise false backup coverage.
+- Preserve durable identity and cursors through schema16 migration and held restore.
+
 ## [2.11.0] - 2026-10-09
 
 - Read and reopen native Codex history with stable thread, turn and item identities.
@@ -393,7 +403,8 @@ Linux x86_64 only (`native_bwrap` asset in `bundle/lock.json`).
 Versions before 2.0.0 (`0.1.0`) were direct Codex and Claude Code adapters; their records
 stay readable but cannot create accounts or start turns.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.11.1...HEAD
+[2.11.1]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.1
 [2.11.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.0
 [2.10.19]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.19
 [2.10.18]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.10.18

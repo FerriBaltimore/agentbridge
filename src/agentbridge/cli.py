@@ -34,7 +34,7 @@ def open_bridge(args):
                               'Explicit PostgreSQL selection requires schema and connection file.')
         postgres = PostgresConfiguration(*configured)
     bridge = Bridge(args.root, backend=args.store_backend, postgres=postgres)
-    if args.owner_ref is None and args.durability is None:
+    if args.owner_ref is None and args.durability is None and args.checkpoint_mode is None:
         return bridge
     if args.durability == 'required':
         if not args.owner_ref:
@@ -47,7 +47,9 @@ def open_bridge(args):
     from .checkpoint.state import configure
 
     configure(bridge.store, owner_ref=args.owner_ref,
-              durable={'legacy': False, 'required': True}.get(args.durability))
+              durable={'legacy': False, 'required': True}.get(args.durability),
+              checkpoint_mode=(args.checkpoint_mode.replace('-', '_')
+                               if args.checkpoint_mode else None))
     return bridge
 
 

@@ -37,7 +37,7 @@ def inspect(root):
             if len(rows) != 1 or type(rows[0][0]) is not int:
                 raise BridgeError('native_identity_unknown', 'The Store schema cannot be read.')
             version = rows[0][0]
-            if version > 15:
+            if version > 16:
                 raise BridgeError('runtime_incompatible', 'The Store schema is not supported.')
             if version < 15:
                 raise BridgeError('native_identity_unknown', 'The legacy Store needs host migration.')

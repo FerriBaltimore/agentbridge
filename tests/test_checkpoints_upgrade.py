@@ -101,7 +101,7 @@ def test_other_instances_and_restored_upgrade_authority_remain_held(tmp_path):
         bridge.store.admit('other-turn', 'other', 'next', RunOptions(), 'other-turn')
     snapshot = bridge.checkpoints.snapshot_store(format_version='1', operation_id=str(uuid4()),
                                                 params=scope(bridge))
-    assert snapshot['store_schema'] == 15
+    assert snapshot['store_schema'] == 16
     restored_scope = restore_store(tmp_path / 'restored', snapshot,
         bridge.checkpoints.resolve_content(snapshot['content']), owner_ref='fixture-owner')
     restored = Bridge(tmp_path / 'restored')
@@ -126,7 +126,7 @@ def test_schema14_upgrade_preserves_store_identity_and_integer_position(tmp_path
     assert upgraded.checkpoints.identity() == before
     assert terminal(upgraded).seq == expected['after_seq']
     with upgraded.store.connect() as db:
-        assert db.execute('SELECT version FROM metadata').fetchone()[0] == 15
+        assert db.execute('SELECT version FROM metadata').fetchone()[0] == 16
 
 
 def test_restore_schema14_is_explicitly_migrated_and_never_carries_upgrade_proof(tmp_path):
@@ -144,5 +144,5 @@ def test_restore_schema14_is_explicitly_migrated_and_never_carries_upgrade_proof
     assert restored.checkpoints.identity()['recovery_held']
     assert restored_scope['store_generation'] != snapshot['store_generation']
     with restored.store.connect() as db:
-        assert db.execute('SELECT version FROM metadata').fetchone()[0] == 15
+        assert db.execute('SELECT version FROM metadata').fetchone()[0] == 16
         assert db.execute('SELECT COUNT(*) FROM checkpoint_upgrade_operations').fetchone()[0] == 0

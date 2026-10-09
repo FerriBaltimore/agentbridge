@@ -52,7 +52,7 @@ def inspect_postgres(root):
         return None
     with connect_selected(root) as connection:
         rows = connection.execute('SELECT version FROM metadata LIMIT 2').fetchall()
-        if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] != 15:
+        if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] not in {15, 16}:
             raise BridgeError('runtime_incompatible', 'The Store schema is not supported.')
         row = connection.execute('SELECT enabled FROM store_identity WHERE singleton=1').fetchone()
         if row is None or row[0] != 1:

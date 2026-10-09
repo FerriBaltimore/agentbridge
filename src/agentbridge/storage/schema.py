@@ -13,6 +13,7 @@ from ..native_sessions import migrate_v12
 from ..execution_policy import migrate_v13
 from ..checkpoint.state import migrate as migrate_v14
 from ..checkpoint.upgrade import migrate as migrate_v15
+from ..checkpoint.state import migrate_mode as migrate_v16
 
 
 def initialize(db):
@@ -135,7 +136,8 @@ def initialize(db):
     version = migrate_v13(db, version)
     version = migrate_v14(db, version)
     version = migrate_v15(db, version)
-    if version != 15:
+    version = migrate_v16(db, version)
+    if version != 16:
         raise BridgeError("schema_version", "This store needs a different AgentBridge version.")
     db.execute('CREATE UNIQUE INDEX IF NOT EXISTS run_message_id ON runs(message_id)')
 

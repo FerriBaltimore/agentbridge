@@ -15,6 +15,36 @@ Store preserves this configuration; requests cannot rebind the owner or disable 
 Standalone legacy Stores declare `durability.support = disabled`. Their terminal events keep
 legacy behavior; the SDK does not claim `not_required` for unsupported durability.
 
+## Capture policy
+
+The default `checkpoint_mode="required"` preserves the automatic per-turn capture and
+admission barrier described below. A host can instead select deferred capture explicitly:
+
+```python
+bridge = Bridge(private_root, owner_ref="stable-installation-owner", durable=True,
+                checkpoint_mode="on_demand")
+```
+
+The CLI equivalent is `--durability required --owner-ref OWNER --checkpoint-mode on-demand`.
+This host-only setting persists across client/worker restarts and appears in
+`checkpoints.identity()` and durability capabilities. Changing it requires drained turns;
+omitting it retains the saved choice. It cannot disable durable identity or change its owner.
+
+In `on_demand` mode, terminal processing persists the outcome, native capture association,
+generation cursor and process-death proof, without inventorying or copying native files.
+Ordinary pending capture does not prevent the next message, configuration or queue action.
+An unverified process death still holds admission, as do credential, restore and continuity
+holds. A capture failure is never proof that execution stopped.
+
+The backup owner calls `checkpoints.create` using the terminal durability `barrier_id` as
+`operation_id`. The terminal event is available through `turns.events`; no application-owned
+execution state is needed. The SDK captures only the latest stopped turn under an exclusive
+instance lock that excludes concurrent admission. Superseded pending captures stay in history
+and cannot archive newer native bytes under an older turn. Previously sealed descriptors
+remain idempotently readable. Pending capture has no backup coverage; after explicit capture,
+the existing ready observation, snapshot coverage and restore contracts apply unchanged.
+`snapshot_store` and `observe_store` report coverage; neither silently starts native capture.
+
 ## Turn boundary and recovery
 
 A durable worker becomes a Linux subreaper before native launch. After the native wrapper
@@ -23,13 +53,13 @@ Other workers and a shared proxy live outside that ownership tree. Failure to ve
 leaves continuity pending. A later PID absence alone is insufficient evidence.
 
 Before releasing active-turn exclusion, the Store persists a barrier and terminal intent.
-The SDK inventories the private native home, makes online SQLite backups of its indexes,
+In the default `required` mode, it inventories the native home, backs up its SQLite indexes,
 publishes immutable local content and its descriptor, and associates the result with the
 terminal transaction. No full AgentBridge Store copy occurs on each turn. No GCS operation
 is on this execution path.
 
 A failed seal retains the historical execution result and emits `checkpoint.pending`.
-The instance cannot admit another turn, change execution configuration, edit/deliver its
+In `required` mode the instance cannot admit another turn, change configuration, edit/deliver its
 queue, or be deleted until its barrier clears. Other instances continue independently.
 The historical terminal stays unchanged after a retry; one later `checkpoint.ready`
 observation identifies the completed checkpoint. Its sequence is after the terminal,
@@ -56,7 +86,7 @@ Their params contain `format_version = "1"`, a canonical UUID `operation_id`, an
 it does not create authority. Local paths never come from these RPC bodies.
 
 `create.params` contains `owner_ref`, `store_id`, `store_generation`, `instance_id`, `turn_id`.
-For an automatic terminal seal, use its persisted `barrier_id` as `operation_id`. A retry
+Use the terminal's persisted `barrier_id` as `operation_id`, including deferred capture. A retry
 verifies the same immutable object before returning its checkpoint. A process-death proof
 which was never observed is not manufactured by the retry.
 
@@ -239,8 +269,9 @@ sequence while the whole previous execution domain is demonstrably closed:
    this instance after verifying the durable SQL receipt. Same-proof retries are idempotent;
    different proofs are rejected. Unselected instances remain held across restart.
 
-These methods are local SDK operations and are absent from RPC. Store schema 14 migrates to 15
-by adding upgrade records; no event position or Store identity changes. Restore accepts only the
-reviewed 14/15 layouts, performs that table migration explicitly and then rotates generation,
+These methods are local SDK operations and are absent from RPC. Schema 14 adds upgrade records
+in schema 15; schema 16 adds the capture policy with default `required`. Neither migration
+changes identity or event positions. Restore accepts reviewed 14/15/16 layouts, performs these
+additions explicitly and then rotates generation,
 invalidating imported upgrade proofs. Native checkpoint runtime hashes remain exact; restoring
 older native material still requires its original pinned runtime before a reviewed migration.

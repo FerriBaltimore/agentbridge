@@ -20,6 +20,7 @@ from .instance_deletion import InstanceDeletionStoreMixin
 from .native_sessions import bind_native_session
 from .execution_policy import read_policy, write_policy
 from .checkpoint.state import configure, require_admission
+from .checkpoint.content import instance_lock
 
 
 def dumps(value):
@@ -28,7 +29,8 @@ def dumps(value):
 
 class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetirementStoreMixin, EvaluationStoreMixin, ProxyBindingStoreMixin,
             RoutingStoreMixin, AuthStoreMixin):
-    def __init__(self, root, *, owner_ref=None, durable=None, backend=None, postgres=None):
+    def __init__(self, root, *, owner_ref=None, durable=None, checkpoint_mode=None,
+                 backend=None, postgres=None):
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.root, 0o700)
@@ -45,7 +47,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
             from .storage.schema import initialize_optional
 
             initialize_optional(self)
-        configure(self, owner_ref=owner_ref, durable=durable)
+        configure(self, owner_ref=owner_ref, durable=durable, checkpoint_mode=checkpoint_mode)
         self.recover_deleting_instances()
 
     @contextmanager
@@ -170,7 +172,7 @@ class Store(InstanceDeletionStoreMixin, AccountPauseStoreMixin, AccountRetiremen
             validate_mode(routing_mode)
         route_changed = 'model' in values or routing_change
         policy_changed = bool(values.keys() & {'permission_mode', 'sandbox_mode', 'cwd'})
-        with self.connect() as db:
+        with instance_lock(self, id, busy_code='busy', shared=True), self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             require_admission(db, id)
             row = db.execute('SELECT * FROM sessions WHERE id=?', (id,)).fetchone()
