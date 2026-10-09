@@ -94,3 +94,20 @@ Adapters map their errors once. AgentBridge owns automatic account selection
 before each admitted turn. The host owns product retry policy and explicit
 recovery or new-turn decisions after a failure; no layer silently reruns an
 uncertain turn on another account.
+
+Native Codex RPC failures additionally preserve optional `details.native_method`
+(`initialize`, `thread_resume`, `thread_read`, `turn_start`, `turn_steer` or
+`turn_interrupt`) and `details.native_code` (a signed 32-bit integer, never a
+boolean). Other method names and malformed or out-of-range codes are omitted.
+The method identifies the RPC being observed; an asynchronous failure while
+waiting does not prove that this request caused the error. These fields contain
+no thread IDs, provider prose, paths, request bodies or credentials.
+
+A live native owner's socket forwards only validated diagnostic fields:
+`detection`, `http_status`, recognized `provider_code`, existing bounded
+`unknown_evidence`, `native_method` and `native_code`. Older owners that return
+only an error code remain supported and have empty diagnostic details. The
+caller still derives the control outcome conservatively: a sent interruption
+whose result was not confirmed remains `unknown` and never becomes retryable
+because the inner provider rejected its RPC. A failed read does not stop the
+running turn, release its owner or resend any admitted input.

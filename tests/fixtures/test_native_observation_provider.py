@@ -15,6 +15,7 @@ def main():
     native = json.loads(path.read_text()) if path.exists() else None
     active = None
     read_advanced = False
+    rejected_controls = set()
 
     def save():
         path.write_text(json.dumps(native))
@@ -39,6 +40,14 @@ def main():
         request = json.loads(line)
         method, params = request['method'], request.get('params', {})
         result = {}
+        controlled = active and active['items'][0]['content'][0].get('text') == 'reject-controls'
+        if controlled and method in {'thread/read', 'turn/interrupt'} and method not in rejected_controls:
+            rejected_controls.add(method)
+            send({'id': request['id'], 'error': {
+                'code': -32600 if method == 'thread/read' else -32602,
+                'message': 'private-native-canary capacity rejected',
+                'data': {'httpStatusCode': 418, 'private': 'private-native-canary'}}})
+            continue
         if method == 'initialized':
             continue
         if method == 'thread/start':

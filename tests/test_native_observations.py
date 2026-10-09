@@ -1,5 +1,6 @@
 """SC AB-1: reconnect reads native history and live items before completion."""
 
+import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -284,3 +285,77 @@ def test_ab2_reopen_original_native_id_after_instance_metadata_loss(setup_proxy)
         bridge.instance_read(instance)
     assert unavailable.value.code == 'native_history_unavailable'
     assert not home.exists()
+
+
+def test_native_owner_retains_safe_rejection_details_without_replaying_or_stopping(
+        setup_proxy, request, monkeypatch):
+    from agentbridge.error_evidence import capture
+    from agentbridge.native_control import address
+
+    bridge, instance = setup_proxy(native_command=('/usr/bin/python3', '-c', FIXTURE.read_text()))
+    started = bridge.message_create(instance, 'reject-controls', permission_mode='default',
+                                    idempotency_key='one-native-request')['turn_id']
+
+    def cleanup():
+        row = bridge.run(started).snapshot
+        if any(alive(row[name + '_pid'], row[name + '_identity']) for name in ('worker', 'child')):
+            bridge.turn_recover(started)
+
+    request.addfinalizer(cleanup)
+    until(lambda: any(event['kind'] == 'item.delta' for event in bridge.turn_events(started)))
+    owner = bridge.run(started).snapshot
+    for action, method, native_code in (('read', 'thread_read', -32600),
+                                        ('interrupt', 'turn_interrupt', -32602)):
+        with pytest.raises(BridgeError) as rejected:
+            if action == 'read':
+                dispatch(bridge, 'instances.read', {'instance_id': instance})
+            else:
+                dispatch(bridge, 'turns.interrupt', {'turn_id': started})
+        error = rejected.value.safe_data()
+        assert error['code'] == 'provider_failed'
+        assert error['outcome'] == ('unknown' if action == 'interrupt' else 'not_started')
+        assert error['retryable'] is False
+        assert error['details'] == {
+            'detection': 'unclassified', 'http_status': 418,
+            'native_method': method, 'native_code': native_code,
+            'unknown_evidence': capture({'code': native_code,
+                'message': 'private-native-canary capacity rejected',
+                'data': {'httpStatusCode': 418, 'private': 'private-native-canary'}})}
+        assert 'private-native-canary' not in json.dumps(error)
+        live = bridge.instance_read(instance)
+        assert live['owner']['turn_id'] == started
+        assert live['status']['type'] == 'active'
+        current = bridge.run(started).snapshot
+        assert current['child_pid'] == owner['child_pid']
+        assert alive(current['child_pid'], current['child_identity'])
+        assert len(bridge.runs()) == 1
+        assert bridge.message_lookup(instance, 'one-native-request')['message']['turn_id'] == started
+    # Exercise an older owner's code-only reply and reject malformed diagnostic fields
+    # at the same socket boundary. Only this fixture's successful read reply is replaced.
+    for diagnostic in (None, {'detection': ['private-native-canary'], 'http_status': True,
+            'provider_code': 'private-native-canary', 'native_method': {'private': 'canary'},
+            'native_code': True, 'unknown_evidence': {'fingerprint': 'private-native-canary'}}):
+        decode = json.loads
+        def owner_reply(payload, *args, **kwargs):
+            value = decode(payload, *args, **kwargs)
+            if (isinstance(value, dict) and value.get('ok') is True
+                    and isinstance(value.get('result'), dict)
+                    and value['result'].get('native_session_id') == 'native-thread'):
+                value = {'ok': False, 'code': 'provider_failed'}
+                if diagnostic is not None:
+                    value['details'] = diagnostic
+            return value
+        with monkeypatch.context() as legacy:
+            legacy.setattr(json, 'loads', owner_reply)
+            with pytest.raises(BridgeError) as rejected:
+                bridge.instance_read(instance)
+            assert rejected.value.code == 'provider_failed'
+            assert rejected.value.details == {}
+            assert 'private-native-canary' not in json.dumps(rejected.value.safe_data())
+    assert bridge.instance_read(instance)['owner']['turn_id'] == started
+    assert bridge.turn_interrupt(started)['acknowledged'] is True
+    until(lambda: bridge.run(started).status == 'interrupted')
+    until(lambda: not alive(owner['worker_pid'], owner['worker_identity']))
+    with address(bridge.root, instance, started) as (endpoint, _):
+        assert not endpoint.exists()
+    assert len(bridge.runs()) == 1

@@ -13,6 +13,13 @@ Earlier releases: [archive through 2.9.1](docs/changelog-archive.md).
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-10-10
+
+- Preserve bounded native error diagnostics through the live owner connection and public RPC.
+  Private provider prose remains excluded; unknown interruption outcomes remain protected.
+- Native errors can name the observed operation and numeric protocol error. These fields are
+  observations only; they neither prove termination nor authorize another execution attempt.
+
 ## [2.11.6] - 2026-10-09
 
 - Queue reads expose the exact active execution targeted by queue controls, using the
@@ -215,7 +222,8 @@ Earlier releases: [archive through 2.9.1](docs/changelog-archive.md).
 - Package the pinned GrantBridge browser runtime; no additional public server is required.
 - Validate browser consent against fixtures; production provider acceptance remains pending.
 
-[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.11.6...HEAD
+[Unreleased]: https://github.com/FerriBaltimore/agentbridge/compare/v2.12.0...HEAD
+[2.12.0]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.12.0
 [2.11.6]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.6
 [2.11.5]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.5
 [2.11.4]: https://github.com/FerriBaltimore/agentbridge/releases/tag/v2.11.4

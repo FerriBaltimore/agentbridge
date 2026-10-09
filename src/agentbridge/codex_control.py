@@ -18,36 +18,46 @@ class CodexControl:
         self.native_control = None
 
     def rpc(self, method, params, *, timeout=None):
-        self.next_id += 1
-        request_id = self.next_id
-        self.channel.send({'id': request_id, 'method': method, 'params': params})
-        deadline = time.monotonic() + (timeout if timeout is not None
-                                        else self.payload['options']['timeout'])
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise BridgeError('provider_timeout', 'The native provider did not answer in time.',
-                                  phase='execution', outcome='unknown')
-            value = self.channel.receive(remaining)
-            if value.get('id') == request_id and 'method' not in value:
-                if 'error' in value:
-                    error = value['error']
-                    if (method == 'thread/resume' and isinstance(error, dict)
-                            and error.get('code') == -32600
-                            and error.get('message') == 'no rollout found for thread id '
-                            + str(params.get('threadId'))):
-                        raise BridgeError('native_thread_missing',
-                                          'The native runtime confirmed this thread is absent.')
-                    issue = normalize('codex', value['error'], phase='launch', outcome='not_started')
-                    raise BridgeError(issue['code'], 'Codex rejected the native operation.',
-                                      phase='launch', outcome='not_started', retryable=False,
-                                      details=issue['details'])
-                result = value.get('result')
-                if not isinstance(result, dict):
-                    raise BridgeError('provider_protocol_error', 'Invalid native response result.',
+        try:
+            self.next_id += 1
+            request_id = self.next_id
+            self.channel.send({'id': request_id, 'method': method, 'params': params})
+            deadline = time.monotonic() + (timeout if timeout is not None
+                                            else self.payload['options']['timeout'])
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise BridgeError('provider_timeout', 'The native provider did not answer in time.',
                                       phase='execution', outcome='unknown')
-                return result
-            self.event(value)
+                value = self.channel.receive(remaining)
+                if value.get('id') == request_id and 'method' not in value:
+                    if 'error' in value:
+                        error = value['error']
+                        native_code = error.get('code') if isinstance(error, dict) else None
+                        details = ({'native_code': native_code} if type(native_code) is int
+                                   and -(2 ** 31) <= native_code < 2 ** 31 else {})
+                        if (method == 'thread/resume' and isinstance(error, dict)
+                                and error.get('code') == -32600
+                                and error.get('message') == 'no rollout found for thread id '
+                                + str(params.get('threadId'))):
+                            raise BridgeError('native_thread_missing',
+                                              'The native runtime confirmed this thread is absent.',
+                                              details=details)
+                        issue = normalize('codex', value['error'], phase='launch', outcome='not_started')
+                        raise BridgeError(issue['code'], 'Codex rejected the native operation.',
+                                          phase='launch', outcome='not_started', retryable=False,
+                                          details={**issue['details'], **details})
+                    result = value.get('result')
+                    if not isinstance(result, dict):
+                        raise BridgeError('provider_protocol_error', 'Invalid native response result.',
+                                          phase='execution', outcome='unknown')
+                    return result
+                self.event(value)
+        except BridgeError as error:
+            if method in {'initialize', 'thread/resume', 'thread/read',
+                          'turn/start', 'turn/steer', 'turn/interrupt'}:
+                error.details = {**error.details, 'native_method': method.replace('/', '_')}
+            raise
 
     def event(self, value):
         if 'method' not in value and 'id' in value:

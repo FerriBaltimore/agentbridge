@@ -8,6 +8,8 @@ import struct
 import stat
 
 from .errors import BridgeError
+from .error_evidence import from_issue
+from .provider_errors import CANONICAL, NATIVE_CODES
 from .models import identifier
 from .native_observations import thread
 from .process import alive
@@ -16,6 +18,35 @@ from .queueing.interruption import QueuedInterruption
 
 
 MAX_REPLY = 8 * 1024 * 1024
+NATIVE_METHODS = frozenset(('initialize', 'thread_resume', 'thread_read',
+                           'turn_start', 'turn_steer', 'turn_interrupt'))
+
+
+def _error_details(value, code):
+    """Only bounded provider diagnostics cross the live owner's socket boundary."""
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    detection = value.get('detection')
+    if isinstance(detection, str) and detection in {'structured', 'text_match', 'http_status', 'unclassified'}:
+        result['detection'] = detection
+    status = value.get('http_status')
+    if type(status) is int and 400 <= status < 600:
+        result['http_status'] = status
+    provider_code = value.get('provider_code')
+    if (isinstance(provider_code, str) and
+            (NATIVE_CODES.get(provider_code) == code or provider_code in CANONICAL and provider_code == code)):
+        result['provider_code'] = provider_code
+    evidence = from_issue({'details': value})
+    if evidence is not None:
+        result['unknown_evidence'] = evidence
+    method = value.get('native_method')
+    if isinstance(method, str) and method in NATIVE_METHODS:
+        result['native_method'] = method
+    number = value.get('native_code')
+    if type(number) is int and -(2 ** 31) <= number < 2 ** 31:
+        result['native_code'] = number
+    return result
 
 
 @contextmanager
@@ -74,7 +105,8 @@ def request(store, run, action, *, include_turns=True):
         if value.get('ok') is not True:
             raise BridgeError(value.get('code', 'native_connection_unavailable'),
                               'The native operation was not confirmed.', phase='execution',
-                              outcome='unknown' if action == 'interrupt' else 'not_started')
+                              outcome='unknown' if action == 'interrupt' else 'not_started',
+                              details=_error_details(value.get('details'), value.get('code')))
         return value['result']
     except (OSError, ValueError, KeyError):
         raise BridgeError('native_connection_unavailable',
@@ -147,6 +179,8 @@ class NativeControl:
             except (BridgeError, OSError, ValueError, KeyError) as error:
                 reply = {'ok': False, 'code': (error.code if isinstance(error, BridgeError)
                                                else 'invalid_request')}
+                if isinstance(error, BridgeError):
+                    reply['details'] = _error_details(error.details, error.code)
             try:
                 channel.sendall((json.dumps(reply, allow_nan=False) + '\n').encode())
             except OSError:

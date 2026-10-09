@@ -100,7 +100,7 @@ def _disconnected_read(bridge, session, include_turns, reopen):
             payload = {'options': asdict(options)}
             control = CodexControl(channel, payload, lambda _: None, None)
             control.thread_id = session['native_id']
-            control.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.11.6'}})
+            control.rpc('initialize', {'clientInfo': {'name': 'agentbridge', 'version': '2.12.0'}})
             channel.send({'method': 'initialized', 'params': {}})
             # A fresh app-server has no loaded thread. Resume is a non-executing
             # load of this exact ID, and distinguishes absence from "not loaded".
